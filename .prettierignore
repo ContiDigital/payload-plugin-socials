@@ -1,0 +1,12 @@
+.codegraph
+AGENTS.md
+CLAUDE.md
+.next
+coverage
+dist
+node_modules
+playwright-report
+test-results
+dev/dev-database.db
+dev/payload-types.ts
+pnpm-lock.yaml

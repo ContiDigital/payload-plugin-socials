@@ -1,0 +1,362 @@
+import type {
+  AdminMode,
+  FacebookPluginConfig,
+  GbpPluginConfig,
+  InstagramPluginConfig,
+  NormalizedFacebookConfig,
+  NormalizedGbpConfig,
+  NormalizedPinterestConfig,
+  NormalizedPluginOptions,
+  NormalizedSchedulingConfig,
+  PayloadPluginSocialsConfig,
+  PinterestPluginConfig,
+  SocialsAdminConfig,
+  SocialsSchedulingConfig,
+} from '../types/index.js'
+
+import {
+  DEFAULT_ADMIN_NAV_LABEL,
+  DEFAULT_ADMIN_ROUTE_PATH,
+  DEFAULT_API_BASE_PATH,
+  DEFAULT_BASE_RETRY_DELAY_MS,
+  DEFAULT_MAX_CONCURRENCY,
+  DEFAULT_MAX_REQUESTS_PER_MINUTE,
+  DEFAULT_MAX_RETRIES,
+  DEFAULT_MAX_RETRY_DELAY_MS,
+  DEFAULT_PINTEREST_VIDEO_UPLOAD_TIMEOUT_MS,
+  DEFAULT_RATE_LIMIT_ENABLED,
+  DEFAULT_REQUEST_TIMEOUT_MS,
+  DEFAULT_RETRY_JITTER_FACTOR,
+  PLUGIN_SLUG,
+  SOCIALS_QUEUE_NAME,
+} from '../constants.js'
+import { coerceEncryptionKey } from '../server/utilities/encryption.js'
+
+const ONE_DAY_SECONDS = 24 * 60 * 60
+const THIRTY_DAYS_SECONDS = 30 * ONE_DAY_SECONDS
+
+const normalizeScheduling = (
+  config: SocialsSchedulingConfig | undefined,
+): NormalizedSchedulingConfig => {
+  const out: NormalizedSchedulingConfig = {
+    connectionRefreshWindowSeconds: normalizePositiveInteger(
+      config?.connectionRefreshWindowSeconds,
+      ONE_DAY_SECONDS,
+    ),
+    drainBatchSize: normalizePositiveInteger(config?.drainBatchSize, 100),
+    insightsRefreshWindowSeconds: normalizePositiveInteger(
+      config?.insightsRefreshWindowSeconds,
+      THIRTY_DAYS_SECONDS,
+    ),
+    internalApiKey: config?.internalApiKey?.trim() || undefined,
+    sweepBatchSize: normalizePositiveInteger(config?.sweepBatchSize, 100),
+  }
+  if (config?.autoRun?.cron) {
+    out.autoRun = {
+      connectionRefreshCron: config.autoRun.connectionRefreshCron,
+      cron: config.autoRun.cron,
+      insightsRefreshCron: config.autoRun.insightsRefreshCron,
+      queue: config.autoRun.queue ?? SOCIALS_QUEUE_NAME,
+    }
+  }
+  return out
+}
+
+// ---------------------------------------------------------------------------
+// Primitive normalizers
+// ---------------------------------------------------------------------------
+
+const normalizePath = (value: string): `/${string}` => {
+  const trimmed = value.trim()
+  if (!trimmed.startsWith('/')) {
+    return `/${trimmed}`
+  }
+  return trimmed as `/${string}`
+}
+
+const normalizePositiveInteger = (value: number | undefined, fallback: number): number => {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return fallback
+  }
+  return Math.max(1, Math.floor(value))
+}
+
+const normalizeNonNegativeInteger = (value: number | undefined, fallback: number): number => {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return fallback
+  }
+  return Math.max(0, Math.floor(value))
+}
+
+const normalizeFloat01 = (value: number | undefined, fallback: number): number => {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return fallback
+  }
+  return Math.max(0, Math.min(1, value))
+}
+
+const normalizeNonEmptyString = (value: string | undefined, fallback: string): string => {
+  if (typeof value !== 'string' || value.trim().length === 0) {
+    return fallback
+  }
+  return value.trim()
+}
+
+const normalizeAdminMode = (value: string | undefined): AdminMode => {
+  if (value === 'route' || value === 'dashboard' || value === 'both' || value === 'headless') {
+    return value
+  }
+  return 'route'
+}
+
+// ---------------------------------------------------------------------------
+// Per-platform normalizers
+// ---------------------------------------------------------------------------
+
+const DEFAULT_PINTEREST_SCOPES = [
+  'user_accounts:read',
+  'pins:read',
+  'pins:write',
+  'boards:read',
+  'boards:write',
+] as const
+
+const DEFAULT_INSTAGRAM_SCOPES = [
+  'pages_show_list',
+  'pages_read_engagement',
+  'instagram_basic',
+  'instagram_content_publish',
+  'instagram_manage_insights',
+] as const
+
+const DEFAULT_FACEBOOK_SCOPES = [
+  'pages_show_list',
+  'pages_read_engagement',
+  'pages_manage_posts',
+] as const
+
+const normalizePinterest = (
+  config: PinterestPluginConfig | undefined,
+): NormalizedPinterestConfig => {
+  if (!config || !config.enabled) {
+    return {
+      allowedVideoHosts: [],
+      clientId: '',
+      clientSecret: '',
+      enabled: false,
+      environment: 'production',
+      redirectUri: '',
+      scopes: DEFAULT_PINTEREST_SCOPES,
+      videoUploadTimeoutMs: DEFAULT_PINTEREST_VIDEO_UPLOAD_TIMEOUT_MS,
+    }
+  }
+  if (!config.clientId || !config.clientSecret || !config.redirectUri) {
+    throw new Error(
+      `${PLUGIN_SLUG}: platforms.pinterest requires clientId, clientSecret, and redirectUri when enabled`,
+    )
+  }
+  return {
+    allowedVideoHosts: Object.freeze(
+      (config.allowedVideoHosts ?? []).map((host) => host.trim().toLowerCase()).filter(Boolean),
+    ),
+    clientId: config.clientId.trim(),
+    clientSecret: config.clientSecret,
+    enabled: true,
+    environment: config.environment === 'sandbox' ? 'sandbox' : 'production',
+    redirectUri: config.redirectUri.trim(),
+    scopes:
+      config.scopes && config.scopes.length > 0
+        ? Object.freeze([...config.scopes])
+        : DEFAULT_PINTEREST_SCOPES,
+    videoUploadTimeoutMs: normalizePositiveInteger(
+      config.videoUploadTimeoutMs,
+      DEFAULT_PINTEREST_VIDEO_UPLOAD_TIMEOUT_MS,
+    ),
+  }
+}
+
+const normalizeMeta = (
+  config: FacebookPluginConfig | InstagramPluginConfig | undefined,
+  defaultScopes: readonly string[],
+  surfaceName: 'facebook' | 'instagram',
+): NormalizedFacebookConfig => {
+  if (!config || !config.enabled) {
+    return {
+      apiVersion: 'v25.0',
+      appId: '',
+      appSecret: '',
+      enabled: false,
+      redirectUri: '',
+      scopes: defaultScopes,
+      systemUserAccessToken: '',
+    }
+  }
+  // Either appId+appSecret (OAuth flow) or systemUserAccessToken must be set.
+  const hasOauthCreds = Boolean(config.appId && config.appSecret)
+  const hasSystemUserToken = Boolean(config.systemUserAccessToken)
+  if (!hasOauthCreds && !hasSystemUserToken) {
+    throw new Error(
+      `${PLUGIN_SLUG}: platforms.${surfaceName} requires either (appId + appSecret) or systemUserAccessToken when enabled`,
+    )
+  }
+  const apiVersion = normalizeNonEmptyString(config.apiVersion, 'v25.0')
+  if (!/^v\d+\.\d+$/.test(apiVersion)) {
+    throw new Error(`${PLUGIN_SLUG}: platforms.${surfaceName}.apiVersion must look like "v25.0"`)
+  }
+  return {
+    apiVersion,
+    appId: (config.appId ?? '').trim(),
+    appSecret: config.appSecret ?? '',
+    enabled: true,
+    redirectUri: (config.redirectUri ?? '').trim(),
+    scopes:
+      config.scopes && config.scopes.length > 0 ? Object.freeze([...config.scopes]) : defaultScopes,
+    systemUserAccessToken: config.systemUserAccessToken ?? '',
+  }
+}
+
+const normalizeGbp = (config: GbpPluginConfig | undefined): NormalizedGbpConfig => {
+  if (!config || !config.enabled) {
+    return {
+      clientId: '',
+      clientSecret: '',
+      enabled: false,
+      redirectUri: '',
+    }
+  }
+  const hasOauthCreds = Boolean(config.clientId && config.clientSecret && config.redirectUri)
+  const hasServiceAccount = Boolean(
+    config.serviceAccount?.clientEmail && config.serviceAccount?.privateKey,
+  )
+  if (!hasOauthCreds && !hasServiceAccount) {
+    throw new Error(
+      `${PLUGIN_SLUG}: platforms.gbp requires either (clientId + clientSecret + redirectUri) or serviceAccount.{clientEmail, privateKey} when enabled`,
+    )
+  }
+  return {
+    clientId: (config.clientId ?? '').trim(),
+    clientSecret: config.clientSecret ?? '',
+    enabled: true,
+    redirectUri: (config.redirectUri ?? '').trim(),
+    serviceAccount: config.serviceAccount
+      ? {
+          clientEmail: config.serviceAccount.clientEmail.trim(),
+          impersonate: config.serviceAccount.impersonate?.trim(),
+          privateKey: config.serviceAccount.privateKey,
+        }
+      : undefined,
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
+
+export const normalizePluginOptions = (
+  options: PayloadPluginSocialsConfig,
+): NormalizedPluginOptions => {
+  // Validate required fields up-front. Disabled path returns a stub so tests
+  // can build the plugin without supplying credentials.
+  if (options.disabled) {
+    return buildNormalizedOptions(options, { disabled: true })
+  }
+
+  if (typeof options.authorize !== 'function') {
+    throw new Error(`${PLUGIN_SLUG}: authorize must be a function`)
+  }
+  if (!options.sources || Object.keys(options.sources).length === 0) {
+    throw new Error(`${PLUGIN_SLUG}: sources must be a non-empty object mapping kind → resolver`)
+  }
+  if (!options.platforms || Object.keys(options.platforms).length === 0) {
+    throw new Error(`${PLUGIN_SLUG}: platforms must declare at least one entry`)
+  }
+  if (!options.encryptionKey) {
+    throw new Error(
+      `${PLUGIN_SLUG}: encryptionKey is required (32 bytes, hex/base64 string or Buffer)`,
+    )
+  }
+  // Validate encryption key shape immediately so a misconfigured host fails
+  // at boot rather than on the first publish.
+  coerceEncryptionKey(options.encryptionKey)
+
+  return buildNormalizedOptions(options, { disabled: false })
+}
+
+const buildNormalizedOptions = (
+  options: PayloadPluginSocialsConfig,
+  overrides: { disabled: boolean },
+): NormalizedPluginOptions => {
+  const adminConfig: SocialsAdminConfig = options.admin ?? {}
+  const encryptionKey = overrides.disabled
+    ? Buffer.alloc(32)
+    : coerceEncryptionKey(options.encryptionKey)
+  const previousEncryptionKeys = overrides.disabled
+    ? []
+    : (options.previousEncryptionKeys ?? [])
+        .map(coerceEncryptionKey)
+        .filter(
+          (key, index, keys) =>
+            !key.equals(encryptionKey) &&
+            keys.findIndex((candidate) => candidate.equals(key)) === index,
+        )
+  return {
+    admin: {
+      injectInto: adminConfig.injectInto ?? [],
+      mode: normalizeAdminMode(adminConfig.mode),
+      navLabel: normalizeNonEmptyString(adminConfig.navLabel, DEFAULT_ADMIN_NAV_LABEL),
+      route: normalizePath(adminConfig.route ?? DEFAULT_ADMIN_ROUTE_PATH),
+    },
+    api: {
+      basePath: normalizePath(options.api?.basePath ?? DEFAULT_API_BASE_PATH),
+    },
+    authorize: options.authorize ?? (() => Promise.resolve(false)),
+    coordination: options.coordination ?? {},
+    copyOverrides: options.copyOverrides ?? {},
+    disabled: overrides.disabled,
+    encryptionKey,
+    platforms: {
+      facebook: normalizeMeta(options.platforms?.facebook, DEFAULT_FACEBOOK_SCOPES, 'facebook'),
+      gbp: normalizeGbp(options.platforms?.gbp),
+      instagram: normalizeMeta(options.platforms?.instagram, DEFAULT_INSTAGRAM_SCOPES, 'instagram'),
+      pinterest: normalizePinterest(options.platforms?.pinterest),
+    },
+    previousEncryptionKeys,
+    rateLimit: {
+      acquireRequestLease: options.coordination?.acquireRequestLease,
+      baseRetryDelayMs: normalizePositiveInteger(
+        options.rateLimit?.baseRetryDelayMs,
+        DEFAULT_BASE_RETRY_DELAY_MS,
+      ),
+      enabled: options.rateLimit?.enabled ?? DEFAULT_RATE_LIMIT_ENABLED,
+      jitterFactor: normalizeFloat01(options.rateLimit?.jitterFactor, DEFAULT_RETRY_JITTER_FACTOR),
+      maxConcurrency: normalizePositiveInteger(
+        options.rateLimit?.maxConcurrency,
+        DEFAULT_MAX_CONCURRENCY,
+      ),
+      maxRequestsPerMinute: normalizePositiveInteger(
+        options.rateLimit?.maxRequestsPerMinute,
+        DEFAULT_MAX_REQUESTS_PER_MINUTE,
+      ),
+      maxRetries: normalizeNonNegativeInteger(options.rateLimit?.maxRetries, DEFAULT_MAX_RETRIES),
+      maxRetryDelayMs: normalizePositiveInteger(
+        options.rateLimit?.maxRetryDelayMs,
+        DEFAULT_MAX_RETRY_DELAY_MS,
+      ),
+      requestTimeoutMs: normalizePositiveInteger(
+        options.rateLimit?.requestTimeoutMs,
+        DEFAULT_REQUEST_TIMEOUT_MS,
+      ),
+    },
+    scheduling: normalizeScheduling(options.scheduling),
+    sources: options.sources ?? {},
+    testMode: Boolean(options.testMode),
+    webhooks: options.webhooks?.meta?.verifyToken.trim()
+      ? {
+          meta: {
+            onEvent: options.webhooks.meta.onEvent,
+            verifyToken: options.webhooks.meta.verifyToken.trim(),
+          },
+        }
+      : {},
+  }
+}

@@ -1,0 +1,194 @@
+.socials-composer {
+  --socials-border: var(--theme-elevation-150);
+  border: 1px solid var(--socials-border);
+  border-radius: var(--style-radius-m, 8px);
+  margin-block: 1rem;
+  padding: clamp(1rem, 2vw, 1.5rem);
+
+  h3,
+  p {
+    margin-top: 0;
+  }
+
+  label {
+    display: grid;
+    gap: 0.4rem;
+  }
+
+  input,
+  select,
+  textarea {
+    background: var(--theme-input-bg);
+    border: 1px solid var(--theme-elevation-250);
+    border-radius: var(--style-radius-s, 4px);
+    color: var(--theme-text);
+    font: inherit;
+    padding: 0.65rem 0.75rem;
+    width: 100%;
+  }
+
+  textarea {
+    resize: vertical;
+  }
+}
+
+.socials-composer__header {
+  align-items: end;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  justify-content: space-between;
+}
+
+.socials-composer__header p,
+.socials-composer__count,
+.socials-composer__preview em {
+  color: var(--theme-elevation-600);
+  font-size: 0.85rem;
+}
+
+.socials-composer__tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+.socials-composer__tabs button {
+  background: var(--theme-elevation-50);
+  border: 1px solid var(--socials-border);
+  border-radius: 999px;
+  color: var(--theme-text);
+  cursor: pointer;
+  padding: 0.45rem 0.8rem;
+}
+.socials-composer__tabs button[aria-selected='true'] {
+  background: var(--theme-elevation-900);
+  color: var(--theme-elevation-0);
+}
+
+.socials-composer__layout {
+  display: grid;
+  gap: clamp(1rem, 3vw, 2rem);
+  grid-template-columns: minmax(0, 3fr) minmax(240px, 2fr);
+  margin-top: 1.5rem;
+}
+.socials-composer__fields {
+  display: grid;
+  gap: 1rem;
+}
+.socials-composer__row {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.socials-composer__check {
+  align-items: center;
+  display: flex !important;
+}
+.socials-composer__check input {
+  width: auto;
+}
+.socials-composer__count {
+  justify-self: end;
+}
+.socials-composer__count--error,
+.socials-composer__error,
+.socials-composer__issue--error {
+  color: var(--theme-error-750);
+}
+.socials-composer__issue--warning {
+  color: var(--theme-warning-500);
+}
+.socials-composer__success,
+.socials-composer__valid {
+  color: var(--theme-success-500);
+}
+
+.socials-composer__media {
+  border: 1px solid var(--socials-border);
+  border-radius: 6px;
+  padding: 0.75rem;
+}
+.socials-composer__media-grid {
+  display: grid;
+  gap: 0.6rem;
+  grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+}
+.socials-composer__asset {
+  aspect-ratio: 1;
+  background: var(--theme-elevation-50);
+  border: 2px solid transparent;
+  border-radius: 5px;
+  cursor: pointer;
+  overflow: hidden;
+  padding: 0;
+  position: relative;
+}
+.socials-composer__asset--selected {
+  border-color: var(--theme-success-500);
+  box-shadow: 0 0 0 2px var(--theme-elevation-0);
+}
+.socials-composer__asset img,
+.socials-composer__asset video {
+  height: 100%;
+  object-fit: cover;
+  width: 100%;
+}
+.socials-composer__asset span {
+  background: #000b;
+  bottom: 0;
+  color: #fff;
+  inset-inline: 0;
+  padding: 0.25rem;
+  position: absolute;
+}
+
+.socials-composer__preview {
+  align-self: start;
+  background: var(--theme-elevation-50);
+  border: 1px solid var(--socials-border);
+  border-radius: 10px;
+  display: grid;
+  gap: 0.75rem;
+  overflow: hidden;
+  padding: 1rem;
+  position: sticky;
+  top: 1rem;
+}
+.socials-composer__preview img {
+  aspect-ratio: 1;
+  border-radius: 6px;
+  object-fit: cover;
+  width: 100%;
+}
+.socials-composer__preview p {
+  white-space: pre-wrap;
+}
+.socials-composer__preview-platform {
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.socials-composer__preview em {
+  font-style: normal;
+}
+.socials-composer__history {
+  border-top: 1px solid var(--socials-border);
+  margin-top: 1.5rem;
+  padding-top: 1rem;
+}
+
+@media (max-width: 800px) {
+  .socials-composer__layout {
+    grid-template-columns: 1fr;
+  }
+  .socials-composer__preview {
+    position: static;
+  }
+}
+
+@media (max-width: 520px) {
+  .socials-composer__row {
+    grid-template-columns: 1fr;
+  }
+}
