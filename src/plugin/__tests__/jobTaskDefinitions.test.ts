@@ -90,7 +90,7 @@ describe('socialPostPublish handler', () => {
 
   it('fails when the source context cannot be resolved', async () => {
     vi.mocked(resolveSourceContext).mockRejectedValue(new Error('no resolver'))
-    const update = vi.fn().mockResolvedValue({ totalDocs: 1 })
+    const update = vi.fn().mockResolvedValue({ docs: [{ id: 1 }], errors: [] })
     const req = mkReq({
       findByID: vi.fn().mockResolvedValue({
         id: 1,
@@ -123,7 +123,7 @@ describe('socialPostPublish handler', () => {
         sourceKind: 'product',
         status: 'queued',
       }),
-      update: vi.fn().mockResolvedValue({ totalDocs: 1 }),
+      update: vi.fn().mockResolvedValue({ docs: [{ id: 9 }], errors: [] }),
     })
     const result = await publish({ input: { postId: 9 }, req })
     expect(result).toEqual({ output: { externalId: 'pin_1', externalUrl: 'https://p', postId: 9 } })
@@ -135,7 +135,7 @@ describe('socialPostPublish handler', () => {
     vi.mocked(getPlatformAdapter).mockReturnValue({
       publish: vi.fn().mockRejectedValue(new Error('upstream 500')),
     } as never)
-    const update = vi.fn().mockResolvedValue({ totalDocs: 1 })
+    const update = vi.fn().mockResolvedValue({ docs: [{ id: 1 }], errors: [] })
     const req = mkReq({
       findByID: vi.fn().mockResolvedValue({
         id: 1,
@@ -165,12 +165,37 @@ describe('socialPostPublish handler', () => {
         sourceKind: 'product',
         status: 'queued',
       }),
-      update: vi.fn().mockResolvedValue({ totalDocs: 0 }),
+      update: vi.fn().mockResolvedValue({ docs: [], errors: [] }),
     })
     expect(await publish({ input: { postId: 8 }, req })).toEqual({
       output: { alreadyInProgress: true, postId: 8 },
     })
     expect(adapterPublish).not.toHaveBeenCalled()
+  })
+
+  it('regression: proceeds past claim and calls adapter.publish when bulk update returns real BulkOperationResult with docs', async () => {
+    vi.mocked(resolveSourceContext).mockResolvedValue({ images: [] } as never)
+    const adapterPublish = vi
+      .fn()
+      .mockResolvedValue({ externalId: 'ext_42', externalUrl: 'https://social/42' })
+    vi.mocked(getPlatformAdapter).mockReturnValue({ publish: adapterPublish } as never)
+    const update = vi.fn().mockResolvedValue({ docs: [{ id: 42 }], errors: [] })
+    const req = mkReq({
+      findByID: vi.fn().mockResolvedValue({
+        id: 42,
+        meta: { queuedInput: { boardId: 'b', text: 'Hello' } },
+        platform: 'pinterest',
+        sourceId: 'src_1',
+        sourceKind: 'product',
+        status: 'queued',
+      }),
+      update,
+    })
+    const result = await publish({ input: { postId: 42 }, req })
+    expect(adapterPublish).toHaveBeenCalledTimes(1)
+    expect(result).toEqual({
+      output: { externalId: 'ext_42', externalUrl: 'https://social/42', postId: 42 },
+    })
   })
 })
 

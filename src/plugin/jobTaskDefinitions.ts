@@ -124,8 +124,8 @@ const claimPostForPublish = async (payload: Payload, id: number | string): Promi
     where: {
       and: [{ id: { equals: id } }, { status: { in: ['queued', 'failed'] } }],
     },
-  } as never)) as unknown as { totalDocs?: number }
-  return result.totalDocs === 1
+  } as never)) as unknown as { docs?: unknown[] }
+  return (result.docs?.length ?? 0) === 1
 }
 
 const buildPublishTaskConfig = () =>

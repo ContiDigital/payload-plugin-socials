@@ -58,14 +58,14 @@ describe('publication reservations', () => {
   it('rejects a duplicate that is queued or already in progress', async () => {
     const payload = {
       find: vi.fn().mockResolvedValue({ docs: [{ id: 'post_1', status: 'publishing' }] }),
-      update: vi.fn().mockResolvedValue({ totalDocs: 0 }),
+      update: vi.fn().mockResolvedValue({ docs: [], errors: [] }),
     } as unknown as Payload
 
     await expect(reservePublication(args(payload))).rejects.toBeInstanceOf(ConflictError)
   })
 
   it('atomically reclaims a failed publication', async () => {
-    const update = vi.fn().mockResolvedValue({ totalDocs: 1 })
+    const update = vi.fn().mockResolvedValue({ docs: [{ id: 'post_1' }], errors: [] })
     const payload = {
       find: vi.fn().mockResolvedValue({ docs: [{ id: 'post_1', status: 'failed' }] }),
       update,
@@ -76,6 +76,28 @@ describe('publication reservations', () => {
       postId: 'post_1',
     })
     expect(update).toHaveBeenCalledOnce()
+  })
+
+  it('regression: reclaims a failed row (claimed: true) instead of throwing ConflictError when bulk update returns real BulkOperationResult', async () => {
+    const update = vi.fn().mockResolvedValue({ docs: [{ id: 'post_99' }], errors: [] })
+    const payload = {
+      find: vi.fn().mockResolvedValue({ docs: [{ id: 'post_99', status: 'failed' }] }),
+      update,
+    } as unknown as Payload
+
+    const reservation = await reservePublication(args(payload))
+    expect(reservation).toEqual({ claimed: true, postId: 'post_99' })
+    expect(update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: 'publishing' }),
+        where: expect.objectContaining({
+          and: expect.arrayContaining([
+            { id: { equals: 'post_99' } },
+            { status: { in: ['cancelled', 'draft', 'failed'] } },
+          ]),
+        }),
+      }),
+    )
   })
 
   it('marks a claimed row failed and redacts secrets', async () => {

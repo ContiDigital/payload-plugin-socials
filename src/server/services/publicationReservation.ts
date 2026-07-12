@@ -68,8 +68,8 @@ export const reservePublication = async (args: {
           { status: { in: ['cancelled', 'draft', 'failed'] } },
         ],
       },
-    } as never)) as unknown as { totalDocs?: number }
-    if (result.totalDocs !== 1) {
+    } as never)) as unknown as { docs?: unknown[] }
+    if ((result.docs?.length ?? 0) !== 1) {
       throw new ConflictError('an identical publication is already queued or in progress')
     }
     return { claimed: true, postId: existing.id }
