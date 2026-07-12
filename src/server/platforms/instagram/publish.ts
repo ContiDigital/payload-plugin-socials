@@ -361,6 +361,22 @@ const resolvePrimaryAssetUrl = (input: InstagramPublishInput): string => {
   return input.videoUrl ?? input.imageUrl ?? ''
 }
 
+/**
+ * Pure derivation of the Instagram idempotency identity — identical logic to
+ * the publish path. Exported for parity testing against `buildPublicationIdentity`.
+ */
+export const deriveInstagramIdentity = (
+  ctx: SocialSourceContext,
+  input: InstagramPublishInput,
+): { idempotencyKey: string; primaryAssetUrl: string } => {
+  const mediaType = input.mediaType ?? 'IMAGE'
+  const primaryAssetUrl = resolvePrimaryAssetUrl(input)
+  return {
+    idempotencyKey: buildIdempotencyKey(ctx, input.igUserId, mediaType, primaryAssetUrl),
+    primaryAssetUrl,
+  }
+}
+
 export type InstagramPublishResult = {
   alreadyExisted: boolean
   postId: number | string

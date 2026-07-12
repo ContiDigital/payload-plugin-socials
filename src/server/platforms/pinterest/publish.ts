@@ -145,6 +145,25 @@ export const buildPinterestPreview = (
   }
 }
 
+/**
+ * Pure derivation of the Pinterest idempotency identity — identical logic to
+ * the publish path. Exported for parity testing against `buildPublicationIdentity`.
+ */
+export const derivePinterestIdentity = (
+  ctx: SocialSourceContext,
+  input: PinterestPublishInput,
+): { idempotencyKey: string; primaryAssetUrl: string } => {
+  const defaultImage = ctx.images.find((img) => img.role === 'main') ?? ctx.images[0]
+  const mediaType = input.mediaType ?? 'IMAGE'
+  const imageUrl = input.imageUrl?.trim() || defaultImage?.url || ''
+  const videoUrl = input.videoUrl?.trim() || ctx.videos?.[0]?.url || ''
+  const primaryAssetUrl = mediaType === 'VIDEO' ? videoUrl || input.mediaId?.trim() || '' : imageUrl
+  return {
+    idempotencyKey: buildIdempotencyKey(ctx, input.boardId, primaryAssetUrl),
+    primaryAssetUrl,
+  }
+}
+
 const findExistingByIdempotencyKey = async (
   payload: Payload,
   key: string,

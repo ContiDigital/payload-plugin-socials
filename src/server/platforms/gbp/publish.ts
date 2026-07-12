@@ -128,6 +128,22 @@ const buildIdempotencyKey = (
 ): string =>
   sha256Hex(`gbp:${ctx.sourceKind}:${ctx.sourceId}:${accountId}:${locationId}:${topicType}`)
 
+/**
+ * Pure derivation of the GBP idempotency identity — identical logic to
+ * the publish path. Exported for parity testing against `buildPublicationIdentity`.
+ */
+export const deriveGbpIdentity = (
+  ctx: SocialSourceContext,
+  input: GbpPublishInput,
+): { idempotencyKey: string; primaryAssetUrl: string } => {
+  const { accountId, locationId } = validateLocationResource(input.locationResourceName)
+  const topicType: GbpTopicType = input.topicType ?? 'STANDARD'
+  return {
+    idempotencyKey: buildIdempotencyKey(ctx, accountId, locationId, topicType),
+    primaryAssetUrl: input.imageUrl ?? '',
+  }
+}
+
 const buildSourceHash = (snapshot: GbpLocalPostBody): string => sha256Hex(JSON.stringify(snapshot))
 
 const findExistingByIdempotencyKey = async (

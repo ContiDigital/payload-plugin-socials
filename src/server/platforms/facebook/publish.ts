@@ -372,6 +372,22 @@ const resolvePrimaryAssetUrl = (input: FacebookPublishInput): string => {
   }
 }
 
+/**
+ * Pure derivation of the Facebook idempotency identity — identical logic to
+ * the publish path. Exported for parity testing against `buildPublicationIdentity`.
+ */
+export const deriveFacebookIdentity = (
+  ctx: SocialSourceContext,
+  input: FacebookPublishInput,
+): { idempotencyKey: string; primaryAssetUrl: string } => {
+  const format: FacebookFormat = input.format ?? 'LINK'
+  const primaryAssetUrl = resolvePrimaryAssetUrl(input)
+  return {
+    idempotencyKey: buildIdempotencyKey(ctx, input.pageId, format, primaryAssetUrl),
+    primaryAssetUrl,
+  }
+}
+
 export type FacebookPublishResult = {
   alreadyExisted: boolean
   postId: number | string
