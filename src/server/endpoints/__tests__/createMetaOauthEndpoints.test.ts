@@ -12,6 +12,7 @@ import { STATE_COOKIE_NAMES } from '../../platforms/_meta/oauth.js'
 import { getPlatformAdapter } from '../../platforms/registry.js'
 import { disconnectPlatform } from '../../services/connectionService.js'
 import { assertAccess } from '../../utilities/access.js'
+import { PlatformApiError } from '../../utilities/errors.js'
 import {
   createMetaOauthEndpoints,
   createMetaOauthEndpointsForPlatform,
@@ -116,6 +117,34 @@ describe('meta disconnect', () => {
   it('clears the stored credentials for the platform', async () => {
     const res = await find(ig(), '/instagram/disconnect').handler(mkReq())
     expect(res.status).toBe(200)
+    expect(disconnectPlatform).toHaveBeenCalledWith(expect.anything(), 'instagram')
+  })
+
+  it('returns upstreamRevoked true when revoke succeeds', async () => {
+    adapter.revokeAuthorization.mockResolvedValueOnce({ affectedPlatforms: ['instagram'] })
+    const res = await find(ig(), '/instagram/disconnect').handler(mkReq())
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body).toMatchObject({ ok: true, upstreamRevoked: true })
+    expect(disconnectPlatform).toHaveBeenCalledWith(expect.anything(), 'instagram')
+  })
+
+  it('returns HTTP 200 with upstreamRevoked false when revoke throws, still disconnects locally', async () => {
+    adapter.revokeAuthorization.mockRejectedValueOnce(
+      new PlatformApiError({
+        message: 'Meta authorization revocation failed: HTTP 503',
+        platform: 'instagram',
+        raw: 'upstream down',
+        retryable: true,
+        statusCode: 502,
+        upstreamCode: 503,
+      }),
+    )
+    const res = await find(ig(), '/instagram/disconnect').handler(mkReq())
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body).toMatchObject({ ok: true, upstreamRevoked: false })
+    // Local disconnect MUST still be called even though revoke failed
     expect(disconnectPlatform).toHaveBeenCalledWith(expect.anything(), 'instagram')
   })
 })

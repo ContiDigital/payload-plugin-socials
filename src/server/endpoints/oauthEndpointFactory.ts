@@ -148,6 +148,7 @@ export const createOauthDisconnectEndpoint = (
   cfg: OauthEndpointConfig,
 ): Endpoint => ({
   handler: async (req) => {
+    const log = createPluginLogger(req.payload?.logger, { op: `${cfg.platform}:disconnect` })
     try {
       await assertAccess(req, options, 'admin')
       const adapter = getPlatformAdapter(cfg.platform)
@@ -160,9 +161,18 @@ export const createOauthDisconnectEndpoint = (
       let upstreamRevoked = false
       let revoked: { affectedPlatforms?: PlatformId[] } | undefined
       if (adapter.revokeAuthorization) {
-        upstreamRevoked = true
-        const result = await adapter.revokeAuthorization({ options, payload: req.payload })
-        revoked = result || undefined
+        try {
+          const result = await adapter.revokeAuthorization({ options, payload: req.payload })
+          revoked = result || undefined
+          upstreamRevoked = true
+        } catch (revokeError) {
+          const message =
+            revokeError instanceof Error ? revokeError.message : String(revokeError)
+          log.warn('Upstream revocation failed; proceeding with local disconnect', {
+            error: message,
+            platform: cfg.platform,
+          })
+        }
       }
       const affectedPlatforms = revoked?.affectedPlatforms ?? [cfg.platform]
       for (const platform of affectedPlatforms) {

@@ -7,10 +7,11 @@ import { metaJson } from '../_meta/api.js'
 import { getPageAccessToken } from './pages.js'
 
 export const FACEBOOK_POST_INSIGHT_METRICS = [
-  'post_media_view',
-  'post_total_media_view_unique',
+  'post_impressions',
+  'post_impressions_unique',
+  'post_engaged_users',
   'post_clicks',
-  'post_clicks_by_type',
+  'post_video_views',
   'post_reactions_by_type_total',
 ] as const
 
