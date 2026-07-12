@@ -69,9 +69,11 @@ export const buildPublicationIdentity = (args: {
     case 'pinterest': {
       const boardId = asString(input.boardId)
       const defaultImage = ctx?.images.find((image) => image.role === 'main') ?? ctx?.images[0]
-      const imageUrl = asString(input.imageUrl) || defaultImage?.url || ''
+      const imageUrl = asString(input.imageUrl).trim() || defaultImage?.url || ''
       const mediaType = asString(input.mediaType, 'IMAGE')
-      const primary = mediaType === 'VIDEO' ? asString(input.videoUrl ?? input.mediaId) : imageUrl
+      const videoUrl = asString(input.videoUrl).trim() || ctx?.videos?.[0]?.url || ''
+      const primary =
+        mediaType === 'VIDEO' ? videoUrl || asString(input.mediaId).trim() || '' : imageUrl
       return {
         destinationId: boardId,
         idempotencyKey: sha256Hex(`pinterest:${sourceKind}:${sourceId}:${boardId}:${primary}`),
