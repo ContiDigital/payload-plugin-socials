@@ -14,16 +14,36 @@ import { getPageAccessToken } from '../pages.js'
 const options = {} as NormalizedPluginOptions
 const payload = {} as Payload
 
+/**
+ * The exact documented Facebook Graph API lifetime post-insight metrics.
+ * This test asserts that the implementation requests precisely these, not
+ * invented names that would trigger error #100 on the Graph API.
+ */
+const EXPECTED_METRICS = [
+  'post_impressions',
+  'post_impressions_unique',
+  'post_engaged_users',
+  'post_clicks',
+  'post_video_views',
+  'post_reactions_by_type_total',
+]
+
 beforeEach(() => {
   vi.clearAllMocks()
   vi.mocked(getPageAccessToken).mockResolvedValue('PAGE_TOKEN')
 })
 
+describe('FACEBOOK_POST_INSIGHT_METRICS constant', () => {
+  it('contains exactly the documented Graph API lifetime post metrics', () => {
+    expect([...FACEBOOK_POST_INSIGHT_METRICS]).toEqual(EXPECTED_METRICS)
+  })
+})
+
 describe('getFacebookInsightsForRef', () => {
-  it('uses current replacement metrics, a Page token, and normalizes values', async () => {
+  it('requests the documented metric set on the wire and normalizes values', async () => {
     vi.mocked(metaJson).mockResolvedValue({
       data: [
-        { name: 'post_media_view', period: 'lifetime', values: [{ value: 42 }] },
+        { name: 'post_impressions', period: 'lifetime', values: [{ value: 100 }] },
         { name: 'post_reactions_by_type_total', total_value: { value: { like: 3 } } },
       ],
     })
@@ -36,13 +56,17 @@ describe('getFacebookInsightsForRef', () => {
 
     expect(getPageAccessToken).toHaveBeenCalledWith(payload, options, 'page_123')
     expect(result.metrics).toEqual({
-      post_media_view: 42,
+      post_impressions: 100,
       post_reactions_by_type_total: { like: 3 },
     })
+
+    // Assert the exact metric= parameter sent on the wire
     const call = vi.mocked(metaJson).mock.calls[0]
-    expect(decodeURIComponent(String(call?.[3]))).toContain(
-      `metric=${FACEBOOK_POST_INSIGHT_METRICS.join(',')}`,
-    )
+    const urlPath = String(call?.[3])
+    const urlParams = new URLSearchParams(urlPath.split('?')[1] ?? '')
+    const wireMetrics = urlParams.get('metric')?.split(',') ?? []
+    expect(wireMetrics).toEqual(EXPECTED_METRICS)
+
     expect(call?.[5]).toEqual({ accessToken: 'PAGE_TOKEN' })
   })
 
