@@ -8,6 +8,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
+### Added
+
+- **Image format safety per platform.** The plugin now validates image formats against each platform's documented allowlist before publishing. Instagram accepts JPEG only; GBP accepts JPEG and PNG; Facebook accepts JPEG, PNG, GIF, BMP, and TIFF (WebP/AVIF treated as unsafe); Pinterest accepts JPEG, PNG, WebP, and GIF (not AVIF). When a disallowed format is detected, the plugin either transcodes to JPEG automatically (when `assets.autoConvert` is enabled with a `renditionCollection`) or throws a clear validation error naming the platform, the detected format, the allowed formats, and two remedies.
+- **`assets` plugin option** with `preflight` (default true), `autoConvert` (default false), `renditionCollection`, and `jpegQuality` (default 82, clamped 1-100). Throws at normalize time when `autoConvert` is true without a `renditionCollection`.
+- **`detectImageFormat(url, fetchImpl?)` utility** that fetches only the first 32 bytes (Range header) and identifies the format from magic bytes: JPEG, PNG, WebP, GIF, AVIF, BMP, and TIFF. Never throws on network errors.
+- **`resolvePlatformImageUrl` helper** that layers format detection, allowlist checking, optional transcoding via sharp, and rendition reuse (deterministic filename prevents duplicate uploads).
+- **`format` field on `SocialImage`** and `SocialImageFormat` type union. Threaded through `coerceImages` (compose endpoint) and `normalizeImages` (standalone context) so adapters have access to declared format metadata.
+- **Pre-publish format validation in each adapter's `validate()` method.** When a declared format is disallowed and `autoConvert` is off, a validation error issue surfaces in the UI before the publish call.
+
 ## [0.9.0] - 2026-07-12
 
 ### Added

@@ -7,6 +7,7 @@ import type {
   PreviewResult,
   PublishArgs,
   PublishedRef,
+  SocialImageFormat,
   ValidationResult,
 } from '../../../types/index.js'
 
@@ -16,6 +17,8 @@ import {
   PINTEREST_MIN_IMAGE_WIDTH,
   PINTEREST_TITLE_MAX,
 } from '../../../constants.js'
+import { PLATFORM_IMAGE_CONSTRAINTS } from '../../assets/imagePreflight.js'
+import { resolvePlatformImageUrl } from '../../assets/resolvePlatformImage.js'
 import { getCredentials, recordConnectionError } from '../../services/connectionService.js'
 import { ValidationError } from '../../utilities/errors.js'
 import { refreshPinterestAccessToken } from './api.js'
@@ -44,6 +47,32 @@ const CAPABILITIES: PlatformCapabilities = {
   video: true,
 }
 
+/**
+ * Check whether a declared format is disallowed for this platform.
+ */
+const checkFormatIssue = (
+  format: SocialImageFormat | undefined,
+  options: NormalizedPluginOptions,
+): string | undefined => {
+  if (!format) {
+    return undefined
+  }
+  if (!options.assets.preflight) {
+    return undefined
+  }
+  const allowed = PLATFORM_IMAGE_CONSTRAINTS.pinterest.formats as readonly string[]
+  if (allowed.includes(format)) {
+    return undefined
+  }
+  if (options.assets.autoConvert) {
+    return undefined
+  }
+  return (
+    `Image format "${format}" is not accepted by Pinterest (allowed: ${allowed.join(', ')}). ` +
+    `Configure a JPEG imageSize on your upload collection or enable assets.autoConvert.`
+  )
+}
+
 export const createPinterestAdapter = (
   options: NormalizedPluginOptions,
 ): PlatformAdapter<PinterestPublishInput> => {
@@ -58,11 +87,6 @@ export const createPinterestAdapter = (
 
     async exchangeCallback({ code, options: opts, payload, req }) {
       const result = await exchangeCodeForTokens({ code, options: opts, payload, req })
-      // Tokens are already persisted server-side; return only what's safe
-      // to expose to callers (which then go through the plugin's own
-      // saveCredentials flow for adapters that don't store internally).
-      // This adapter has already saved; return a synthetic shape that
-      // identifies what was granted so the host can surface it.
       const credentials = await getCredentials(payload, opts, 'pinterest')
       return {
         accessToken: credentials?.accessToken ?? '',
@@ -163,6 +187,16 @@ export const createPinterestAdapter = (
           severity: 'error',
         })
       }
+
+      // Image format pre-publish check.
+      if (mediaType === 'IMAGE') {
+        const imgFormat = primary?.format
+        const formatIssue = checkFormatIssue(imgFormat, args.options)
+        if (formatIssue) {
+          issues.push({ field: 'imageUrl', message: formatIssue, severity: 'error' })
+        }
+      }
+
       if (!ctx.link && !input?.link) {
         issues.push({
           message: 'No outbound link set — pin will not drive traffic',
@@ -190,9 +224,10 @@ export const createPinterestAdapter = (
         throw new ValidationError(`Pinterest publish input invalid: ${errors}`)
       }
       try {
+        const resolvedInput = await resolvePinterestImages(args)
         const result = await publishPinterestPin({
           ctx: args.ctx,
-          input: args.input,
+          input: resolvedInput,
           options: args.options,
           payload: args.payload,
           req: args.req,
@@ -220,4 +255,33 @@ export const createPinterestAdapter = (
       })
     },
   }
+}
+
+/**
+ * Resolve image URL for the Pinterest publish input through the platform
+ * image format safety layer.
+ */
+const resolvePinterestImages = async (
+  args: PublishArgs<PinterestPublishInput>,
+): Promise<PinterestPublishInput> => {
+  const { ctx, input, options, payload } = args
+  const mediaType = input.mediaType ?? 'IMAGE'
+  const resolved = { ...input }
+
+  if (mediaType === 'IMAGE') {
+    const imageUrl = input.imageUrl?.trim() || ctx.images[0]?.url || ''
+    if (imageUrl) {
+      const imgMeta = ctx.images.find((img) => img.url === imageUrl)
+      const result = await resolvePlatformImageUrl({
+        declaredFormat: imgMeta?.format,
+        imageUrl,
+        options,
+        payload,
+        platform: 'pinterest',
+      })
+      resolved.imageUrl = result.url
+    }
+  }
+
+  return resolved
 }

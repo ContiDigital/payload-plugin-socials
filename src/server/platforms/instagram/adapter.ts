@@ -7,10 +7,13 @@ import type {
   PreviewResult,
   PublishArgs,
   PublishedRef,
+  SocialImageFormat,
   ValidationResult,
 } from '../../../types/index.js'
 
 import { INSTAGRAM_CAPTION_MAX_CHARS, INSTAGRAM_CAPTION_MAX_HASHTAGS } from '../../../constants.js'
+import { PLATFORM_IMAGE_CONSTRAINTS } from '../../assets/imagePreflight.js'
+import { resolvePlatformImageUrl } from '../../assets/resolvePlatformImage.js'
 import { getCredentials, recordConnectionError } from '../../services/connectionService.js'
 import { ValidationError } from '../../utilities/errors.js'
 import { refreshMetaAccessToken } from '../_meta/api.js'
@@ -38,6 +41,33 @@ const CAPABILITIES: PlatformCapabilities = {
   serviceAccount: true,
   stories: true,
   video: true,
+}
+
+/**
+ * Check whether a declared format is disallowed for this platform.
+ * Used in validate() to surface a pre-publish error when autoConvert is off.
+ */
+const checkFormatIssue = (
+  format: SocialImageFormat | undefined,
+  options: NormalizedPluginOptions,
+): string | undefined => {
+  if (!format) {
+    return undefined
+  }
+  if (!options.assets.preflight) {
+    return undefined
+  }
+  const allowed = PLATFORM_IMAGE_CONSTRAINTS.instagram.formats as readonly string[]
+  if (allowed.includes(format)) {
+    return undefined
+  }
+  if (options.assets.autoConvert) {
+    return undefined
+  }
+  return (
+    `Image format "${format}" is not accepted by Instagram (allowed: ${allowed.join(', ')}). ` +
+    `Configure a JPEG imageSize on your upload collection or enable assets.autoConvert.`
+  )
 }
 
 export const createInstagramAdapter = (
@@ -171,7 +201,16 @@ export const createInstagramAdapter = (
         }
       }
 
-      // Caption validation — only when applicable.
+      // Image format pre-publish check (only surfaces when autoConvert is off).
+      if (mediaType === 'IMAGE' && input?.imageUrl) {
+        const imgMeta = ctx.images.find((img) => img.url === input.imageUrl)
+        const formatIssue = checkFormatIssue(imgMeta?.format, args.options)
+        if (formatIssue) {
+          issues.push({ field: 'imageUrl', message: formatIssue, severity: 'error' })
+        }
+      }
+
+      // Caption validation -- only when applicable.
       if (mediaType !== 'STORIES') {
         const caption =
           input?.caption ??
@@ -218,9 +257,11 @@ export const createInstagramAdapter = (
         throw new ValidationError(`Instagram publish input invalid: ${errors}`)
       }
       try {
+        // Resolve image formats for the platform before publishing.
+        const resolvedInput = await resolveInstagramImages(args)
         const result = await publishInstagramMedia({
           ctx: args.ctx,
-          input: args.input,
+          input: resolvedInput,
           options: args.options,
           payload: args.payload,
           req: args.req,
@@ -247,4 +288,51 @@ export const createInstagramAdapter = (
       })
     },
   }
+}
+
+/**
+ * Resolve all image URLs in the Instagram publish input through the platform
+ * image format safety layer. Substitutes URLs with transcoded versions when
+ * needed, while preserving the ORIGINAL URLs for idempotency key derivation
+ * (which happens inside publishInstagramMedia based on the original input).
+ */
+const resolveInstagramImages = async (
+  args: PublishArgs<InstagramPublishInput>,
+): Promise<InstagramPublishInput> => {
+  const { ctx, input, options, payload } = args
+  const mediaType = input.mediaType ?? 'IMAGE'
+  const resolved = { ...input }
+
+  // Resolve single image URL.
+  if ((mediaType === 'IMAGE' || mediaType === 'STORIES') && input.imageUrl) {
+    const imgMeta = ctx.images.find((img) => img.url === input.imageUrl)
+    const result = await resolvePlatformImageUrl({
+      declaredFormat: imgMeta?.format,
+      imageUrl: input.imageUrl,
+      options,
+      payload,
+      platform: 'instagram',
+    })
+    resolved.imageUrl = result.url
+  }
+
+  // Resolve carousel children image URLs.
+  if (mediaType === 'CAROUSEL' && input.carouselChildren) {
+    resolved.carouselChildren = await Promise.all(
+      input.carouselChildren.map(async (child) => {
+        if (!child.imageUrl) {
+          return child
+        }
+        const result = await resolvePlatformImageUrl({
+          imageUrl: child.imageUrl,
+          options,
+          payload,
+          platform: 'instagram',
+        })
+        return { ...child, imageUrl: result.url }
+      }),
+    )
+  }
+
+  return resolved
 }

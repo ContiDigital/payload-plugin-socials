@@ -1,4 +1,9 @@
-import type { SocialImage, SocialSourceContext, SocialVideo } from '../../types/index.js'
+import type {
+  SocialImage,
+  SocialImageFormat,
+  SocialSourceContext,
+  SocialVideo,
+} from '../../types/index.js'
 
 import { STANDALONE_SOURCE_KIND } from '../../constants.js'
 import { sha256Hex } from '../utilities/hash.js'
@@ -16,7 +21,13 @@ import { sha256Hex } from '../utilities/hash.js'
 export type StandaloneComposeInput = {
   body?: string
   hints?: SocialSourceContext['hints']
-  images?: Array<{ height?: number; role?: string; url: string; width?: number }>
+  images?: Array<{
+    format?: SocialImageFormat
+    height?: number
+    role?: string
+    url: string
+    width?: number
+  }>
   imageUrl?: string
   link?: string
   metadata?: Record<string, unknown>
@@ -30,6 +41,7 @@ const normalizeImages = (input: StandaloneComposeInput): SocialImage[] => {
     return input.images
       .filter((img) => typeof img.url === 'string' && img.url.length > 0)
       .map((img) => ({
+        format: img.format,
         height: img.height,
         role: img.role ?? 'main',
         url: img.url,
