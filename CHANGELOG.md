@@ -8,6 +8,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
+### Added
+
+- **Config-first copy transformations (`transformations` option).** Operators can now declare per-field copy transforms in the plugin config, keyed by source kind (and an optional `'*'` wildcard). Each value is either a `{{ variable | filter }}` template string rendered through the existing interpolation engine, or a function that receives the `SocialSourceContext` directly. The new `transformations` option covers all seven canonical copy fields: `pinterestTitle`, `pinterestDescription`, `pinterestAltText`, `pinterestHashtags`, `instagramCaption`, `facebookMessage`, and `gbpSummary`. It is a higher-precedence, source-kind-aware superset of the existing `copyOverrides` option; `copyOverrides` continues to work unchanged and is still the right choice for simple global function overrides. The precedence chain is: kind-specific transform, then wildcard transform, then `copyOverrides`, then the built-in default.
+
 ## [0.9.0] - 2026-07-12
 
 ### Added

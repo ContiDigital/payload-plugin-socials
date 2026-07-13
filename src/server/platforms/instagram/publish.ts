@@ -15,6 +15,7 @@ import {
   INSTAGRAM_CONTAINER_LIFETIME_HOURS,
   SOCIAL_POSTS_SLUG,
 } from '../../../constants.js'
+import { resolveConfiguredText } from '../../copy/resolveConfiguredCopy.js'
 import { PlatformApiError, ValidationError } from '../../utilities/errors.js'
 import { sha256Hex } from '../../utilities/hash.js'
 import { metaJson } from '../_meta/api.js'
@@ -56,7 +57,7 @@ export type InstagramPublishInput = {
   altText?: string
   /** Reels-only: audio_name. */
   audioName?: string
-  /** Caption override (optional; falls back to copyOverrides → default builder). */
+  /** Caption override (optional; falls back to transformations → copyOverrides → default builder). */
   caption?: string
   /** Carousel children — 2–10 entries, each `{ imageUrl }` or `{ videoUrl }`. */
   carouselChildren?: Array<{ imageUrl?: string; videoUrl?: string }>
@@ -117,8 +118,10 @@ const resolveCaption = (
   input: InstagramPublishInput,
   options: NormalizedPluginOptions,
 ): string => {
-  const override = options.copyOverrides.instagramCaption?.(ctx)
-  return input.caption ?? override ?? buildDefaultInstagramCaption(ctx)
+  if (input.caption !== undefined) {
+    return input.caption
+  }
+  return resolveConfiguredText('instagramCaption', ctx, options, buildDefaultInstagramCaption)
 }
 
 const validateCaption = (caption: string): void => {

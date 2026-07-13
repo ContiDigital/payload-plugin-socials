@@ -33,7 +33,16 @@ export type ResolvedTemplateCopy = {
   pinterestTitle?: string
 }
 
-const splitHashtags = (rendered: string): string[] =>
+/**
+ * Split a rendered hashtag string into a normalized `#tag` array.
+ *
+ * Tokens are split on whitespace and commas. Each token that does not
+ * already start with `#` has one prepended. Empty tokens are discarded.
+ *
+ * Exported so `resolveConfiguredCopy` can reuse this helper when processing
+ * config-level `pinterestHashtags` string transforms.
+ */
+export const splitHashtags = (rendered: string): string[] =>
   rendered
     .split(/[\s,]+/)
     .map((token) => token.trim())

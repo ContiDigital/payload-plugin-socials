@@ -7,6 +7,7 @@ import type {
 } from '../../../types/index.js'
 
 import { SOCIAL_POSTS_SLUG } from '../../../constants.js'
+import { resolveConfiguredText } from '../../copy/resolveConfiguredCopy.js'
 import { PlatformApiError, ValidationError } from '../../utilities/errors.js'
 import { sha256Hex } from '../../utilities/hash.js'
 import { makeMetaRequest } from '../_meta/api.js'
@@ -47,7 +48,7 @@ export type FacebookPublishInput = {
   imageUrls?: string[]
   /** LINK: link URL (defaults to ctx.link). */
   link?: string
-  /** Message override (falls back to copyOverrides → default builder). */
+  /** Message override (falls back to transformations → copyOverrides → default builder). */
   message?: string
   /** Page id to publish to. Required. */
   pageId: string
@@ -94,8 +95,13 @@ const resolveMessage = (
   input: FacebookPublishInput,
   options: NormalizedPluginOptions,
 ): string => {
-  const override = options.copyOverrides.facebookMessage?.(ctx)
-  return input.message?.trim() || override || buildDefaultFacebookMessage(ctx)
+  const resolved = resolveConfiguredText(
+    'facebookMessage',
+    ctx,
+    options,
+    buildDefaultFacebookMessage,
+  )
+  return input.message?.trim() || resolved
 }
 
 const validateSchedule = (

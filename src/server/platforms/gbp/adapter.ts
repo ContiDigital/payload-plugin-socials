@@ -11,6 +11,7 @@ import type {
 } from '../../../types/index.js'
 
 import { GBP_SUMMARY_MAX_CHARS } from '../../../constants.js'
+import { resolveConfiguredText } from '../../copy/resolveConfiguredCopy.js'
 import { getCredentials, recordConnectionError } from '../../services/connectionService.js'
 import { ValidationError } from '../../utilities/errors.js'
 import { refreshGbpAccessToken } from './api.js'
@@ -110,8 +111,7 @@ export const createGbpAdapter = (
     },
 
     preview(args: PreviewArgs): Promise<PreviewResult> {
-      const summary =
-        options.copyOverrides.gbpSummary?.(args.ctx) ?? buildDefaultGbpSummary(args.ctx)
+      const summary = resolveConfiguredText('gbpSummary', args.ctx, options, buildDefaultGbpSummary)
       const primary = args.ctx.images[0]
       return Promise.resolve({
         body: summary,
@@ -130,8 +130,7 @@ export const createGbpAdapter = (
       const { ctx, input } = args
       const summary =
         input?.summary?.trim() ||
-        options.copyOverrides.gbpSummary?.(ctx) ||
-        buildDefaultGbpSummary(ctx)
+        resolveConfiguredText('gbpSummary', ctx, options, buildDefaultGbpSummary)
       if (!summary.trim()) {
         issues.push({ message: 'GBP requires a non-empty summary', severity: 'error' })
       }

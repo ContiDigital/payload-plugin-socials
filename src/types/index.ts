@@ -402,6 +402,82 @@ export type GbpPluginConfig = {
 }
 
 // ---------------------------------------------------------------------------
+// Copy transformations
+// ---------------------------------------------------------------------------
+
+/**
+ * The seven canonical copy fields the plugin manages across all platforms.
+ * Use this tuple as the single source of truth for any code that iterates
+ * over copy fields.
+ */
+export const SOCIAL_COPY_FIELD_KEYS = [
+  'pinterestTitle',
+  'pinterestDescription',
+  'pinterestAltText',
+  'pinterestHashtags',
+  'instagramCaption',
+  'facebookMessage',
+  'gbpSummary',
+] as const
+
+export type SocialCopyFieldKey = (typeof SOCIAL_COPY_FIELD_KEYS)[number]
+
+/**
+ * A transformation for a single string copy field. Provide either:
+ *   - A template string with `{{ variable | filter }}` placeholders (rendered
+ *     by the plugin's interpolation engine against the source context), or
+ *   - A function that receives the full `SocialSourceContext` and returns
+ *     the final string value.
+ */
+export type SocialCopyTransform = ((ctx: SocialSourceContext) => string) | string
+
+/**
+ * A transformation for `pinterestHashtags`. Provide either:
+ *   - A space- or comma-separated string of hashtag tokens (normalized by
+ *     the plugin's `splitHashtags` helper), or
+ *   - A function that receives the `SocialSourceContext` and returns a
+ *     `string[]` of `#tag` values.
+ */
+export type SocialHashtagsTransform = ((ctx: SocialSourceContext) => string[]) | string
+
+/**
+ * Per-field transformation map for a single source kind (or the wildcard
+ * `'*'` fallback). Every key is optional — only the fields you care about
+ * need entries. For all seven fields except `pinterestHashtags` the value
+ * is a `SocialCopyTransform`; `pinterestHashtags` accepts a
+ * `SocialHashtagsTransform`.
+ */
+export type SocialCopyFieldTransforms = {
+  facebookMessage?: SocialCopyTransform
+  gbpSummary?: SocialCopyTransform
+  instagramCaption?: SocialCopyTransform
+  pinterestAltText?: SocialCopyTransform
+  pinterestDescription?: SocialCopyTransform
+  pinterestHashtags?: SocialHashtagsTransform
+  pinterestTitle?: SocialCopyTransform
+}
+
+/**
+ * Config-first, source-kind-aware copy transformation map.
+ *
+ * Keyed by `SocialSourceKind` (e.g. `'product'`, `'blogPost'`). The
+ * optional `'*'` key is a fallback that applies to any source kind not
+ * explicitly listed.
+ *
+ * Precedence (highest to lowest):
+ *   1. `transformations[ctx.sourceKind][field]`   — kind-specific
+ *   2. `transformations['*'][field]`               — wildcard fallback
+ *   3. `copyOverrides[field]`                      — function-only legacy
+ *   4. Built-in default builder                   — plugin default
+ *
+ * String values are rendered through the plugin's `{{ variable | filter }}`
+ * template engine. Function values receive the `SocialSourceContext` directly.
+ */
+export type SocialsTransformations = {
+  '*'?: SocialCopyFieldTransforms
+} & Record<SocialSourceKind, SocialCopyFieldTransforms>
+
+// ---------------------------------------------------------------------------
 // Public plugin options
 // ---------------------------------------------------------------------------
 
@@ -591,6 +667,29 @@ export type PayloadPluginSocialsConfig = {
   sources: Record<SocialSourceKind, SourceContextResolver>
   /** Allow flipping every adapter to test mode (e.g. Pinterest sandbox). */
   testMode?: boolean
+  /**
+   * Config-first, source-kind-aware copy transformations.
+   *
+   * Declare per-field copy for each source kind (and an optional `'*'`
+   * wildcard). Each value is either a template string (rendered through the
+   * plugin's `{{ variable | filter }}` engine) or a function that receives
+   * the full `SocialSourceContext`. This is the recommended way to customize
+   * copy — it is source-kind-aware and takes precedence over `copyOverrides`.
+   *
+   * @example
+   * ```ts
+   * transformations: {
+   *   product: {
+   *     pinterestTitle: '{{ title | upper }} | {{ modelLabel | default:Shop Now }}',
+   *     pinterestHashtags: (ctx) => ['#marble', `#${ctx.sourceKind}`],
+   *   },
+   *   '*': {
+   *     facebookMessage: '{{ title }}\n\n{{ description | truncate:300 }}',
+   *   },
+   * }
+   * ```
+   */
+  transformations?: SocialsTransformations
   webhooks?: SocialsWebhookConfig
 }
 
@@ -666,6 +765,8 @@ export type NormalizedPluginOptions = {
   scheduling: NormalizedSchedulingConfig
   sources: SourceResolverRegistry
   testMode: boolean
+  /** Always present after normalization; `{}` when no transformations were configured. */
+  transformations: SocialsTransformations
   webhooks: SocialsWebhookConfig
 }
 

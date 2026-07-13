@@ -11,6 +11,7 @@ import type {
 } from '../../../types/index.js'
 
 import { INSTAGRAM_CAPTION_MAX_CHARS, INSTAGRAM_CAPTION_MAX_HASHTAGS } from '../../../constants.js'
+import { resolveConfiguredText } from '../../copy/resolveConfiguredCopy.js'
 import { getCredentials, recordConnectionError } from '../../services/connectionService.js'
 import { ValidationError } from '../../utilities/errors.js'
 import { refreshMetaAccessToken } from '../_meta/api.js'
@@ -106,8 +107,12 @@ export const createInstagramAdapter = (
     },
 
     preview(args: PreviewArgs): Promise<PreviewResult> {
-      const caption =
-        options.copyOverrides.instagramCaption?.(args.ctx) ?? buildDefaultInstagramCaption(args.ctx)
+      const caption = resolveConfiguredText(
+        'instagramCaption',
+        args.ctx,
+        options,
+        buildDefaultInstagramCaption,
+      )
       const primary = args.ctx.images[0]
       return Promise.resolve({
         body: caption,
@@ -175,8 +180,7 @@ export const createInstagramAdapter = (
       if (mediaType !== 'STORIES') {
         const caption =
           input?.caption ??
-          options.copyOverrides.instagramCaption?.(ctx) ??
-          buildDefaultInstagramCaption(ctx)
+          resolveConfiguredText('instagramCaption', ctx, options, buildDefaultInstagramCaption)
         if (caption.length > INSTAGRAM_CAPTION_MAX_CHARS) {
           issues.push({
             field: 'caption',
