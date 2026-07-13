@@ -62,7 +62,8 @@ export const applyAdminEnhancements = (
   }
   const components = config.admin.components
 
-  // Expose plugin-config bits that client components need (basePath, route).
+  // Expose plugin-config bits that client components need (basePath, route,
+  // sourceKinds for the template builder's record-search picker).
   if (!config.custom) {
     config.custom = {}
   }
@@ -73,6 +74,13 @@ export const applyAdminEnhancements = (
     enabledPlatforms: Object.entries(options.platforms)
       .filter(([, p]) => p.enabled)
       .map(([id]) => id),
+    // Expose the registered source kinds so the template builder can
+    // populate the record-picker dropdown without enumerating collections.
+    sourceKinds: options.admin.injectInto.map(({ collection, label, sourceKind }) => ({
+      collection,
+      kind: sourceKind,
+      label: label ?? collection,
+    })),
   }
 
   if (options.admin.mode === 'route' || options.admin.mode === 'both') {

@@ -26,6 +26,7 @@ The `1.x` API follows semantic versioning. Schema changes are called out in the 
 - [Configuration](#configuration)
 - [Source resolvers](#source-resolvers)
 - [Post templates](#post-templates)
+  - [Template builder](#template-builder)
 - [Copy transformations](#copy-transformations)
 - [Per-platform setup](#per-platform-setup)
   - [Pinterest](#pinterest)
@@ -309,6 +310,18 @@ const title = renderTemplate('{{title}} | {{modelLabel}}', buildTemplateScope(ct
 const copy = resolveTemplateCopy(templateDoc.templates, ctx, { boardName: 'Statues' })
 // => { pinterestTitle?, pinterestDescription?, pinterestHashtags?: string[], ... }
 ```
+
+### Template builder
+
+Each copy field in the `social-templates` collection mounts a `SocialTemplateFieldBuilder` component instead of a plain textarea. The builder provides:
+
+- **Token picker.** Buttons for every statically-known scope token (`title`, `description`, `material`, `color`, `category`, `dimensions`, `link`, `modelLabel`, `sourceId`, `sourceKind`, `baseTitle`, `baseDescription`). After you select a sample record, any `metadata.*` keys that record exposes are added to the picker dynamically.
+- **Filter menu.** After clicking a token, apply `truncate:N`, `default:...`, `upper`, `lower`, or `trim` in one click. The filter is written into the template string directly.
+- **Live preview.** Enter a record ID in the preview panel and the builder POSTs to `POST {basePath}/templates/preview` every 350ms, showing the rendered output for that field against the real record.
+- **Character count.** A per-field count with a warning when the rendered value would exceed the platform limit (100 chars for Pinterest title, 500 for description and alt text, 1500 for GBP summary, 2200 for Instagram caption).
+- **Raw-string toggle.** Switch to a plain input or textarea to hand-write template syntax for advanced cases.
+
+**Important:** the token picker only offers tokens that `buildTemplateScope` maps into the render scope. Collection fields that are not surfaced by the host's `SourceContextResolver` do not appear in the picker and would produce silent empty output if typed manually. To use a field, expose it through the resolver's `metadata` map and it will be discovered automatically in the live preview.
 
 ---
 
@@ -897,6 +910,7 @@ POST  /api/socials/:platform/:sourceKind/:sourceId/validate    # publisher-gated
 POST  /api/socials/:platform/:sourceKind/:sourceId/publish     # publisher-gated; accepts an optional scheduledAt
 GET   /api/socials/:platform/:sourceKind/:sourceId/history     # publisher-gated; the last 50 social-posts rows
 GET   /api/socials/templates/:sourceKind/:sourceId             # publisher-gated; resolved enabled templates
+POST  /api/socials/templates/preview                           # admin-gated; preview draft template fields + scopeKeys
 ```
 
 ### Meta webhooks

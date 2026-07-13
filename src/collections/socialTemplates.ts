@@ -2,26 +2,20 @@ import type { CollectionConfig, PayloadRequest } from 'payload'
 
 import type { AuthorizeFn } from '../types/index.js'
 
-import { PLATFORM_IDS, SOCIAL_TEMPLATES_SLUG } from '../constants.js'
+import { PLATFORM_IDS, PLUGIN_SLUG, SOCIAL_TEMPLATES_SLUG } from '../constants.js'
 
 /**
  * Plugin-owned `social-templates` collection.
  *
- * Reusable post templates authored by staff. Each field holds a template
- * string with `{{ variable }}` placeholders that the composer fills per source
- * record at compose time (see `server/templates/resolveTemplateCopy.ts`).
+ * Reusable post templates authored by staff. Each copy field mounts a
+ * `SocialTemplateFieldBuilder` custom field component that provides a
+ * structured token picker, filter menu, and debounced live preview against a
+ * chosen record. The raw template string (`{{ path | filter }}`) is the stored
+ * value; the builder is a structured editor over that string, with a
+ * raw-string toggle as an escape hatch.
  *
- * Unlike `social-posts` (plugin-internal, read-only in the admin), templates
- * are staff-authored content, so all CRUD is gated by the host `authorize`
- * function rather than locked to the service layer. Payload renders the
- * collection's edit UI automatically, so template authoring needs no custom
- * admin component.
+ * Field types are unchanged (text / textarea) so no migration is required.
  */
-
-const TEMPLATE_HELP =
-  'Use {{ variable }} placeholders. Available: {{title}}, {{description}}, {{material}}, ' +
-  '{{color}}, {{category}}, {{dimensions}}, {{link}}, {{modelLabel}}, and {{metadata.<field>}}. ' +
-  'Filters: | upper, | lower, | trim, | truncate:N, | default:text.'
 
 const buildGate = (authorize: AuthorizeFn | undefined) => {
   return async ({ req }: { req: PayloadRequest }) => {
@@ -34,6 +28,29 @@ const buildGate = (authorize: AuthorizeFn | undefined) => {
     return Boolean(await authorize({ payload: req.payload, req, scope: 'admin' }))
   }
 }
+
+const builderField = (
+  copyField: string,
+  multiline: boolean,
+): {
+  components: {
+    Field: {
+      clientProps: { copyField: string; multiline: boolean }
+      exportName: string
+      path: string
+    }
+  }
+  description: string
+} => ({
+  components: {
+    Field: {
+      clientProps: { copyField, multiline },
+      exportName: 'SocialTemplateFieldBuilder',
+      path: `${PLUGIN_SLUG}/client`,
+    },
+  },
+  description: `Template for "${copyField}". Use the builder to pick tokens from the resolved scope and apply filters. Tokens must be mapped by the host's SourceContextResolver to produce output — fields not exposed via the resolver's metadata map will render as empty.`,
+})
 
 export const buildSocialTemplatesCollection = (authorize?: AuthorizeFn): CollectionConfig => {
   const gate = buildGate(authorize)
@@ -82,25 +99,45 @@ export const buildSocialTemplatesCollection = (authorize?: AuthorizeFn): Collect
         name: 'templates',
         type: 'group',
         fields: [
-          { name: 'pinterestTitle', type: 'text', admin: { description: TEMPLATE_HELP } },
+          {
+            name: 'pinterestTitle',
+            type: 'text',
+            admin: builderField('pinterestTitle', false),
+          },
           {
             name: 'pinterestDescription',
             type: 'textarea',
-            admin: { description: TEMPLATE_HELP },
+            admin: builderField('pinterestDescription', true),
           },
-          { name: 'pinterestAltText', type: 'textarea', admin: { description: TEMPLATE_HELP } },
+          {
+            name: 'pinterestAltText',
+            type: 'textarea',
+            admin: builderField('pinterestAltText', true),
+          },
           {
             name: 'pinterestHashtags',
             type: 'text',
             admin: {
+              ...builderField('pinterestHashtags', false),
               description:
-                'Space or comma separated tags; a leading # is added automatically. ' +
-                TEMPLATE_HELP,
+                'Space or comma separated tags; a leading # is added automatically. Use the builder to construct the template.',
             },
           },
-          { name: 'instagramCaption', type: 'textarea', admin: { description: TEMPLATE_HELP } },
-          { name: 'facebookMessage', type: 'textarea', admin: { description: TEMPLATE_HELP } },
-          { name: 'gbpSummary', type: 'textarea', admin: { description: TEMPLATE_HELP } },
+          {
+            name: 'instagramCaption',
+            type: 'textarea',
+            admin: builderField('instagramCaption', true),
+          },
+          {
+            name: 'facebookMessage',
+            type: 'textarea',
+            admin: builderField('facebookMessage', true),
+          },
+          {
+            name: 'gbpSummary',
+            type: 'textarea',
+            admin: builderField('gbpSummary', true),
+          },
         ],
       },
     ],
