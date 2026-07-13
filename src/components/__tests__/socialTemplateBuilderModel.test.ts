@@ -4,12 +4,12 @@ import type { SocialSourceContext } from '../../types/index.js'
 
 import { buildTemplateScope } from '../../server/templates/renderTemplate.js'
 import {
-  INSERTABLE_STATIC_TOKENS,
-  TEMPLATE_SCOPE_TOKENS,
   applyFilter,
   compilePreviewRequestBody,
+  INSERTABLE_STATIC_TOKENS,
   insertToken,
   isMetadataToken,
+  TEMPLATE_SCOPE_TOKENS,
 } from '../socialTemplateBuilderModel.js'
 
 // ---------------------------------------------------------------------------
