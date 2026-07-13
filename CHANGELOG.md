@@ -8,7 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
-## [1.0.0] - 2026-07-12
+## [0.9.0] - 2026-07-12
 
 ### Added
 
@@ -79,6 +79,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ### Notes
 
+- Pre-1.0: minor versions may include breaking changes; pin exact versions.
 - **Runtime baseline:** Node.js 22.12 or newer is required.
 - **Schema additions on first install**: 2 collections (`social-posts`, `social-templates`) and 1 global (`socials-connections`). Run `pnpm payload migrate:create` after install to generate a migration; the plugin never auto-creates migrations.
 - **Facebook video publishing uses Meta's public-CDN `file_url` ingestion**: local-file and resumable-session upload are outside the v1 source contract.
