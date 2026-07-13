@@ -9,17 +9,23 @@ import type {
 } from '../../../../types/index.js'
 
 import { PlatformApiError, ValidationError } from '../../../utilities/errors.js'
+import { buildPublicationIdentity } from '../../../utilities/publicationIdentity.js'
 
 vi.mock('../../_meta/api.js', () => ({
   makeMetaRequest: vi.fn(),
   metaJson: vi.fn(),
 }))
+vi.mock('../../../assets/resolvePlatformImage.js', () => ({
+  resolvePlatformImageUrl: vi.fn(),
+}))
 
+import { resolvePlatformImageUrl } from '../../../assets/resolvePlatformImage.js'
 import { makeMetaRequest, metaJson } from '../../_meta/api.js'
-import { deleteInstagramMedia, publishInstagramMedia } from '../publish.js'
+import { deleteInstagramMedia, deriveInstagramIdentity, publishInstagramMedia } from '../publish.js'
 
 const mockedMetaJson = vi.mocked(metaJson)
 const mockedRequest = vi.mocked(makeMetaRequest)
+const mockedResolveImage = vi.mocked(resolvePlatformImageUrl)
 
 const options = {
   copyOverrides: {},
@@ -77,6 +83,10 @@ beforeEach(() => {
     logger: undefined,
     update: vi.fn().mockResolvedValue({ id: 'row_existing' }),
   }
+  // Default: passthrough (preflight off / no conversion needed).
+  mockedResolveImage.mockImplementation((args) =>
+    Promise.resolve({ converted: false, url: args.imageUrl }),
+  )
 })
 
 describe('publishInstagramMedia — validation', () => {
@@ -173,6 +183,9 @@ describe('publishInstagramMedia — two-phase flow', () => {
 
     vi.clearAllMocks()
     payload.find.mockResolvedValue({ docs: [] })
+    mockedResolveImage.mockImplementation((args) =>
+      Promise.resolve({ converted: false, url: args.imageUrl }),
+    )
     setupFlow()
     await publishInstagramMedia({
       ctx: ctx(),
@@ -259,6 +272,77 @@ describe('publishInstagramMedia — idempotency + status errors', () => {
         payload: asPayload(payload),
       }),
     ).rejects.toBeInstanceOf(PlatformApiError)
+  })
+
+  it('key and primaryAssetUrl use the ORIGINAL imageUrl even when autoConvert returns a different URL', async () => {
+    const originalUrl = 'https://cdn.example.com/main.jpg'
+    const convertedUrl = 'https://payload.example.com/media/main-instagram.jpg'
+
+    // Simulate autoConvert returning a converted URL for the outbound body.
+    mockedResolveImage.mockResolvedValue({ converted: true, url: convertedUrl })
+    setupFlow()
+
+    const input = { igUserId: 'ig1', imageUrl: originalUrl, mediaType: 'IMAGE' as const }
+    const testCtx = ctx()
+
+    await publishInstagramMedia({
+      ctx: testCtx,
+      input,
+      options,
+      payload: asPayload(payload),
+    })
+
+    // The persisted row must use the ORIGINAL-derived key.
+    const expectedIdentity = deriveInstagramIdentity(testCtx, input)
+    const expectedPublicationIdentity = buildPublicationIdentity({
+      ctx: testCtx,
+      input,
+      platform: 'instagram',
+      sourceId: testCtx.sourceId,
+      sourceKind: testCtx.sourceKind,
+    })
+
+    const persistedData = (payload.create.mock.calls[0][0] as { data: Record<string, unknown> })
+      .data
+
+    // idempotencyKey must match the original-url derivation.
+    expect(persistedData.idempotencyKey).toBe(expectedIdentity.idempotencyKey)
+    expect(persistedData.idempotencyKey).toBe(expectedPublicationIdentity.idempotencyKey)
+
+    // imageUrl stored on the row is the ORIGINAL URL.
+    expect(persistedData.imageUrl).toBe(originalUrl)
+
+    // The OUTBOUND container body must carry the CONVERTED url.
+    const containerBody = createBodies()[0]
+    expect(containerBody.image_url).toBe(convertedUrl)
+  })
+
+  it('key is identical to buildPublicationIdentity with preflight OFF (default passthrough)', async () => {
+    setupFlow()
+    const input = {
+      igUserId: 'ig1',
+      imageUrl: 'https://cdn.example.com/main.jpg',
+      mediaType: 'IMAGE' as const,
+    }
+    const testCtx = ctx()
+
+    await publishInstagramMedia({
+      ctx: testCtx,
+      input,
+      options,
+      payload: asPayload(payload),
+    })
+
+    const expectedIdentity = buildPublicationIdentity({
+      ctx: testCtx,
+      input,
+      platform: 'instagram',
+      sourceId: testCtx.sourceId,
+      sourceKind: testCtx.sourceKind,
+    })
+    const persistedData = (payload.create.mock.calls[0][0] as { data: Record<string, unknown> })
+      .data
+    expect(persistedData.idempotencyKey).toBe(expectedIdentity.idempotencyKey)
   })
 })
 

@@ -8,6 +8,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
+### Fixed
+
+- **Image conversion ordering for Pinterest, Instagram, and Facebook.** When `assets.autoConvert` is enabled and a source image format is disallowed by the target platform, the converted rendition URL was incorrectly used to derive the `social-posts` idempotency key in the publish path. The reservation layer (`buildPublicationIdentity`) continued using the original URL, so the two paths produced different keys, orphaning the reservation row in `status: 'publishing'` and creating a duplicate published row on each retry. The fix moves image conversion to happen strictly when building the outbound platform API request body (after the idempotency key and `primaryAssetUrl` are locked to the original URL). The converted URL is now used only for the bytes sent to Pinterest/Meta and never touches the key, `primaryAssetUrl`, `sourceHash`, or the reservation. GBP is intentionally unchanged because its key does not include an image URL. This bug is only observable when `assets.autoConvert` is enabled; the default passthrough path is byte-for-byte identical to the previous behavior.
+- The new `resolvePlatformImageUrl` helper is now exercised by a dedicated unit test suite (`src/server/assets/__tests__/resolvePlatformImage.test.ts`) covering preflight-off passthrough, allowed-format passthrough, disallowed-with-autoConvert convert-and-upload, disallowed-without-autoConvert throws, and unknown-format passthrough.
+
 ## [0.9.0] - 2026-07-12
 
 ### Added

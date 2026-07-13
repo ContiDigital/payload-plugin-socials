@@ -12,6 +12,7 @@ import {
   PINTEREST_TITLE_MAX,
   SOCIAL_POSTS_SLUG,
 } from '../../../constants.js'
+import { resolvePlatformImageUrl } from '../../assets/resolvePlatformImage.js'
 import { ValidationError } from '../../utilities/errors.js'
 import { sha256Hex } from '../../utilities/hash.js'
 import { pinterestJson } from './api.js'
@@ -38,6 +39,12 @@ import { uploadPinterestVideoFromUrl } from './videoUpload.js'
  *
  * NEVER hard-deletes a `social-posts` row — it's both audit AND idempotency
  * anchor. Cancellation flips `status: 'cancelled'`.
+ *
+ * Image conversion ordering (critical):
+ *   idempotencyKey and primaryAssetUrl are derived from the ORIGINAL input
+ *   imageUrl. resolvePlatformImageUrl is called ONLY when building the
+ *   outbound Pinterest API request body. The converted URL never touches the
+ *   key, primaryAssetUrl, sourceHash, or the reservation.
  */
 
 export type PinterestPublishInput = {
@@ -45,6 +52,7 @@ export type PinterestPublishInput = {
   boardId: string
   boardName?: string
   coverImageUrl?: string
+  declaredImageFormat?: string
   description?: string
   imageUrl?: string
   link?: string
@@ -228,9 +236,15 @@ export const publishPinterestPin = async (args: {
   const altText = (input.altText?.trim() || preview.altText).slice(0, PINTEREST_ALT_TEXT_MAX)
   const link = input.link?.trim() || preview.link
   const mediaType = input.mediaType ?? 'IMAGE'
+
+  // Resolve the ORIGINAL asset URLs — these are the source-of-truth for
+  // idempotency. They must not be modified by image conversion.
   const imageUrl = input.imageUrl?.trim() || preview.defaultImageUrl
   const videoUrl = input.videoUrl?.trim() || ctx.videos?.[0]?.url || ''
   const coverImageUrl = input.coverImageUrl?.trim() || ctx.videos?.[0]?.coverImageUrl || imageUrl
+
+  // primaryAssetUrl is derived from the ORIGINAL input, in lockstep with
+  // buildPublicationIdentity and derivePinterestIdentity.
   const primaryAssetUrl = mediaType === 'VIDEO' ? videoUrl || input.mediaId?.trim() || '' : imageUrl
 
   if (mediaType === 'IMAGE' && !imageUrl) {
@@ -249,6 +263,8 @@ export const publishPinterestPin = async (args: {
     throw new ValidationError('Pin title is required')
   }
 
+  // Derive idempotency key from the ORIGINAL primaryAssetUrl — identical to
+  // buildPublicationIdentity. This happens BEFORE any image conversion.
   const idempotencyKey = buildIdempotencyKey(ctx, input.boardId, primaryAssetUrl)
   const existing = await findExistingByIdempotencyKey(payload, idempotencyKey)
 
@@ -267,6 +283,8 @@ export const publishPinterestPin = async (args: {
   // fall through and republish, overwriting the same row so the audit
   // history shows the most recent publish.
 
+  // sourceHash is computed from the ORIGINAL primaryAssetUrl, never the
+  // converted one.
   const sourceHash = buildSourceHash({
     altText,
     assetUrl: primaryAssetUrl,
@@ -287,6 +305,28 @@ export const publishPinterestPin = async (args: {
         }))
       : undefined
 
+  // --- Image conversion: happens ONLY when building the outbound body ---
+  // The converted URL is used exclusively for the Pinterest API request.
+  // It never touches idempotencyKey, primaryAssetUrl, or sourceHash.
+  const assetsOptions =
+    (
+      options as unknown as {
+        assets?: { autoConvert?: boolean; preflight?: boolean; uploadCollection?: string }
+      }
+    ).assets ?? {}
+  const outboundImageUrl =
+    mediaType === 'IMAGE'
+      ? (
+          await resolvePlatformImageUrl({
+            declaredFormat: input.declaredImageFormat,
+            imageUrl,
+            options: assetsOptions,
+            payload,
+            platform: 'pinterest',
+          })
+        ).url
+      : imageUrl
+
   const pin = await createPin(payload, options, {
     alt_text: altText,
     board_id: input.boardId,
@@ -299,7 +339,7 @@ export const publishPinterestPin = async (args: {
             media_id: mediaId ?? '',
             source_type: 'video_id',
           }
-        : { source_type: 'image_url', url: imageUrl },
+        : { source_type: 'image_url', url: outboundImageUrl },
     title,
   })
 

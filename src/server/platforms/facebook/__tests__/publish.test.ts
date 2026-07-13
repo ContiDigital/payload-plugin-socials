@@ -9,17 +9,23 @@ import type {
 } from '../../../../types/index.js'
 
 import { ValidationError } from '../../../utilities/errors.js'
+import { buildPublicationIdentity } from '../../../utilities/publicationIdentity.js'
 
 vi.mock('../../_meta/api.js', () => ({
   makeMetaRequest: vi.fn(),
   metaJson: vi.fn(),
 }))
+vi.mock('../../../assets/resolvePlatformImage.js', () => ({
+  resolvePlatformImageUrl: vi.fn(),
+}))
 
+import { resolvePlatformImageUrl } from '../../../assets/resolvePlatformImage.js'
 import { makeMetaRequest, metaJson } from '../../_meta/api.js'
-import { deleteFacebookPost, publishFacebookPost } from '../publish.js'
+import { deleteFacebookPost, deriveFacebookIdentity, publishFacebookPost } from '../publish.js'
 
 const mockedMetaJson = vi.mocked(metaJson)
 const mockedRequest = vi.mocked(makeMetaRequest)
+const mockedResolveImage = vi.mocked(resolvePlatformImageUrl)
 
 const options = {
   copyOverrides: {},
@@ -86,6 +92,10 @@ beforeEach(() => {
     logger: undefined,
     update: vi.fn().mockResolvedValue({ id: 'row_existing' }),
   }
+  // Default: passthrough (preflight off / no conversion needed).
+  mockedResolveImage.mockImplementation((args) =>
+    Promise.resolve({ converted: false, url: args.imageUrl }),
+  )
 })
 
 describe('publishFacebookPost — formats', () => {
@@ -247,6 +257,114 @@ describe('publishFacebookPost — validation + idempotency', () => {
     })
     expect(result.alreadyExisted).toBe(true)
     expect(mockedRequest).not.toHaveBeenCalled()
+  })
+
+  it('key and primaryAssetUrl use the ORIGINAL imageUrl even when autoConvert returns a different URL', async () => {
+    const originalUrl = 'https://cdn.example.com/main.jpg'
+    const convertedUrl = 'https://payload.example.com/media/main-facebook.jpg'
+
+    // Simulate autoConvert returning a converted URL for the outbound body.
+    mockedResolveImage.mockResolvedValue({ converted: true, url: convertedUrl })
+    setupPublish()
+
+    const input = { format: 'PHOTO' as const, imageUrl: originalUrl, pageId: 'p1' }
+    const testCtx = ctx()
+
+    await publishFacebookPost({
+      ctx: testCtx,
+      input,
+      options,
+      payload: asPayload(payload),
+    })
+
+    // The persisted row must use the ORIGINAL-derived key.
+    const expectedIdentity = deriveFacebookIdentity(testCtx, input)
+    const expectedPublicationIdentity = buildPublicationIdentity({
+      ctx: testCtx,
+      input,
+      platform: 'facebook',
+      sourceId: testCtx.sourceId,
+      sourceKind: testCtx.sourceKind,
+    })
+
+    const persistedData = (payload.create.mock.calls[0][0] as { data: Record<string, unknown> })
+      .data
+
+    // idempotencyKey must match the original-url derivation.
+    expect(persistedData.idempotencyKey).toBe(expectedIdentity.idempotencyKey)
+    expect(persistedData.idempotencyKey).toBe(expectedPublicationIdentity.idempotencyKey)
+
+    // imageUrl stored on the row is the ORIGINAL URL.
+    expect(persistedData.imageUrl).toBe(originalUrl)
+
+    // The OUTBOUND Facebook API body must carry the CONVERTED url.
+    const photoUrl = requestParams('/photos').get('url')
+    expect(photoUrl).toBe(convertedUrl)
+  })
+
+  it('key is identical to buildPublicationIdentity with preflight OFF (default passthrough)', async () => {
+    setupPublish()
+    const input = { format: 'PHOTO' as const, imageUrl: 'https://cdn/x.jpg', pageId: 'p1' }
+    const testCtx = ctx()
+
+    await publishFacebookPost({
+      ctx: testCtx,
+      input,
+      options,
+      payload: asPayload(payload),
+    })
+
+    const expectedIdentity = buildPublicationIdentity({
+      ctx: testCtx,
+      input,
+      platform: 'facebook',
+      sourceId: testCtx.sourceId,
+      sourceKind: testCtx.sourceKind,
+    })
+    const persistedData = (payload.create.mock.calls[0][0] as { data: Record<string, unknown> })
+      .data
+    expect(persistedData.idempotencyKey).toBe(expectedIdentity.idempotencyKey)
+  })
+
+  it('PHOTO_MULTI: key uses the ORIGINAL first imageUrl even when autoConvert returns a different URL', async () => {
+    const originalUrls = ['https://cdn.example.com/1.jpg', 'https://cdn.example.com/2.jpg']
+    const convertedUrls = [
+      'https://payload.example.com/media/1-facebook.jpg',
+      'https://payload.example.com/media/2-facebook.jpg',
+    ]
+
+    mockedResolveImage
+      .mockResolvedValueOnce({ converted: true, url: convertedUrls[0] })
+      .mockResolvedValueOnce({ converted: true, url: convertedUrls[1] })
+    setupPublish()
+
+    const input = { format: 'PHOTO_MULTI' as const, imageUrls: originalUrls, pageId: 'p1' }
+    const testCtx = ctx()
+
+    await publishFacebookPost({
+      ctx: testCtx,
+      input,
+      options,
+      payload: asPayload(payload),
+    })
+
+    const expectedIdentity = buildPublicationIdentity({
+      ctx: testCtx,
+      input,
+      platform: 'facebook',
+      sourceId: testCtx.sourceId,
+      sourceKind: testCtx.sourceKind,
+    })
+    const persistedData = (payload.create.mock.calls[0][0] as { data: Record<string, unknown> })
+      .data
+    expect(persistedData.idempotencyKey).toBe(expectedIdentity.idempotencyKey)
+
+    // Photos are uploaded using the converted URLs.
+    const photoCalls = mockedRequest.mock.calls.filter((c) => String(c[3]).includes('/photos'))
+    const uploadedUrls = photoCalls.map((c) =>
+      new URLSearchParams((c[4] as { init: { body: string } }).init.body).get('url'),
+    )
+    expect(uploadedUrls).toEqual(convertedUrls)
   })
 })
 

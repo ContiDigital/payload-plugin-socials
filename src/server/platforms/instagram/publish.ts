@@ -15,6 +15,7 @@ import {
   INSTAGRAM_CONTAINER_LIFETIME_HOURS,
   SOCIAL_POSTS_SLUG,
 } from '../../../constants.js'
+import { resolvePlatformImageUrl } from '../../assets/resolvePlatformImage.js'
 import { PlatformApiError, ValidationError } from '../../utilities/errors.js'
 import { sha256Hex } from '../../utilities/hash.js'
 import { metaJson } from '../_meta/api.js'
@@ -46,6 +47,12 @@ import { buildDefaultInstagramCaption, countHashtags, countMentions } from './co
  *
  * Idempotency key:
  *   sha256("instagram:" + sourceKind + ":" + sourceId + ":" + igUserId + ":" + mediaType + ":" + primaryAssetUrl)
+ *
+ * Image conversion ordering (critical):
+ *   idempotencyKey and primaryAssetUrl are derived from the ORIGINAL input
+ *   imageUrl. resolvePlatformImageUrl is called ONLY when building the
+ *   outbound container body. The converted URL never touches the key,
+ *   primaryAssetUrl, or sourceHash.
  */
 
 export const INSTAGRAM_MEDIA_TYPES = ['IMAGE', 'REELS', 'STORIES', 'CAROUSEL'] as const
@@ -59,9 +66,11 @@ export type InstagramPublishInput = {
   /** Caption override (optional; falls back to copyOverrides → default builder). */
   caption?: string
   /** Carousel children — 2–10 entries, each `{ imageUrl }` or `{ videoUrl }`. */
-  carouselChildren?: Array<{ imageUrl?: string; videoUrl?: string }>
+  carouselChildren?: Array<{ declaredImageFormat?: string; imageUrl?: string; videoUrl?: string }>
   /** Reels-only: cover image url. */
   coverUrl?: string
+  /** Declared MIME format of the image (e.g. 'png', 'webp'). Used for conversion. */
+  declaredImageFormat?: string
   /** IG Business user id. Required. */
   igUserId: string
   /** Single-image override. */
@@ -143,14 +152,15 @@ const validateCaption = (caption: string): void => {
 
 const buildSingleImageContainerBody = (
   caption: string,
+  imageUrl: string,
   input: InstagramPublishInput,
 ): Record<string, unknown> => {
-  if (!input.imageUrl) {
+  if (!imageUrl) {
     throw new ValidationError('imageUrl is required for IMAGE media')
   }
   const body: Record<string, unknown> = {
     caption,
-    image_url: input.imageUrl,
+    image_url: imageUrl,
   }
   if (input.locationId) {
     body.location_id = input.locationId
@@ -189,10 +199,13 @@ const buildReelsContainerBody = (
   return body
 }
 
-const buildStoriesContainerBody = (input: InstagramPublishInput): Record<string, unknown> => {
+const buildStoriesContainerBody = (
+  imageUrl: string | undefined,
+  input: InstagramPublishInput,
+): Record<string, unknown> => {
   const body: Record<string, unknown> = { media_type: 'STORIES' }
-  if (input.imageUrl) {
-    body.image_url = input.imageUrl
+  if (imageUrl) {
+    body.image_url = imageUrl
   } else if (input.videoUrl) {
     body.video_url = input.videoUrl
   } else {
@@ -290,6 +303,7 @@ const buildCarouselChildren = async (
   options: NormalizedPluginOptions,
   igUserId: string,
   children: NonNullable<InstagramPublishInput['carouselChildren']>,
+  assetsOptions: { autoConvert?: boolean; preflight?: boolean; uploadCollection?: string },
 ): Promise<string[]> => {
   if (children.length < INSTAGRAM_CAROUSEL_MIN_CHILDREN) {
     throw new ValidationError(
@@ -306,7 +320,16 @@ const buildCarouselChildren = async (
     children.map(async (child) => {
       const body: Record<string, unknown> = { is_carousel_item: true }
       if (child.imageUrl) {
-        body.image_url = child.imageUrl
+        // Resolve the outbound image URL (convert if needed), but the
+        // idempotency key was already derived from the original child.imageUrl.
+        const { url: outboundUrl } = await resolvePlatformImageUrl({
+          declaredFormat: child.declaredImageFormat,
+          imageUrl: child.imageUrl,
+          options: assetsOptions,
+          payload,
+          platform: 'instagram',
+        })
+        body.image_url = outboundUrl
       } else if (child.videoUrl) {
         body.media_type = 'VIDEO'
         body.video_url = child.videoUrl
@@ -397,6 +420,8 @@ export const publishInstagramMedia = async (args: {
   }
   const mediaType = input.mediaType ?? 'IMAGE'
 
+  // Derive primaryAssetUrl from the ORIGINAL input — identical to
+  // buildPublicationIdentity. No conversion applied here.
   const primaryAssetUrl = resolvePrimaryAssetUrl(input)
   if (!primaryAssetUrl && mediaType !== 'CAROUSEL') {
     throw new ValidationError('imageUrl or videoUrl is required')
@@ -407,6 +432,7 @@ export const publishInstagramMedia = async (args: {
     validateCaption(caption)
   }
 
+  // Idempotency key derived from ORIGINAL primaryAssetUrl — before any conversion.
   const idempotencyKey = buildIdempotencyKey(ctx, input.igUserId, mediaType, primaryAssetUrl)
   const existing = await findExistingByIdempotencyKey(payload, idempotencyKey)
   if (existing && existing.status === 'published' && existing.externalId) {
@@ -421,14 +447,32 @@ export const publishInstagramMedia = async (args: {
     }
   }
 
+  // Assets options from plugin config (opt-in; default is passthrough).
+  const assetsOptions =
+    (
+      options as unknown as {
+        assets?: { autoConvert?: boolean; preflight?: boolean; uploadCollection?: string }
+      }
+    ).assets ?? {}
+
   // ---- Container assembly + publish ----
+  // Image conversion happens here — ONLY in the outbound body builder.
+  // The converted URL is never fed back into idempotencyKey or primaryAssetUrl.
   let containerId: string
   if (mediaType === 'IMAGE') {
+    // Resolve outbound image URL (may be converted); idempotency key already locked above.
+    const { url: outboundImageUrl } = await resolvePlatformImageUrl({
+      declaredFormat: input.declaredImageFormat,
+      imageUrl: input.imageUrl ?? '',
+      options: assetsOptions,
+      payload,
+      platform: 'instagram',
+    })
     containerId = await createContainer(
       payload,
       options,
       input.igUserId,
-      buildSingleImageContainerBody(caption, input),
+      buildSingleImageContainerBody(caption, outboundImageUrl, input),
     )
   } else if (mediaType === 'REELS') {
     containerId = await createContainer(
@@ -438,11 +482,23 @@ export const publishInstagramMedia = async (args: {
       buildReelsContainerBody(caption, input),
     )
   } else if (mediaType === 'STORIES') {
+    // Resolve outbound image URL for STORIES too.
+    const outboundImageUrl = input.imageUrl
+      ? (
+          await resolvePlatformImageUrl({
+            declaredFormat: input.declaredImageFormat,
+            imageUrl: input.imageUrl,
+            options: assetsOptions,
+            payload,
+            platform: 'instagram',
+          })
+        ).url
+      : undefined
     containerId = await createContainer(
       payload,
       options,
       input.igUserId,
-      buildStoriesContainerBody(input),
+      buildStoriesContainerBody(outboundImageUrl, input),
     )
   } else if (mediaType === 'CAROUSEL') {
     if (!input.carouselChildren) {
@@ -453,6 +509,7 @@ export const publishInstagramMedia = async (args: {
       options,
       input.igUserId,
       input.carouselChildren,
+      assetsOptions,
     )
     const parentBody: Record<string, unknown> = {
       caption,
@@ -497,6 +554,7 @@ export const publishInstagramMedia = async (args: {
     }
   }
 
+  // sourceHash uses the ORIGINAL primaryAssetUrl — never the converted one.
   const sourceHash = sha256Hex(
     JSON.stringify({
       caption,

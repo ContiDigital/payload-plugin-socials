@@ -7,6 +7,7 @@ import type {
 } from '../../../types/index.js'
 
 import { SOCIAL_POSTS_SLUG } from '../../../constants.js'
+import { resolvePlatformImageUrl } from '../../assets/resolvePlatformImage.js'
 import { PlatformApiError, ValidationError } from '../../utilities/errors.js'
 import { sha256Hex } from '../../utilities/hash.js'
 import { makeMetaRequest } from '../_meta/api.js'
@@ -31,6 +32,12 @@ import { getPageAccessToken } from './pages.js'
  *
  * Idempotency key:
  *   sha256("facebook:" + sourceKind + ":" + sourceId + ":" + pageId + ":" + format + ":" + primaryAssetUrl)
+ *
+ * Image conversion ordering (critical):
+ *   idempotencyKey and primaryAssetUrl are derived from the ORIGINAL input
+ *   imageUrl. resolvePlatformImageUrl is called ONLY when building the
+ *   outbound Facebook API request body (publishSinglePhoto / uploadPhotoUnpublished).
+ *   The converted URL never touches the key, primaryAssetUrl, or sourceHash.
  */
 
 export const FACEBOOK_FORMATS = ['LINK', 'PHOTO', 'PHOTO_MULTI', 'VIDEO'] as const
@@ -39,6 +46,8 @@ export type FacebookFormat = (typeof FACEBOOK_FORMATS)[number]
 export type FacebookPublishInput = {
   /** PHOTO: optional alt text. */
   altText?: string
+  /** Declared MIME format of the image (e.g. 'png', 'webp'). Used for conversion. */
+  declaredImageFormat?: string
   /** Format. Default `LINK`. */
   format?: FacebookFormat
   /** PHOTO: single photo URL. */
@@ -258,14 +267,15 @@ const publishSinglePhoto = async (
   input: FacebookPublishInput,
   message: string,
   pageAccessToken: string,
+  outboundImageUrl: string,
   scheduledSeconds?: number,
 ): Promise<PhotoResponse> => {
-  if (!input.imageUrl) {
+  if (!outboundImageUrl) {
     throw new ValidationError('imageUrl is required for PHOTO')
   }
   const body: Record<string, unknown> = {
     caption: message,
-    url: input.imageUrl,
+    url: outboundImageUrl,
   }
   if (input.altText) {
     body.alt_text_custom = input.altText
@@ -292,15 +302,16 @@ const publishMultiPhoto = async (
   input: FacebookPublishInput,
   message: string,
   pageAccessToken: string,
+  outboundImageUrls: string[],
   scheduledSeconds?: number,
 ): Promise<FeedResponse> => {
-  if (!input.imageUrls || input.imageUrls.length < 2 || input.imageUrls.length > 10) {
+  if (!outboundImageUrls.length || outboundImageUrls.length < 2 || outboundImageUrls.length > 10) {
     throw new ValidationError('PHOTO_MULTI requires 2–10 entries in imageUrls')
   }
 
-  // Step 1: upload each photo unpublished.
+  // Step 1: upload each photo unpublished (using the outbound/converted URLs).
   const uploaded = await Promise.all(
-    input.imageUrls.map((url) =>
+    outboundImageUrls.map((url) =>
       uploadPhotoUnpublished(payload, options, input.pageId, url, pageAccessToken),
     ),
   )
@@ -408,6 +419,9 @@ export const publishFacebookPost = async (args: {
   const format: FacebookFormat = input.format ?? 'LINK'
 
   const message = resolveMessage(ctx, input, options)
+
+  // Derive primaryAssetUrl from the ORIGINAL input — no conversion applied.
+  // Identical to buildPublicationIdentity and deriveFacebookIdentity.
   const primaryAssetUrl = resolvePrimaryAssetUrl(input)
 
   if (format === 'LINK' && !input.link && !primaryAssetUrl) {
@@ -417,6 +431,7 @@ export const publishFacebookPost = async (args: {
     }
   }
 
+  // Idempotency key from ORIGINAL primaryAssetUrl — before any conversion.
   const idempotencyKey = buildIdempotencyKey(ctx, input.pageId, format, primaryAssetUrl)
   const existing = await findExistingByIdempotencyKey(payload, idempotencyKey)
   if (existing && existing.status === 'published' && existing.externalId) {
@@ -434,6 +449,17 @@ export const publishFacebookPost = async (args: {
   const pageAccessToken = await getPageAccessToken(payload, options, input.pageId)
   const scheduledSeconds = validateSchedule(input.scheduledPublishTime, format)
 
+  // Assets options from plugin config (opt-in; default is passthrough).
+  const assetsOptions =
+    (
+      options as unknown as {
+        assets?: { autoConvert?: boolean; preflight?: boolean; uploadCollection?: string }
+      }
+    ).assets ?? {}
+
+  // --- Image conversion: happens ONLY when building the outbound body ---
+  // The converted URL is used exclusively for the Facebook API request.
+  // It never touches idempotencyKey, primaryAssetUrl, or sourceHash.
   let externalId: string
   let raw: unknown
   switch (format) {
@@ -455,12 +481,21 @@ export const publishFacebookPost = async (args: {
       break
     }
     case 'PHOTO': {
+      // Resolve outbound image URL for the API body only.
+      const { url: outboundImageUrl } = await resolvePlatformImageUrl({
+        declaredFormat: input.declaredImageFormat,
+        imageUrl: input.imageUrl ?? '',
+        options: assetsOptions,
+        payload,
+        platform: 'facebook',
+      })
       const response = await publishSinglePhoto(
         payload,
         options,
         input,
         message,
         pageAccessToken,
+        outboundImageUrl,
         scheduledSeconds,
       )
       externalId = response.post_id ?? response.id
@@ -468,12 +503,30 @@ export const publishFacebookPost = async (args: {
       break
     }
     case 'PHOTO_MULTI': {
+      // Resolve each image URL for the API body; the idempotency key was
+      // derived from the ORIGINAL imageUrls[0] above.
+      if (!input.imageUrls || input.imageUrls.length < 2 || input.imageUrls.length > 10) {
+        throw new ValidationError('PHOTO_MULTI requires 2–10 entries in imageUrls')
+      }
+      const outboundImageUrls = await Promise.all(
+        input.imageUrls.map(async (url) => {
+          const { url: out } = await resolvePlatformImageUrl({
+            declaredFormat: input.declaredImageFormat,
+            imageUrl: url,
+            options: assetsOptions,
+            payload,
+            platform: 'facebook',
+          })
+          return out
+        }),
+      )
       const response = await publishMultiPhoto(
         payload,
         options,
         input,
         message,
         pageAccessToken,
+        outboundImageUrls,
         scheduledSeconds,
       )
       externalId = response.post_id ?? response.id
@@ -508,6 +561,8 @@ export const publishFacebookPost = async (args: {
   }
 
   const externalUrl = buildPermalink(externalId)
+
+  // sourceHash uses the ORIGINAL primaryAssetUrl — never the converted one.
   const sourceHash = sha256Hex(
     JSON.stringify({ format, message, pageId: input.pageId, primaryAssetUrl }),
   )
