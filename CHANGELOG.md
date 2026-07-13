@@ -17,6 +17,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 - **`format` field on `SocialImage`** and `SocialImageFormat` type union. Threaded through `coerceImages` (compose endpoint) and `normalizeImages` (standalone context) so adapters have access to declared format metadata.
 - **Pre-publish format validation in each adapter's `validate()` method.** When a declared format is disallowed and `autoConvert` is off, a validation error issue surfaces in the UI before the publish call.
 
+### Fixed
+
+- **Idempotency key divergence when `assets.autoConvert` is enabled (Pinterest, Instagram, Facebook).** Previously, each platform adapter resolved image URLs to their converted renditions before passing them into the publish function. This caused the `idempotencyKey` and `primaryAssetUrl` stored in the `social-posts` reservation row to be derived from the converted URL, while `buildPublicationIdentity` (the endpoint layer) derived them from the original URL. The mismatch produced orphaned `status: 'publishing'` reservation rows and duplicate published rows on retry, violating the idempotency invariant. Image conversion via `resolvePlatformImageUrl` now happens exclusively when constructing the outbound platform API request body, after the idempotency key, `primaryAssetUrl`, and `sourceHash` are locked to the original input URL. The converted URL is used only in the API request body field (`media_source.url` for Pinterest, `image_url` for Instagram, `url` for Facebook photos). GBP is unaffected because its idempotency key excludes the image URL. The `buildPublicationIdentity` utility and all key formula strings are unchanged.
+
 ## [0.9.0] - 2026-07-12
 
 ### Added
@@ -28,7 +32,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   - Native Payload Jobs `autoRun` (plugin registers the cron entry when `scheduling.autoRun.cron` is set).
   - External cron (AWS EventBridge / Vercel cron / GitHub Actions / etc.) hitting `/internal/jobs/sweep` and `/internal/jobs/run` with a pre-shared API key.
   - Long-running worker process calling `runQueuedSocialsJobs(payload)` directly.
-- **Scheduled publishing.** `POST /:platform/:sourceKind/:sourceId/publish` now accepts `scheduledAt` (ISO-8601 ≥60s in the future). The plugin snapshots the publish input into a `queued` `social-posts` row + queues the publish task with `waitUntil`. When the task fires, the source context is re-resolved and the adapter publishes the snapshot.
+- **Scheduled publishing.** `POST /:platform/:sourceKind/:sourceId/publish` now accepts `scheduledAt` (ISO-8601 >=60s in the future). The plugin snapshots the publish input into a `queued` `social-posts` row + queues the publish task with `waitUntil`. When the task fires, the source context is re-resolved and the adapter publishes the snapshot.
 - **Internal scheduler HTTP endpoints (API-key gated):**
   - `POST /internal/jobs/sweep`: sweep due posts and drain the queue
   - `POST /internal/jobs/run`: drain the queue only

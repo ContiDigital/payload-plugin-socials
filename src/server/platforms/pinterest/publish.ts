@@ -12,6 +12,7 @@ import {
   PINTEREST_TITLE_MAX,
   SOCIAL_POSTS_SLUG,
 } from '../../../constants.js'
+import { resolvePlatformImageUrl } from '../../assets/resolvePlatformImage.js'
 import { ValidationError } from '../../utilities/errors.js'
 import { sha256Hex } from '../../utilities/hash.js'
 import { pinterestJson } from './api.js'
@@ -38,6 +39,11 @@ import { uploadPinterestVideoFromUrl } from './videoUpload.js'
  *
  * NEVER hard-deletes a `social-posts` row — it's both audit AND idempotency
  * anchor. Cancellation flips `status: 'cancelled'`.
+ *
+ * Image conversion (assets.autoConvert) happens ONLY when constructing the
+ * outbound Pinterest API request body, AFTER the idempotency key and
+ * primaryAssetUrl are locked to the ORIGINAL input URL. The converted URL
+ * never touches the key, primaryAssetUrl, sourceHash, or the reservation row.
  */
 
 export type PinterestPublishInput = {
@@ -228,6 +234,9 @@ export const publishPinterestPin = async (args: {
   const altText = (input.altText?.trim() || preview.altText).slice(0, PINTEREST_ALT_TEXT_MAX)
   const link = input.link?.trim() || preview.link
   const mediaType = input.mediaType ?? 'IMAGE'
+
+  // Derive primaryAssetUrl and idempotencyKey from the ORIGINAL input URL.
+  // These must never be touched by format conversion.
   const imageUrl = input.imageUrl?.trim() || preview.defaultImageUrl
   const videoUrl = input.videoUrl?.trim() || ctx.videos?.[0]?.url || ''
   const coverImageUrl = input.coverImageUrl?.trim() || ctx.videos?.[0]?.coverImageUrl || imageUrl
@@ -249,6 +258,7 @@ export const publishPinterestPin = async (args: {
     throw new ValidationError('Pin title is required')
   }
 
+  // Lock the idempotency key to the ORIGINAL primaryAssetUrl before any conversion.
   const idempotencyKey = buildIdempotencyKey(ctx, input.boardId, primaryAssetUrl)
   const existing = await findExistingByIdempotencyKey(payload, idempotencyKey)
 
@@ -287,6 +297,22 @@ export const publishPinterestPin = async (args: {
         }))
       : undefined
 
+  // Resolve the outbound image URL for the API request body ONLY.
+  // The converted URL must never touch the key, primaryAssetUrl, sourceHash,
+  // or the reservation row above.
+  let outboundImageUrl = imageUrl
+  if (mediaType === 'IMAGE' && imageUrl) {
+    const imgMeta = ctx.images.find((img) => img.url === imageUrl)
+    const resolved = await resolvePlatformImageUrl({
+      declaredFormat: imgMeta?.format,
+      imageUrl,
+      options,
+      payload,
+      platform: 'pinterest',
+    })
+    outboundImageUrl = resolved.url
+  }
+
   const pin = await createPin(payload, options, {
     alt_text: altText,
     board_id: input.boardId,
@@ -299,7 +325,7 @@ export const publishPinterestPin = async (args: {
             media_id: mediaId ?? '',
             source_type: 'video_id',
           }
-        : { source_type: 'image_url', url: imageUrl },
+        : { source_type: 'image_url', url: outboundImageUrl },
     title,
   })
 

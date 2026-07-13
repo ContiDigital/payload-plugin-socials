@@ -18,7 +18,6 @@ import {
   PINTEREST_TITLE_MAX,
 } from '../../../constants.js'
 import { PLATFORM_IMAGE_CONSTRAINTS } from '../../assets/imagePreflight.js'
-import { resolvePlatformImageUrl } from '../../assets/resolvePlatformImage.js'
 import { getCredentials, recordConnectionError } from '../../services/connectionService.js'
 import { ValidationError } from '../../utilities/errors.js'
 import { refreshPinterestAccessToken } from './api.js'
@@ -224,10 +223,11 @@ export const createPinterestAdapter = (
         throw new ValidationError(`Pinterest publish input invalid: ${errors}`)
       }
       try {
-        const resolvedInput = await resolvePinterestImages(args)
+        // Pass the ORIGINAL input — image conversion happens inside publishPinterestPin,
+        // only when constructing the outbound API request body, after keys are locked.
         const result = await publishPinterestPin({
           ctx: args.ctx,
-          input: resolvedInput,
+          input: args.input,
           options: args.options,
           payload: args.payload,
           req: args.req,
@@ -255,33 +255,4 @@ export const createPinterestAdapter = (
       })
     },
   }
-}
-
-/**
- * Resolve image URL for the Pinterest publish input through the platform
- * image format safety layer.
- */
-const resolvePinterestImages = async (
-  args: PublishArgs<PinterestPublishInput>,
-): Promise<PinterestPublishInput> => {
-  const { ctx, input, options, payload } = args
-  const mediaType = input.mediaType ?? 'IMAGE'
-  const resolved = { ...input }
-
-  if (mediaType === 'IMAGE') {
-    const imageUrl = input.imageUrl?.trim() || ctx.images[0]?.url || ''
-    if (imageUrl) {
-      const imgMeta = ctx.images.find((img) => img.url === imageUrl)
-      const result = await resolvePlatformImageUrl({
-        declaredFormat: imgMeta?.format,
-        imageUrl,
-        options,
-        payload,
-        platform: 'pinterest',
-      })
-      resolved.imageUrl = result.url
-    }
-  }
-
-  return resolved
 }

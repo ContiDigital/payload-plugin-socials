@@ -12,7 +12,6 @@ import type {
 } from '../../../types/index.js'
 
 import { PLATFORM_IMAGE_CONSTRAINTS } from '../../assets/imagePreflight.js'
-import { resolvePlatformImageUrl } from '../../assets/resolvePlatformImage.js'
 import { getCredentials, recordConnectionError } from '../../services/connectionService.js'
 import { ValidationError } from '../../utilities/errors.js'
 import { refreshMetaAccessToken } from '../_meta/api.js'
@@ -215,10 +214,11 @@ export const createFacebookAdapter = (
         throw new ValidationError(`Facebook publish input invalid: ${errors}`)
       }
       try {
-        const resolvedInput = await resolveFacebookImages(args)
+        // Pass the ORIGINAL input — image conversion happens inside publishFacebookPost,
+        // only when constructing the outbound API request body, after keys are locked.
         const result = await publishFacebookPost({
           ctx: args.ctx,
-          input: resolvedInput,
+          input: args.input,
           options: args.options,
           payload: args.payload,
           req: args.req,
@@ -245,42 +245,4 @@ export const createFacebookAdapter = (
       })
     },
   }
-}
-
-/**
- * Resolve all image URLs in the Facebook publish input through the platform
- * image format safety layer.
- */
-const resolveFacebookImages = async (
-  args: PublishArgs<FacebookPublishInput>,
-): Promise<FacebookPublishInput> => {
-  const { input, options, payload } = args
-  const format = input.format ?? 'LINK'
-  const resolved = { ...input }
-
-  if (format === 'PHOTO' && input.imageUrl) {
-    const result = await resolvePlatformImageUrl({
-      imageUrl: input.imageUrl,
-      options,
-      payload,
-      platform: 'facebook',
-    })
-    resolved.imageUrl = result.url
-  }
-
-  if (format === 'PHOTO_MULTI' && input.imageUrls) {
-    resolved.imageUrls = await Promise.all(
-      input.imageUrls.map(async (url) => {
-        const result = await resolvePlatformImageUrl({
-          imageUrl: url,
-          options,
-          payload,
-          platform: 'facebook',
-        })
-        return result.url
-      }),
-    )
-  }
-
-  return resolved
 }
