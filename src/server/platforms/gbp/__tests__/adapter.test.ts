@@ -33,6 +33,7 @@ import { deleteGbpLocalPost, publishGbpLocalPost } from '../publish.js'
 
 const buildOptions = (serviceAccount?: { clientEmail: string }): NormalizedPluginOptions =>
   ({
+    assets: { autoConvert: false, jpegQuality: 82, preflight: true },
     copyOverrides: {},
     platforms: { gbp: { enabled: true, serviceAccount } },
   }) as unknown as NormalizedPluginOptions

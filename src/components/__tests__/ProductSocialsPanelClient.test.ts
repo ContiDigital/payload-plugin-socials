@@ -1,12 +1,16 @@
 import { describe, expect, it } from 'vitest'
 
-import type { SocialDraft } from '../../types/index.js'
-import type { ComposerState } from '../socialComposerModel.js'
+import type { SocialDraft, SocialDraftMedia } from '../../types/index.js'
+import type { ComposerState, StandaloneComposerState } from '../socialComposerModel.js'
 
 import {
+  acceptedMediaTypes,
   buildInitialComposerState,
+  buildStandaloneInitialState,
   compileComposerInput,
+  compileStandalonePublishBody,
   getSelectedAssets,
+  pruneSelectedMedia,
   supportsMultipleMedia,
 } from '../socialComposerModel.js'
 
@@ -46,6 +50,122 @@ const state = (over: Partial<ComposerState> = {}): ComposerState => ({
   videoTitle: 'Video title',
   ...over,
 })
+
+// ---------------------------------------------------------------------------
+// acceptedMediaTypes
+// ---------------------------------------------------------------------------
+
+describe('acceptedMediaTypes', () => {
+  it('pinterest IMAGE accepts only image', () => {
+    expect(acceptedMediaTypes('pinterest', 'IMAGE')).toEqual(['image'])
+  })
+
+  it('pinterest VIDEO accepts only video', () => {
+    expect(acceptedMediaTypes('pinterest', 'VIDEO')).toEqual(['video'])
+  })
+
+  it('instagram IMAGE accepts only image', () => {
+    expect(acceptedMediaTypes('instagram', 'IMAGE')).toEqual(['image'])
+  })
+
+  it('instagram REELS accepts only video', () => {
+    expect(acceptedMediaTypes('instagram', 'REELS')).toEqual(['video'])
+  })
+
+  it('instagram STORIES accepts image and video', () => {
+    expect(acceptedMediaTypes('instagram', 'STORIES')).toEqual(['image', 'video'])
+  })
+
+  it('instagram CAROUSEL accepts image and video', () => {
+    expect(acceptedMediaTypes('instagram', 'CAROUSEL')).toEqual(['image', 'video'])
+  })
+
+  it('facebook LINK accepts only image', () => {
+    expect(acceptedMediaTypes('facebook', 'LINK')).toEqual(['image'])
+  })
+
+  it('facebook PHOTO accepts only image', () => {
+    expect(acceptedMediaTypes('facebook', 'PHOTO')).toEqual(['image'])
+  })
+
+  it('facebook PHOTO_MULTI accepts only image', () => {
+    expect(acceptedMediaTypes('facebook', 'PHOTO_MULTI')).toEqual(['image'])
+  })
+
+  it('facebook VIDEO accepts only video', () => {
+    expect(acceptedMediaTypes('facebook', 'VIDEO')).toEqual(['video'])
+  })
+
+  it('gbp STANDARD accepts only image', () => {
+    expect(acceptedMediaTypes('gbp', 'STANDARD')).toEqual(['image'])
+  })
+
+  it('gbp EVENT accepts only image', () => {
+    expect(acceptedMediaTypes('gbp', 'EVENT')).toEqual(['image'])
+  })
+
+  it('gbp OFFER accepts only image', () => {
+    expect(acceptedMediaTypes('gbp', 'OFFER')).toEqual(['image'])
+  })
+
+  it('gbp ALERT accepts only image', () => {
+    expect(acceptedMediaTypes('gbp', 'ALERT')).toEqual(['image'])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// pruneSelectedMedia
+// ---------------------------------------------------------------------------
+
+describe('pruneSelectedMedia', () => {
+  it('keeps valid image selections when changing to IMAGE format', () => {
+    const { pruned, removed } = pruneSelectedMedia(
+      ['https://cdn.test/front.jpg', 'https://cdn.test/video.mp4'],
+      draft.media,
+      'pinterest',
+      'IMAGE',
+    )
+    expect(pruned).toEqual(['https://cdn.test/front.jpg'])
+    expect(removed).toEqual(['https://cdn.test/video.mp4'])
+  })
+
+  it('keeps valid video selections when changing to VIDEO format', () => {
+    const { pruned, removed } = pruneSelectedMedia(
+      ['https://cdn.test/front.jpg', 'https://cdn.test/video.mp4'],
+      draft.media,
+      'pinterest',
+      'VIDEO',
+    )
+    expect(pruned).toEqual(['https://cdn.test/video.mp4'])
+    expect(removed).toEqual(['https://cdn.test/front.jpg'])
+  })
+
+  it('keeps both image and video for CAROUSEL', () => {
+    const { pruned, removed } = pruneSelectedMedia(
+      ['https://cdn.test/front.jpg', 'https://cdn.test/video.mp4'],
+      draft.media,
+      'instagram',
+      'CAROUSEL',
+    )
+    expect(pruned).toEqual(['https://cdn.test/front.jpg', 'https://cdn.test/video.mp4'])
+    expect(removed).toEqual([])
+  })
+
+  it('removes all when switching to REELS and only images selected', () => {
+    const { pruned, removed } = pruneSelectedMedia(
+      ['https://cdn.test/front.jpg', 'https://cdn.test/detail.jpg'],
+      draft.media,
+      'instagram',
+      'REELS',
+    )
+    expect(pruned).toEqual([])
+    expect(removed).toEqual(['https://cdn.test/front.jpg', 'https://cdn.test/detail.jpg'])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// compileComposerInput (updated behavior)
+// ---------------------------------------------------------------------------
 
 describe('compileComposerInput', () => {
   it('initializes copy and chooses video when Pinterest has no image', () => {
@@ -159,7 +279,17 @@ describe('compileComposerInput', () => {
     ['PHOTO', { imageUrl: 'https://cdn.test/front.jpg' }],
     ['VIDEO', { videoTitle: 'Video title', videoUrl: 'https://cdn.test/video.mp4' }],
   ])('compiles Facebook %s media', (format, expected) => {
-    expect(compileComposerInput('facebook', state({ format }), draft)).toMatchObject(expected)
+    expect(
+      compileComposerInput(
+        'facebook',
+        state({
+          format,
+          selectedMedia:
+            format === 'VIDEO' ? ['https://cdn.test/video.mp4'] : ['https://cdn.test/front.jpg'],
+        }),
+        draft,
+      ),
+    ).toMatchObject(expected)
   })
 
   it('compiles GBP event dates and times into the LocalPosts shape', () => {
@@ -220,5 +350,165 @@ describe('compileComposerInput', () => {
     expect(supportsMultipleMedia('instagram', 'CAROUSEL')).toBe(true)
     expect(supportsMultipleMedia('facebook', 'PHOTO_MULTI')).toBe(true)
     expect(supportsMultipleMedia('pinterest', 'IMAGE')).toBe(false)
+  })
+
+  // --- New tests: strict media selection ---
+
+  it('does not fall back to draft media when no selected asset matches the format', () => {
+    // Selecting only images, but format requires video
+    const result = compileComposerInput(
+      'pinterest',
+      state({ format: 'VIDEO', selectedMedia: ['https://cdn.test/front.jpg'] }),
+      draft,
+    )
+    // No video is selected and the draft has other video assets, but the model
+    // should NOT silently fall back. Since 'front.jpg' is an image and format is
+    // VIDEO, the selected asset is not accepted. It should auto-select only if
+    // there is exactly one accepted asset in the draft.
+    expect(result.videoUrl).toBe('https://cdn.test/video.mp4')
+  })
+
+  it('auto-selects the single accepted draft asset when nothing is selected', () => {
+    const singleImageDraft: SocialDraft = {
+      ...draft,
+      media: [{ type: 'image', url: 'https://cdn.test/only.jpg' }],
+    }
+    const result = compileComposerInput(
+      'pinterest',
+      state({ format: 'IMAGE', selectedMedia: [] }),
+      singleImageDraft,
+    )
+    expect(result.imageUrl).toBe('https://cdn.test/only.jpg')
+  })
+
+  it('does not auto-select when multiple accepted assets exist and nothing is selected', () => {
+    // Two images available, nothing selected - should not auto-select
+    const result = compileComposerInput(
+      'pinterest',
+      state({ format: 'IMAGE', selectedMedia: [] }),
+      draft,
+    )
+    // Both 'front.jpg' and 'detail.jpg' are images, so auto-select does not kick in
+    expect(result.imageUrl).toBeUndefined()
+  })
+
+  // --- New tests: title prepend ---
+
+  it('prepends title to instagram caption when title is set', () => {
+    const result = compileComposerInput(
+      'instagram',
+      state({ format: 'IMAGE', title: 'My Title' }),
+      draft,
+    )
+    expect(result.caption).toBe('My Title\n\nComposed copy')
+  })
+
+  it('prepends title to facebook message when title is set', () => {
+    const result = compileComposerInput(
+      'facebook',
+      state({ format: 'LINK', title: 'FB Title' }),
+      draft,
+    )
+    expect(result.message).toBe('FB Title\n\nComposed copy')
+  })
+
+  it('does not prepend title when title is empty', () => {
+    const result = compileComposerInput('instagram', state({ format: 'IMAGE', title: '' }), draft)
+    expect(result.caption).toBe('Composed copy')
+  })
+
+  it('does not prepend title for pinterest (uses title field directly)', () => {
+    const result = compileComposerInput(
+      'pinterest',
+      state({ format: 'IMAGE', title: 'Pin title' }),
+      draft,
+    )
+    expect(result.title).toBe('Pin title')
+    expect(result.description).toBe('Composed copy')
+  })
+
+  // --- Format field threading ---
+
+  it('threads asset format to pinterest output', () => {
+    const draftWithFormat: SocialDraft = {
+      ...draft,
+      media: [{ type: 'image', format: 'jpeg', url: 'https://cdn.test/front.jpg' }],
+    }
+    const result = compileComposerInput(
+      'pinterest',
+      state({ format: 'IMAGE', selectedMedia: ['https://cdn.test/front.jpg'] }),
+      draftWithFormat,
+    )
+    expect(result.format).toBe('jpeg')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Standalone composer model
+// ---------------------------------------------------------------------------
+
+describe('buildStandaloneInitialState', () => {
+  it('returns an empty state with no channels selected', () => {
+    const initial = buildStandaloneInitialState(['pinterest', 'instagram'])
+    expect(initial.channels).toEqual([])
+    expect(initial.title).toBe('')
+    expect(initial.media).toEqual([])
+  })
+})
+
+describe('compileStandalonePublishBody', () => {
+  const media: SocialDraftMedia[] = [
+    { type: 'image', height: 600, url: 'https://cdn.test/img.jpg', width: 800 },
+    { type: 'video', url: 'https://cdn.test/vid.mp4' },
+  ]
+
+  const standaloneState: StandaloneComposerState = {
+    body: 'Hello world',
+    channels: ['pinterest', 'instagram'],
+    destinations: { instagram: 'ig-user-1', pinterest: 'board-1' },
+    link: 'https://example.test',
+    media,
+    title: 'Test Post',
+  }
+
+  it('compiles content block with images', () => {
+    const result = compileStandalonePublishBody(standaloneState, {})
+    expect(result.content.title).toBe('Test Post')
+    expect(result.content.body).toBe('Hello world')
+    expect(result.content.link).toBe('https://example.test')
+    expect(result.content.images).toEqual([
+      { format: undefined, height: 600, url: 'https://cdn.test/img.jpg', width: 800 },
+    ])
+  })
+
+  it('generates per-platform targets with correct destination ids', () => {
+    const result = compileStandalonePublishBody(standaloneState, {})
+    expect(result.targets).toHaveLength(2)
+    const pinterestTarget = result.targets.find((t) => t.platform === 'pinterest')
+    expect(pinterestTarget?.input.boardId).toBe('board-1')
+    const igTarget = result.targets.find((t) => t.platform === 'instagram')
+    expect(igTarget?.input.igUserId).toBe('ig-user-1')
+  })
+
+  it('uses per-channel format overrides', () => {
+    const result = compileStandalonePublishBody(standaloneState, { pinterest: 'VIDEO' })
+    const pinterestTarget = result.targets.find((t) => t.platform === 'pinterest')
+    expect(pinterestTarget?.input.mediaType).toBe('VIDEO')
+    expect(pinterestTarget?.input.videoUrl).toBe('https://cdn.test/vid.mp4')
+  })
+
+  it('omits optional content fields when empty', () => {
+    const emptyState: StandaloneComposerState = {
+      body: '',
+      channels: ['pinterest'],
+      destinations: { pinterest: 'b1' },
+      link: '',
+      media: [],
+      title: 'Title only',
+    }
+    const result = compileStandalonePublishBody(emptyState, {})
+    expect(result.content.body).toBeUndefined()
+    expect(result.content.link).toBeUndefined()
+    expect(result.content.images).toBeUndefined()
   })
 })

@@ -7,9 +7,11 @@ import type {
   PreviewResult,
   PublishArgs,
   PublishedRef,
+  SocialImageFormat,
   ValidationResult,
 } from '../../../types/index.js'
 
+import { PLATFORM_IMAGE_CONSTRAINTS } from '../../assets/imagePreflight.js'
 import { resolveConfiguredText } from '../../copy/resolveConfiguredCopy.js'
 import { getCredentials, recordConnectionError } from '../../services/connectionService.js'
 import { ValidationError } from '../../utilities/errors.js'
@@ -36,6 +38,33 @@ const CAPABILITIES: PlatformCapabilities = {
   serviceAccount: true,
   stories: false,
   video: true,
+}
+
+/**
+ * Check whether a declared format is disallowed for this platform.
+ * Used in validate() to surface a pre-publish error when autoConvert is off.
+ */
+const checkFormatIssue = (
+  format: SocialImageFormat | undefined,
+  options: NormalizedPluginOptions,
+): string | undefined => {
+  if (!format) {
+    return undefined
+  }
+  if (!options.assets.preflight) {
+    return undefined
+  }
+  const allowed = PLATFORM_IMAGE_CONSTRAINTS.facebook.formats as readonly string[]
+  if (allowed.includes(format)) {
+    return undefined
+  }
+  if (options.assets.autoConvert) {
+    return undefined
+  }
+  return (
+    `Image format "${format}" is not accepted by Facebook (allowed: ${allowed.join(', ')}). ` +
+    `Configure a JPEG imageSize on your upload collection or enable assets.autoConvert.`
+  )
 }
 
 export const createFacebookAdapter = (
@@ -161,6 +190,16 @@ export const createFacebookAdapter = (
           })
         }
       }
+
+      // Image format pre-publish check.
+      if (format === 'PHOTO' && input?.imageUrl) {
+        const imgMeta = ctx.images.find((img) => img.url === input.imageUrl)
+        const formatIssue = checkFormatIssue(imgMeta?.format, args.options)
+        if (formatIssue) {
+          issues.push({ field: 'imageUrl', message: formatIssue, severity: 'error' })
+        }
+      }
+
       const hasError = issues.some((i) => i.severity === 'error')
       return { issues, ok: !hasError }
     },
@@ -179,6 +218,8 @@ export const createFacebookAdapter = (
         throw new ValidationError(`Facebook publish input invalid: ${errors}`)
       }
       try {
+        // Pass the ORIGINAL input — image conversion happens inside publishFacebookPost,
+        // only when constructing the outbound API request body, after keys are locked.
         const result = await publishFacebookPost({
           ctx: args.ctx,
           input: args.input,

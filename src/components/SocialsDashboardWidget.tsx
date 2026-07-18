@@ -1,6 +1,6 @@
 'use client'
 
-import { useConfig } from '@payloadcms/ui'
+import { toast, useConfig } from '@payloadcms/ui'
 import React, { useCallback, useEffect, useState } from 'react'
 
 import type { ConnectionState } from '../types/index.js'
@@ -28,13 +28,13 @@ export const SocialsDashboardWidget: React.FC<Props> = ({ enabledPlatforms }) =>
   const endpointBase = `${apiRoute.replace(/\/$/, '')}${basePath}`
 
   const [connections, setConnections] = useState<ConnectionMap>({})
-  const [error, setError] = useState<string>()
   const [loading, setLoading] = useState(true)
   const [pending, setPending] = useState<PlatformId>()
+  // Two-step confirm: when set, shows a "Confirm disconnect" button for that platform
+  const [confirmingDisconnect, setConfirmingDisconnect] = useState<PlatformId>()
 
   const loadConnections = useCallback(async () => {
     setLoading(true)
-    setError(undefined)
     try {
       const response = await fetch(`${endpointBase}/connections`)
       const body = (await response.json()) as { connections?: ConnectionMap; error?: string }
@@ -43,7 +43,7 @@ export const SocialsDashboardWidget: React.FC<Props> = ({ enabledPlatforms }) =>
       }
       setConnections(body.connections ?? {})
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : String(caught))
+      toast.error(caught instanceof Error ? caught.message : String(caught))
     } finally {
       setLoading(false)
     }
@@ -55,7 +55,6 @@ export const SocialsDashboardWidget: React.FC<Props> = ({ enabledPlatforms }) =>
 
   const connect = async (platform: PlatformId): Promise<void> => {
     setPending(platform)
-    setError(undefined)
     try {
       const response = await fetch(`${endpointBase}/${platform}/oauth/start`, { method: 'POST' })
       const body = (await response.json()) as { error?: string; url?: string }
@@ -64,26 +63,24 @@ export const SocialsDashboardWidget: React.FC<Props> = ({ enabledPlatforms }) =>
       }
       window.location.assign(body.url)
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : String(caught))
+      toast.error(caught instanceof Error ? caught.message : String(caught))
       setPending(undefined)
     }
   }
 
   const disconnect = async (platform: PlatformId): Promise<void> => {
-    if (!window.confirm(`Disconnect ${PLATFORM_LABELS[platform]}?`)) {
-      return
-    }
     setPending(platform)
-    setError(undefined)
+    setConfirmingDisconnect(undefined)
     try {
       const response = await fetch(`${endpointBase}/${platform}/disconnect`, { method: 'POST' })
       const body = (await response.json()) as { error?: string }
       if (!response.ok) {
         throw new Error(body.error ?? `Disconnect failed (${response.status})`)
       }
+      toast.success(`${PLATFORM_LABELS[platform]} disconnected.`)
       await loadConnections()
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : String(caught))
+      toast.error(caught instanceof Error ? caught.message : String(caught))
     } finally {
       setPending(undefined)
     }
@@ -95,11 +92,6 @@ export const SocialsDashboardWidget: React.FC<Props> = ({ enabledPlatforms }) =>
       <p style={styles.muted}>
         Tokens remain server-side and encrypted. OAuth redirects open in this tab.
       </p>
-      {error && (
-        <p role="alert" style={styles.error}>
-          {error}
-        </p>
-      )}
       {loading ? (
         <p style={styles.muted}>Loading connection status…</p>
       ) : enabled.size === 0 ? (
@@ -128,21 +120,42 @@ export const SocialsDashboardWidget: React.FC<Props> = ({ enabledPlatforms }) =>
                       : (state?.lastError ?? 'Not connected')}
                   </small>
                 </span>
-                <button
-                  disabled={pending === id || state?.managedByConfig === true}
-                  onClick={() => {
-                    void (connected ? disconnect(id) : connect(id))
-                  }}
-                  type="button"
-                >
-                  {pending === id
-                    ? 'Working…'
-                    : state?.managedByConfig
-                      ? 'Configured'
-                      : connected
-                        ? 'Disconnect'
-                        : 'Connect'}
-                </button>
+                {confirmingDisconnect === id ? (
+                  <>
+                    <button
+                      onClick={() => {
+                        void disconnect(id)
+                      }}
+                      style={{ color: 'var(--theme-error-500)' }}
+                      type="button"
+                    >
+                      Confirm disconnect
+                    </button>
+                    <button onClick={() => setConfirmingDisconnect(undefined)} type="button">
+                      Cancel
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    disabled={pending === id || state?.managedByConfig === true}
+                    onClick={() => {
+                      if (connected) {
+                        setConfirmingDisconnect(id)
+                      } else {
+                        void connect(id)
+                      }
+                    }}
+                    type="button"
+                  >
+                    {pending === id
+                      ? 'Working…'
+                      : state?.managedByConfig
+                        ? 'Configured'
+                        : connected
+                          ? 'Disconnect'
+                          : 'Connect'}
+                  </button>
+                )}
               </li>
             )
           })}
@@ -161,7 +174,6 @@ const styles: Record<string, React.CSSProperties> = {
     padding: '1rem',
   },
   dot: { borderRadius: '50%', display: 'inline-block', height: 8, width: 8 },
-  error: { color: 'var(--theme-error-500)' },
   list: { display: 'grid', gap: '0.5rem', listStyle: 'none', padding: 0 },
   muted: { color: 'var(--theme-elevation-500)', marginTop: 0 },
   row: { alignItems: 'center', display: 'flex', gap: '0.75rem', paddingBlock: '0.35rem' },

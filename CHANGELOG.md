@@ -10,6 +10,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ### Added
 
+- **Standalone composer UI.** The `/admin/socials` route now renders a two-tab layout (Compose | Connections). The Compose tab hosts a standalone multi-channel composer that posts inline content to every selected channel through `POST {basePath}/compose/publish`. Per-channel destination pickers, format selects, and result feedback (success with external link, or error) are included. The existing Connections widget lives on the second tab.
+- **Media library browser.** An "Add media" row under the composer media grid uses `useListDrawer` from `@payloadcms/ui` to open any upload-enabled collection. On select, the chosen document is fetched via the REST API and appended as a media asset. When the source document is webp or avif and has jpeg sizes, the largest jpeg size URL is preferred.
+- **Add media by URL.** An inline URL input with a type select (image/video) appends an asset to the composer media list from any public URL.
+- **Title input for Instagram and Facebook.** An optional "Title (first line)" input prepends the title plus a blank line to the caption or message at compile time. Pinterest retains its existing dedicated title field.
+- **`acceptedMediaTypes` helper.** Pure function returning the accepted media types (`image`, `video`, or both) for any `(platform, format)` combination. Used by the UI to disable and filter assets, and by `compileComposerInput` to enforce strict selection.
+- **Format-to-media coherence.** Assets whose type does not match the current format render disabled (dimmed, not clickable, tooltip "Not available for this format"). On format change, incompatible selected media is pruned and a toast reports what was removed.
+- **`MediaAssetFormat` field** on `SocialDraftMedia` (optional `format` string from mimeType). Threaded through `compileComposerInput` output so a downstream image-format-safety preflight can use it.
+- **`StandaloneComposerState` and `compileStandalonePublishBody`** in the model layer: pure functions for the standalone composer's state shape and its publish body compilation.
+- **`SocialsAdminViewClient`** client component exported from `payload-plugin-socials/client`.
+
+### Changed
+
+- **Platform tabs redesigned.** The right-aligned text pills are replaced with a full-width segmented control directly under the panel header. Equal-width buttons, strong active state, and a per-platform brand accent (3px bottom border: Pinterest #e60023, Instagram #e1306c, Facebook #1877f2, GBP #4285f4) on the active segment. Retains `role=tablist` semantics and keyboard support.
+- **`compileComposerInput` strict media selection.** The silent wrong-type fallback is removed. Only selected assets whose type matches the format are used. If nothing is selected and the draft has exactly one accepted asset, that one is auto-used. Otherwise validation reports the missing media instead of silently picking the wrong type.
+- **Feedback uses toast.** Inline error/success paragraphs and `window.confirm`/`window.alert` in the composer and `SocialsDashboardWidget` are replaced with `toast` from `@payloadcms/ui`. The disconnect action uses a two-step confirm button (click "Disconnect", then "Confirm disconnect") instead of `window.confirm`.
+- **`SocialsAdminView`** now renders a client island (`SocialsAdminViewClient`) with two tabs instead of the connections widget alone.
+- **`SocialPublishPanelClient`** accepts a `mode` prop (`'source'` default, or `'standalone'`). In standalone mode the component renders the multi-channel composer without `useDocumentInfo`.
 - **Config-first copy transformations (`transformations` option).** Operators can now declare per-field copy transforms in the plugin config, keyed by source kind (and an optional `'*'` wildcard). Each value is either a `{{ variable | filter }}` template string rendered through the existing interpolation engine, or a function that receives the `SocialSourceContext` directly. The new `transformations` option covers all seven canonical copy fields: `pinterestTitle`, `pinterestDescription`, `pinterestAltText`, `pinterestHashtags`, `instagramCaption`, `facebookMessage`, and `gbpSummary`. It is a higher-precedence, source-kind-aware superset of the existing `copyOverrides` option; `copyOverrides` continues to work unchanged and is still the right choice for simple global function overrides. The precedence chain is: kind-specific transform, then wildcard transform, then `copyOverrides`, then the built-in default.
 
 ## [0.9.0] - 2026-07-12
@@ -23,7 +40,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   - Native Payload Jobs `autoRun` (plugin registers the cron entry when `scheduling.autoRun.cron` is set).
   - External cron (AWS EventBridge / Vercel cron / GitHub Actions / etc.) hitting `/internal/jobs/sweep` and `/internal/jobs/run` with a pre-shared API key.
   - Long-running worker process calling `runQueuedSocialsJobs(payload)` directly.
-- **Scheduled publishing.** `POST /:platform/:sourceKind/:sourceId/publish` now accepts `scheduledAt` (ISO-8601 ≥60s in the future). The plugin snapshots the publish input into a `queued` `social-posts` row + queues the publish task with `waitUntil`. When the task fires, the source context is re-resolved and the adapter publishes the snapshot.
+- **Scheduled publishing.** `POST /:platform/:sourceKind/:sourceId/publish` now accepts `scheduledAt` (ISO-8601 >=60s in the future). The plugin snapshots the publish input into a `queued` `social-posts` row + queues the publish task with `waitUntil`. When the task fires, the source context is re-resolved and the adapter publishes the snapshot.
 - **Internal scheduler HTTP endpoints (API-key gated):**
   - `POST /internal/jobs/sweep`: sweep due posts and drain the queue
   - `POST /internal/jobs/run`: drain the queue only
