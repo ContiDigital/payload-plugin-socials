@@ -107,10 +107,14 @@ export interface SocialSourceContext {
   videos?: SocialVideo[]
 }
 
+export type MediaAssetFormat = string
+
 export type SocialDraftMedia = {
   altText?: string
   coverImageUrl?: string
   durationSeconds?: number
+  /** Image format from mimeType (e.g. "jpeg", "png", "webp"). */
+  format?: MediaAssetFormat
   height?: number
   role?: SocialImageRole
   type: 'image' | 'video'
@@ -552,7 +556,8 @@ export type SocialsAssetsConfig = {
 //     calls them in a loop. Useful for self-hosted ECS deployments.
 //
 //   - **Hybrid**: nothing precludes mixing — e.g. autoRun for the sweep,
-//     external cron for insights/connection refresh.
+//     external cron from a backup region as a safety net, plus an admin
+//     "Sweep now" button that hits `/internal/jobs/sweep` for incident response.
 // ---------------------------------------------------------------------------
 
 export type SocialsAutoRunConfig = {

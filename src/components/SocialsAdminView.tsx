@@ -4,12 +4,12 @@ import { DefaultTemplate } from '@payloadcms/next/templates'
 import { Gutter } from '@payloadcms/ui'
 import React from 'react'
 
-import { SocialsDashboardWidget } from './SocialsDashboardWidget.js'
+import { SocialsAdminViewClient } from './SocialsAdminViewClient.js'
 
 /**
  * Server-rendered shell for the `/admin/socials` route. The header bits use
  * Payload's `DefaultTemplate` so the page feels native; the content is a
- * client island.
+ * client island with two tabs: Compose and Connections.
  */
 export const SocialsAdminView: React.FC<{ title?: string } & AdminViewServerProps> = ({
   initPageResult,
@@ -38,10 +38,10 @@ export const SocialsAdminView: React.FC<{ title?: string } & AdminViewServerProp
         <header style={{ marginBottom: '1rem' }}>
           <h1>{title}</h1>
           <p style={{ color: 'var(--theme-elevation-500)' }}>
-            Multi-platform organic publishing. Connect platforms and review connection health here.
+            Multi-platform organic publishing. Compose posts or manage connections.
           </p>
         </header>
-        <SocialsDashboardWidget enabledPlatforms={enabledPlatforms} />
+        <SocialsAdminViewClient enabledPlatforms={enabledPlatforms} />
       </Gutter>
     </DefaultTemplate>
   )

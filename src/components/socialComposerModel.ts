@@ -1,6 +1,8 @@
 import type { PlatformId } from '../constants.js'
 import type { PreviewResult, SocialDraft, SocialDraftMedia } from '../types/index.js'
 
+export type MediaType = 'image' | 'video'
+
 export type ComposerState = {
   alertType: '' | 'COVID_19'
   altText: string
@@ -29,6 +31,67 @@ const formatDefaults: Record<PlatformId, string> = {
   gbp: 'STANDARD',
   instagram: 'IMAGE',
   pinterest: 'IMAGE',
+}
+
+/**
+ * Returns the accepted media types for a given platform and format combination.
+ * Used to filter which assets are selectable in the composer and to validate
+ * that selected media matches the format requirements.
+ */
+export const acceptedMediaTypes = (platform: PlatformId, format: string): MediaType[] => {
+  if (platform === 'pinterest') {
+    if (format === 'VIDEO') {
+      return ['video']
+    }
+    return ['image']
+  }
+  if (platform === 'instagram') {
+    if (format === 'IMAGE') {
+      return ['image']
+    }
+    if (format === 'REELS') {
+      return ['video']
+    }
+    return ['image', 'video'] // STORIES, CAROUSEL
+  }
+  if (platform === 'facebook') {
+    if (format === 'LINK') {
+      return ['image']
+    } // optional, but only image when present
+    if (format === 'PHOTO' || format === 'PHOTO_MULTI') {
+      return ['image']
+    }
+    if (format === 'VIDEO') {
+      return ['video']
+    }
+    return ['image']
+  }
+  // GBP: all formats use images only
+  return ['image']
+}
+
+/**
+ * Prune selected media URLs whose asset type is no longer accepted for the
+ * current format. Returns the pruned list and any removed URLs.
+ */
+export const pruneSelectedMedia = (
+  selectedMedia: string[],
+  draftMedia: SocialDraftMedia[],
+  platform: PlatformId,
+  format: string,
+): { pruned: string[]; removed: string[] } => {
+  const accepted = acceptedMediaTypes(platform, format)
+  const pruned: string[] = []
+  const removed: string[] = []
+  for (const url of selectedMedia) {
+    const asset = draftMedia.find((m) => m.url === url)
+    if (asset && accepted.includes(asset.type)) {
+      pruned.push(url)
+    } else {
+      removed.push(url)
+    }
+  }
+  return { pruned, removed }
 }
 
 export const buildInitialComposerState = (
@@ -80,18 +143,42 @@ const dateTimeParts = (value: string) => {
   }
 }
 
+/**
+ * Compile the composer state into a platform-specific publish input.
+ *
+ * Media selection rules (strict, no silent fallback):
+ * - Only assets whose type matches `acceptedMediaTypes(platform, format)` are used.
+ * - If the user has selected accepted assets, use those only.
+ * - If no assets are selected and the draft has exactly one accepted asset,
+ *   auto-use that one for convenience.
+ * - Otherwise no media is populated; validation will report it missing.
+ *
+ * Title prepend: when `state.title` is set and the platform is instagram or
+ * facebook, it becomes the first line of the caption/message.
+ */
 export const compileComposerInput = (
   platform: PlatformId,
   state: ComposerState,
   draft: SocialDraft,
 ): Record<string, unknown> => {
-  const assets = getSelectedAssets(state, draft)
-  const firstImage =
-    assets.find((asset) => asset.type === 'image') ??
-    draft.media.find((asset) => asset.type === 'image')
-  const firstVideo =
-    assets.find((asset) => asset.type === 'video') ??
-    draft.media.find((asset) => asset.type === 'video')
+  const accepted = acceptedMediaTypes(platform, state.format)
+  const selectedAssets = getSelectedAssets(state, draft).filter((a) => accepted.includes(a.type))
+
+  // Auto-select: when nothing explicitly selected, use the single accepted asset if one exists
+  const draftAccepted = draft.media.filter((a) => accepted.includes(a.type))
+  const effectiveAssets =
+    selectedAssets.length > 0 ? selectedAssets : draftAccepted.length === 1 ? draftAccepted : []
+
+  const firstImage = effectiveAssets.find((a) => a.type === 'image')
+  const firstVideo = effectiveAssets.find((a) => a.type === 'video')
+
+  // Title prepend for instagram and facebook (not pinterest, which has its own title field)
+  const buildCopy = (): string => {
+    if ((platform === 'instagram' || platform === 'facebook') && state.title) {
+      return `${state.title}\n\n${state.copy}`
+    }
+    return state.copy
+  }
 
   if (platform === 'pinterest') {
     return {
@@ -99,6 +186,7 @@ export const compileComposerInput = (
       boardId: state.destinationId,
       coverImageUrl: firstVideo?.coverImageUrl ?? firstImage?.url,
       description: state.copy,
+      format: firstImage?.format ?? firstVideo?.format,
       imageUrl: firstImage?.url,
       link: state.link,
       mediaType: state.format,
@@ -107,9 +195,11 @@ export const compileComposerInput = (
     }
   }
   if (platform === 'instagram') {
+    const copy = buildCopy()
     const input: Record<string, unknown> = {
       altText: state.altText,
-      caption: state.copy,
+      caption: copy,
+      format: firstImage?.format ?? firstVideo?.format,
       igUserId: state.destinationId,
       mediaType: state.format,
       shareToFeed: state.shareToFeed,
@@ -129,34 +219,43 @@ export const compileComposerInput = (
       }
     }
     if (state.format === 'CAROUSEL') {
-      input.carouselChildren = assets.map((asset) =>
-        asset.type === 'video' ? { videoUrl: asset.url } : { imageUrl: asset.url },
+      input.carouselChildren = effectiveAssets.map((asset) =>
+        asset.type === 'video'
+          ? { format: asset.format, videoUrl: asset.url }
+          : { format: asset.format, imageUrl: asset.url },
       )
     }
     return input
   }
   if (platform === 'facebook') {
+    const copy = buildCopy()
     const input: Record<string, unknown> = {
       altText: state.altText,
       format: state.format,
       link: state.link,
-      message: state.copy,
+      message: copy,
       pageId: state.destinationId,
     }
     if (state.format === 'PHOTO') {
       input.imageUrl = firstImage?.url
+      input.imageFormat = firstImage?.format
     }
     if (state.format === 'PHOTO_MULTI') {
-      input.imageUrls = assets.filter((asset) => asset.type === 'image').map((asset) => asset.url)
+      input.imageUrls = effectiveAssets
+        .filter((asset) => asset.type === 'image')
+        .map((asset) => asset.url)
     }
     if (state.format === 'VIDEO') {
       input.videoTitle = state.videoTitle
       input.videoUrl = firstVideo?.url
+      input.videoFormat = firstVideo?.format
     }
     return input
   }
 
+  // GBP
   const input: Record<string, unknown> = {
+    imageFormat: state.format === 'ALERT' ? undefined : firstImage?.format,
     imageUrl: state.format === 'ALERT' ? undefined : firstImage?.url,
     languageCode: state.languageCode || undefined,
     locationResourceName: state.destinationId,
@@ -200,3 +299,113 @@ export const compileComposerInput = (
 export const supportsMultipleMedia = (platform: PlatformId, format: string): boolean =>
   (platform === 'instagram' && format === 'CAROUSEL') ||
   (platform === 'facebook' && format === 'PHOTO_MULTI')
+
+// ---------------------------------------------------------------------------
+// Standalone composer model
+// ---------------------------------------------------------------------------
+
+export type StandaloneComposerState = {
+  body: string
+  channels: PlatformId[]
+  destinations: Partial<Record<PlatformId, string>>
+  link: string
+  media: SocialDraftMedia[]
+  title: string
+}
+
+export const buildStandaloneInitialState = (
+  _enabledPlatforms: PlatformId[],
+): StandaloneComposerState => ({
+  body: '',
+  channels: [],
+  destinations: {},
+  link: '',
+  media: [],
+  title: '',
+})
+
+/**
+ * Compile standalone composer state into the request body for
+ * POST {basePath}/compose/publish.
+ */
+export const compileStandalonePublishBody = (
+  state: StandaloneComposerState,
+  perChannelFormat: Partial<Record<PlatformId, string>>,
+): {
+  content: {
+    body?: string
+    images?: Array<{ format?: string; height?: number; url: string; width?: number }>
+    link?: string
+    title: string
+  }
+  targets: Array<{ input: Record<string, unknown>; platform: PlatformId }>
+} => {
+  const images = state.media
+    .filter((m) => m.type === 'image')
+    .map((m) => ({ format: m.format, height: m.height, url: m.url, width: m.width }))
+
+  const targets = state.channels.map((platform) => {
+    const format = perChannelFormat[platform] ?? formatDefaults[platform]
+    const destinationId = state.destinations[platform] ?? ''
+    const accepted = acceptedMediaTypes(platform, format)
+    const acceptedAssets = state.media.filter((m) => accepted.includes(m.type))
+    const firstImage = acceptedAssets.find((a) => a.type === 'image')
+    const firstVideo = acceptedAssets.find((a) => a.type === 'video')
+
+    const input: Record<string, unknown> = {}
+
+    if (platform === 'pinterest') {
+      input.boardId = destinationId
+      input.imageUrl = firstImage?.url
+      input.videoUrl = firstVideo?.url
+      input.mediaType = format
+    } else if (platform === 'instagram') {
+      input.igUserId = destinationId
+      input.mediaType = format
+      if (format === 'IMAGE') {
+        input.imageUrl = firstImage?.url
+      }
+      if (format === 'REELS') {
+        input.videoUrl = firstVideo?.url
+      }
+      if (format === 'STORIES') {
+        input.imageUrl = firstImage?.url
+        input.videoUrl = firstVideo?.url
+      }
+      if (format === 'CAROUSEL') {
+        input.carouselChildren = acceptedAssets.map((a) =>
+          a.type === 'video' ? { videoUrl: a.url } : { imageUrl: a.url },
+        )
+      }
+    } else if (platform === 'facebook') {
+      input.pageId = destinationId
+      input.format = format
+      if (format === 'PHOTO') {
+        input.imageUrl = firstImage?.url
+      }
+      if (format === 'PHOTO_MULTI') {
+        input.imageUrls = acceptedAssets.filter((a) => a.type === 'image').map((a) => a.url)
+      }
+      if (format === 'VIDEO') {
+        input.videoUrl = firstVideo?.url
+      }
+    } else {
+      // GBP
+      input.locationResourceName = destinationId
+      input.topicType = format
+      input.imageUrl = firstImage?.url
+    }
+
+    return { input, platform }
+  })
+
+  return {
+    content: {
+      body: state.body || undefined,
+      images: images.length > 0 ? images : undefined,
+      link: state.link || undefined,
+      title: state.title,
+    },
+    targets,
+  }
+}
