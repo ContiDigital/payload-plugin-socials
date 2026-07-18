@@ -2,3 +2,4 @@ export { SocialPublishPanelClient } from '../components/ProductSocialsPanelClien
 export { SocialsAdminViewClient } from '../components/SocialsAdminViewClient.js'
 export { SocialsDashboardWidget } from '../components/SocialsDashboardWidget.js'
 export { SocialsNavLink } from '../components/SocialsNavLink.js'
+export { SocialTemplateFieldBuilder } from '../components/SocialTemplateFieldBuilder.js'

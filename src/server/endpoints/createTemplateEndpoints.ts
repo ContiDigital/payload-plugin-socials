@@ -5,9 +5,10 @@ import type { SocialTemplateFields } from '../templates/resolveTemplateCopy.js'
 
 import { SOCIAL_TEMPLATES_SLUG } from '../../constants.js'
 import { resolveSourceContext } from '../sources/registry.js'
+import { buildTemplateScope } from '../templates/renderTemplate.js'
 import { resolveTemplateCopy } from '../templates/resolveTemplateCopy.js'
 import { assertAccess } from '../utilities/access.js'
-import { errorResponse, getRouteParam, jsonResponse } from '../utilities/http.js'
+import { errorResponse, getRouteParam, jsonResponse, parseRequestBody } from '../utilities/http.js'
 import { requireIdentifier, requireString } from '../utilities/validation.js'
 
 type SocialTemplateRow = {
@@ -58,6 +59,62 @@ export const createResolvedTemplatesEndpoint = (options: NormalizedPluginOptions
   path: `${options.api.basePath}/templates/:sourceKind/:sourceId`,
 })
 
+/**
+ * POST {basePath}/templates/preview
+ *
+ * Body: { sourceKind: string; sourceId: string; fields: Record<string, string> }
+ *
+ * Returns the resolved copy for the supplied per-field draft template strings
+ * plus the full list of scope keys (including discovered metadata.* keys) so
+ * the admin UI can populate the token picker.
+ *
+ * Gated with `assertAccess(req, options, 'admin')` — template authoring is an
+ * admin-level operation, matching who authors templates.
+ */
+export const createTemplatePreviewEndpoint = (options: NormalizedPluginOptions): Endpoint => ({
+  handler: async (req) => {
+    try {
+      await assertAccess(req, options, 'admin')
+
+      const body = await parseRequestBody(req)
+      const sourceKind = requireString(body.sourceKind, 'sourceKind')
+      const sourceId = requireIdentifier(body.sourceId, 'sourceId')
+      const fields =
+        body.fields && typeof body.fields === 'object' && !Array.isArray(body.fields)
+          ? (body.fields as Record<string, string>)
+          : {}
+
+      const ctx = await resolveSourceContext({
+        id: sourceId,
+        kind: sourceKind,
+        payload: req.payload,
+        req,
+      })
+
+      const resolved = resolveTemplateCopy(fields as SocialTemplateFields, ctx)
+
+      // Build the full scope to expose all available token keys (including
+      // every key in metadata.*) so the client can populate the token picker.
+      const scope = buildTemplateScope(ctx)
+      const rawMetadata: unknown = scope.metadata
+      const metadataKeys =
+        rawMetadata && typeof rawMetadata === 'object'
+          ? Object.keys(rawMetadata as Record<string, unknown>).map((key) => `metadata.${key}`)
+          : []
+
+      const staticKeys = Object.keys(scope).filter((k) => k !== 'metadata')
+      const scopeKeys = [...staticKeys, ...metadataKeys]
+
+      return jsonResponse({ resolved, scopeKeys })
+    } catch (error) {
+      return errorResponse(req, error)
+    }
+  },
+  method: 'post',
+  path: `${options.api.basePath}/templates/preview`,
+})
+
 export const createTemplateEndpoints = (options: NormalizedPluginOptions): Endpoint[] => [
   createResolvedTemplatesEndpoint(options),
+  createTemplatePreviewEndpoint(options),
 ]
