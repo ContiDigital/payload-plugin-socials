@@ -33,6 +33,7 @@ import { deleteInstagramMedia, publishInstagramMedia } from '../publish.js'
 
 const buildOptions = (systemUserAccessToken = ''): NormalizedPluginOptions =>
   ({
+    assets: { autoConvert: false, jpegQuality: 82, preflight: true },
     copyOverrides: {},
     platforms: { instagram: { apiVersion: 'v25.0', enabled: true, systemUserAccessToken } },
   }) as unknown as NormalizedPluginOptions

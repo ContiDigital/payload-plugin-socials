@@ -17,7 +17,9 @@ test('renders the social control center and product composer accessibly', async 
 
   await page.goto('/admin/socials', { waitUntil: 'domcontentloaded' })
   await expect(page.getByRole('heading', { level: 1, name: 'Socials' })).toBeVisible()
-  await expect(page.getByText('Social connections')).toBeVisible()
+  await expect(
+    page.getByRole('tablist', { name: 'Socials view' }).getByRole('tab', { name: 'Connections' }),
+  ).toBeVisible()
 
   const created = await page.request.post('/api/products', {
     data: { title: 'E2E product' },

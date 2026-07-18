@@ -86,6 +86,29 @@ platforms: {
 - **Carousel**: 2 to 10 children that share an aspect ratio. Reels cannot be
   carousel children.
 
+## Image format safety
+
+Instagram is the strictest platform for image formats: it accepts JPEG only.
+If your upload collection stores images in WebP, PNG, or AVIF, those will be
+rejected by Instagram's API with an opaque error. The plugin catches this at
+publish time and either converts the image automatically or fails fast with a
+clear message.
+
+By default (`assets.preflight: true`), the plugin detects the image format
+(from metadata or by reading the first 32 bytes of the URL) and checks it
+against Instagram's JPEG-only allowlist. If the format is not allowed:
+
+- With `assets.autoConvert: true` and a `renditionCollection`, the plugin
+  transcodes to JPEG via sharp and uploads the result to your collection.
+  Subsequent publishes of the same source URL reuse the existing rendition.
+- Without `autoConvert`, the plugin throws a validation error that names the
+  detected format and the two ways to fix it (configure a JPEG imageSize on
+  your upload collection, or enable `autoConvert`).
+
+The simplest setup for Instagram publishing is to add `formatOptions` to your
+upload collection's `imageSizes` so that Payload itself generates a JPEG
+derivative at upload time, and point your source resolver at that derivative URL.
+
 ## Gotchas
 
 - **Public, US-ASCII URLs.** Meta fetches `image_url` and `video_url`

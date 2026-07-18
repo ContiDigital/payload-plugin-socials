@@ -1,6 +1,6 @@
 import type { Endpoint } from 'payload'
 
-import type { NormalizedPluginOptions } from '../../types/index.js'
+import type { NormalizedPluginOptions, SocialImageFormat } from '../../types/index.js'
 import type { StandaloneComposeInput } from '../compose/standaloneContext.js'
 
 import { PLATFORM_IDS } from '../../constants.js'
@@ -25,6 +25,8 @@ import { requireOneOf, requireString } from '../utilities/validation.js'
  * results carry each channel's published ref or error.
  */
 
+const VALID_IMAGE_FORMATS: readonly string[] = ['avif', 'bmp', 'gif', 'jpeg', 'png', 'tiff', 'webp']
+
 const asRecord = (value: unknown): Record<string, unknown> =>
   value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -33,6 +35,14 @@ const asRecord = (value: unknown): Record<string, unknown> =>
 const optionalString = (value: unknown): string | undefined =>
   typeof value === 'string' && value.length > 0 ? value : undefined
 
+const coerceFormat = (value: unknown): SocialImageFormat | undefined => {
+  if (typeof value !== 'string') {
+    return undefined
+  }
+  const lower = value.trim().toLowerCase()
+  return VALID_IMAGE_FORMATS.includes(lower) ? (lower as SocialImageFormat) : undefined
+}
+
 const coerceImages = (raw: unknown): StandaloneComposeInput['images'] => {
   if (!Array.isArray(raw)) {
     return undefined
@@ -40,6 +50,7 @@ const coerceImages = (raw: unknown): StandaloneComposeInput['images'] => {
   const images = raw
     .map((item) => asRecord(item))
     .map((item) => ({
+      format: coerceFormat(item.format),
       height: typeof item.height === 'number' ? item.height : undefined,
       role: optionalString(item.role),
       url: optionalString(item.url) ?? '',

@@ -1,0 +1,213 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+import type { NormalizedPluginOptions } from '../../../types/index.js'
+
+import { resolvePlatformImageUrl } from '../resolvePlatformImage.js'
+
+// Mock detectImageFormat at the module level
+vi.mock('../detectImageFormat.js', () => ({
+  detectImageFormat: vi.fn(),
+}))
+
+// Mock the sharp import used inside resolvePlatformImage
+vi.mock('sharp', () => ({
+  default: (_buf: Buffer) => ({
+    jpeg: (opts?: { quality?: number }) => ({
+      toBuffer: () => Promise.resolve(Buffer.from(`jpeg-${opts?.quality ?? 80}`)),
+    }),
+  }),
+}))
+
+const { detectImageFormat } = await import('../detectImageFormat.js')
+const mockedDetect = vi.mocked(detectImageFormat)
+
+const makeOptions = (
+  overrides: Partial<NormalizedPluginOptions['assets']> = {},
+): NormalizedPluginOptions =>
+  ({
+    assets: {
+      autoConvert: false,
+      jpegQuality: 82,
+      preflight: true,
+      renditionCollection: undefined,
+      ...overrides,
+    },
+  }) as unknown as NormalizedPluginOptions
+
+const makePayload = (findDocs: Array<{ url: string }> = []) => {
+  const mock = {
+    config: { serverURL: 'https://app.example.com' },
+    create: vi.fn().mockResolvedValue({ url: '/media/socials-rendition-abc12345.jpg' }),
+    find: vi.fn().mockResolvedValue({ docs: findDocs }),
+  }
+  return mock as unknown as Parameters<typeof resolvePlatformImageUrl>[0]['payload'] & typeof mock
+}
+
+describe('resolvePlatformImageUrl', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    // By default, global fetch returns a successful response for source bytes
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        arrayBuffer: () => Promise.resolve(new ArrayBuffer(100)),
+        headers: new Headers({ 'content-length': '100' }),
+        ok: true,
+      }),
+    )
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('passes through unchanged when preflight is disabled', async () => {
+    const options = makeOptions({ preflight: false })
+    const result = await resolvePlatformImageUrl({
+      declaredFormat: 'webp',
+      imageUrl: 'https://cdn.example.com/photo.webp',
+      options,
+      payload: makePayload(),
+      platform: 'instagram',
+    })
+    expect(result).toEqual({
+      converted: false,
+      format: 'webp',
+      url: 'https://cdn.example.com/photo.webp',
+    })
+  })
+
+  it('passes through when the format is allowed for the platform', async () => {
+    const options = makeOptions()
+    const result = await resolvePlatformImageUrl({
+      declaredFormat: 'jpeg',
+      imageUrl: 'https://cdn.example.com/photo.jpg',
+      options,
+      payload: makePayload(),
+      platform: 'instagram',
+    })
+    expect(result).toEqual({
+      converted: false,
+      format: 'jpeg',
+      url: 'https://cdn.example.com/photo.jpg',
+    })
+  })
+
+  it('passes through unknown format (detection returns undefined)', async () => {
+    mockedDetect.mockResolvedValue(undefined)
+    const options = makeOptions()
+    const result = await resolvePlatformImageUrl({
+      imageUrl: 'https://cdn.example.com/unknown',
+      options,
+      payload: makePayload(),
+      platform: 'instagram',
+    })
+    expect(result).toEqual({
+      converted: false,
+      url: 'https://cdn.example.com/unknown',
+    })
+  })
+
+  it('detects format via magic bytes when declaredFormat is not provided', async () => {
+    mockedDetect.mockResolvedValue('png')
+    const options = makeOptions()
+    // PNG is not allowed on Instagram
+    await expect(
+      resolvePlatformImageUrl({
+        imageUrl: 'https://cdn.example.com/photo.png',
+        options,
+        payload: makePayload(),
+        platform: 'instagram',
+      }),
+    ).rejects.toThrow(/does not accept png/)
+  })
+
+  it('throws actionable error when format is disallowed and autoConvert is off', async () => {
+    const options = makeOptions()
+    await expect(
+      resolvePlatformImageUrl({
+        declaredFormat: 'webp',
+        imageUrl: 'https://cdn.example.com/photo.webp',
+        options,
+        payload: makePayload(),
+        platform: 'instagram',
+      }),
+    ).rejects.toThrow(/instagram does not accept webp/)
+  })
+
+  it('transcodes and uploads when autoConvert is enabled', async () => {
+    const payload = makePayload()
+    const options = makeOptions({
+      autoConvert: true,
+      renditionCollection: 'media',
+    })
+    const result = await resolvePlatformImageUrl({
+      declaredFormat: 'webp',
+      imageUrl: 'https://cdn.example.com/photo.webp',
+      options,
+      payload,
+      platform: 'instagram',
+    })
+    expect(result.converted).toBe(true)
+    expect(result.format).toBe('jpeg')
+    expect(result.url).toBe('https://app.example.com/media/socials-rendition-abc12345.jpg')
+    expect(payload.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        collection: 'media',
+        file: expect.objectContaining({
+          name: expect.stringMatching(/^socials-rendition-[a-f0-9]{8}\.jpg$/),
+          mimetype: 'image/jpeg',
+        }),
+        overrideAccess: true,
+      }),
+    )
+  })
+
+  it('reuses an existing rendition instead of re-uploading', async () => {
+    const payload = makePayload([{ url: '/media/socials-rendition-existing.jpg' }])
+    const options = makeOptions({
+      autoConvert: true,
+      renditionCollection: 'media',
+    })
+    const result = await resolvePlatformImageUrl({
+      declaredFormat: 'webp',
+      imageUrl: 'https://cdn.example.com/photo.webp',
+      options,
+      payload,
+      platform: 'instagram',
+    })
+    expect(result.converted).toBe(true)
+    expect(result.url).toBe('https://app.example.com/media/socials-rendition-existing.jpg')
+    // Should NOT have called create since the rendition already exists
+    expect(payload.create).not.toHaveBeenCalled()
+  })
+
+  it('allows webp for Pinterest (it is in the allowlist)', async () => {
+    const options = makeOptions()
+    const result = await resolvePlatformImageUrl({
+      declaredFormat: 'webp',
+      imageUrl: 'https://cdn.example.com/photo.webp',
+      options,
+      payload: makePayload(),
+      platform: 'pinterest',
+    })
+    expect(result).toEqual({
+      converted: false,
+      format: 'webp',
+      url: 'https://cdn.example.com/photo.webp',
+    })
+  })
+
+  it('rejects avif for Pinterest', async () => {
+    const options = makeOptions()
+    await expect(
+      resolvePlatformImageUrl({
+        declaredFormat: 'avif',
+        imageUrl: 'https://cdn.example.com/photo.avif',
+        options,
+        payload: makePayload(),
+        platform: 'pinterest',
+      }),
+    ).rejects.toThrow(/pinterest does not accept avif/)
+  })
+})

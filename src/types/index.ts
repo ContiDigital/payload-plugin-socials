@@ -57,10 +57,15 @@ export type SocialSource = {
 export type SocialImageRole =
   'after' | 'before' | 'detail' | 'install' | 'lifestyle' | 'main' | ({} & string)
 
+/** Known image formats the plugin can detect and validate against. */
+export type SocialImageFormat = 'avif' | 'bmp' | 'gif' | 'jpeg' | 'png' | 'tiff' | 'webp'
+
 export interface SocialImage {
   alt?: string
   /** True when below Pinterest's 600px minimum width (informational). */
   belowMinWidth?: boolean
+  /** Declared format of the image (when known by the host). */
+  format?: SocialImageFormat
   height?: number
   role: SocialImageRole
   url: string
@@ -102,10 +107,14 @@ export interface SocialSourceContext {
   videos?: SocialVideo[]
 }
 
+export type MediaAssetFormat = string
+
 export type SocialDraftMedia = {
   altText?: string
   coverImageUrl?: string
   durationSeconds?: number
+  /** Image format from mimeType (e.g. "jpeg", "png", "webp"). */
+  format?: MediaAssetFormat
   height?: number
   role?: SocialImageRole
   type: 'image' | 'video'
@@ -569,6 +578,40 @@ export type SocialsWebhookConfig = {
 }
 
 // ---------------------------------------------------------------------------
+// Asset processing options
+// ---------------------------------------------------------------------------
+
+/**
+ * Image format safety and transcoding configuration. When enabled, the plugin
+ * validates image formats against each platform's allowlist before publishing
+ * and optionally transcodes disallowed formats to JPEG (the one universally
+ * accepted format).
+ */
+export type SocialsAssetsConfig = {
+  /**
+   * When true and a disallowed format is detected, the plugin transcodes to
+   * JPEG and uploads the result to `renditionCollection`. Requires sharp as
+   * a peer dependency. Default: false.
+   */
+  autoConvert?: boolean
+  /**
+   * JPEG quality for transcoded renditions (1-100). Default: 82.
+   */
+  jpegQuality?: number
+  /**
+   * When true (default), the plugin checks image formats against each
+   * platform's allowlist before publishing. When false, images pass through
+   * without format checks.
+   */
+  preflight?: boolean
+  /**
+   * Payload upload collection slug where transcoded renditions are stored.
+   * Required when `autoConvert` is true.
+   */
+  renditionCollection?: string
+}
+
+// ---------------------------------------------------------------------------
 // Scheduling
 //
 // The plugin defines task DEFINITIONS (TaskConfig for Payload's Jobs system)
@@ -589,7 +632,8 @@ export type SocialsWebhookConfig = {
 //     calls them in a loop. Useful for self-hosted ECS deployments.
 //
 //   - **Hybrid**: nothing precludes mixing — e.g. autoRun for the sweep,
-//     external cron for insights/connection refresh.
+//     external cron from a backup region as a safety net, plus an admin
+//     "Sweep now" button that hits `/internal/jobs/sweep` for incident response.
 // ---------------------------------------------------------------------------
 
 export type SocialsAutoRunConfig = {
@@ -645,6 +689,8 @@ export type SocialsSchedulingConfig = {
 export type PayloadPluginSocialsConfig = {
   admin?: SocialsAdminConfig
   api?: SocialsApiConfig
+  /** Image format safety and transcoding. */
+  assets?: SocialsAssetsConfig
   /** Host-supplied access control. */
   authorize: AuthorizeFn
   coordination?: SocialsCoordinationConfig
@@ -739,6 +785,13 @@ export type NormalizedRateLimitConfig = {
   requestTimeoutMs: number
 }
 
+export type NormalizedAssetsConfig = {
+  autoConvert: boolean
+  jpegQuality: number
+  preflight: boolean
+  renditionCollection?: string
+}
+
 export type NormalizedPluginOptions = {
   admin: {
     injectInto: NonNullable<SocialsAdminConfig['injectInto']>
@@ -749,6 +802,7 @@ export type NormalizedPluginOptions = {
   api: {
     basePath: `/${string}`
   }
+  assets: NormalizedAssetsConfig
   authorize: AuthorizeFn
   coordination: SocialsCoordinationConfig
   copyOverrides: SocialsCopyOverrides

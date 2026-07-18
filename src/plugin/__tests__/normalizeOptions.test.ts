@@ -89,6 +89,15 @@ describe('normalizePluginOptions — defaults', () => {
     expect(n.testMode).toBe(false)
     expect(n.disabled).toBe(false)
   })
+
+  it('resolves assets defaults', () => {
+    expect(n.assets).toEqual({
+      autoConvert: false,
+      jpegQuality: 82,
+      preflight: true,
+      renditionCollection: undefined,
+    })
+  })
 })
 
 describe('normalizePluginOptions — primitive normalizers', () => {
@@ -132,6 +141,45 @@ describe('normalizePluginOptions — primitive normalizers', () => {
 
   it('honours testMode', () => {
     expect(normalizePluginOptions(withOpts({ testMode: true })).testMode).toBe(true)
+  })
+})
+
+describe('normalizePluginOptions — assets config', () => {
+  it('defaults preflight to true and autoConvert to false', () => {
+    const n = normalizePluginOptions(withOpts({ assets: {} }))
+    expect(n.assets.preflight).toBe(true)
+    expect(n.assets.autoConvert).toBe(false)
+    expect(n.assets.jpegQuality).toBe(82)
+  })
+
+  it('allows disabling preflight', () => {
+    const n = normalizePluginOptions(withOpts({ assets: { preflight: false } }))
+    expect(n.assets.preflight).toBe(false)
+  })
+
+  it('throws when autoConvert is true without renditionCollection', () => {
+    expect(() => normalizePluginOptions(withOpts({ assets: { autoConvert: true } }))).toThrow(
+      /renditionCollection/,
+    )
+  })
+
+  it('accepts autoConvert with renditionCollection', () => {
+    const n = normalizePluginOptions(
+      withOpts({ assets: { autoConvert: true, renditionCollection: 'media' } }),
+    )
+    expect(n.assets.autoConvert).toBe(true)
+    expect(n.assets.renditionCollection).toBe('media')
+  })
+
+  it('clamps jpegQuality to 1-100', () => {
+    const low = normalizePluginOptions(withOpts({ assets: { jpegQuality: 0 } }))
+    expect(low.assets.jpegQuality).toBe(1)
+
+    const high = normalizePluginOptions(withOpts({ assets: { jpegQuality: 200 } }))
+    expect(high.assets.jpegQuality).toBe(100)
+
+    const normal = normalizePluginOptions(withOpts({ assets: { jpegQuality: 75 } }))
+    expect(normal.assets.jpegQuality).toBe(75)
   })
 })
 

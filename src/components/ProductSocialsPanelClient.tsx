@@ -1,7 +1,7 @@
 'use client'
 
-import { Button, useConfig, useDocumentInfo } from '@payloadcms/ui'
-import React, { useEffect, useMemo, useState } from 'react'
+import { Button, toast, useConfig, useDocumentInfo, useListDrawer } from '@payloadcms/ui'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 
 import type { PlatformId } from '../constants.js'
 import type {
@@ -9,20 +9,30 @@ import type {
   PreviewResult,
   PublishedRef,
   SocialDraft,
+  SocialDraftMedia,
   ValidationResult,
 } from '../types/index.js'
 
 import { PLATFORM_IDS, PLATFORM_LABELS } from '../constants.js'
 import {
+  acceptedMediaTypes,
   buildInitialComposerState,
+  buildStandaloneInitialState,
   compileComposerInput,
+  compileStandalonePublishBody,
   type ComposerState,
   getSelectedAssets,
+  type MediaType,
+  pruneSelectedMedia,
+  type StandaloneComposerState,
   supportsMultipleMedia,
 } from './socialComposerModel.js'
 import './SocialPublishPanelClient.scss'
 
-type Props = { sourceKind?: string }
+type Props = {
+  mode?: 'source' | 'standalone'
+  sourceKind?: string
+}
 type Destination = { id: string; label: string }
 type HistoryRow = {
   externalUrl?: string
@@ -50,6 +60,16 @@ type PreviewEnvelope = {
   draft: SocialDraft
   error?: string
   preview: PreviewResult
+}
+
+type ComposeResult = {
+  anyPublished: boolean
+  results: Array<{
+    error?: string
+    ok: boolean
+    platform: PlatformId
+    publishedRef?: PublishedRef
+  }>
 }
 
 const asRecord = (value: unknown): Record<string, unknown> | undefined =>
@@ -87,7 +107,38 @@ const destinationPath: Record<PlatformId, string> = {
   pinterest: '/pinterest/boards',
 }
 
-export const SocialPublishPanelClient: React.FC<Props> = ({ sourceKind = 'product' }) => {
+/** Infer media type from URL extension or mime type. */
+const inferMediaType = (url: string, mimeType?: string): MediaType => {
+  if (mimeType) {
+    if (mimeType.startsWith('video/')) {
+      return 'video'
+    }
+    return 'image'
+  }
+  const ext = url.split('.').pop()?.split('?')[0]?.toLowerCase() ?? ''
+  if (['avi', 'm4v', 'mkv', 'mov', 'mp4', 'webm'].includes(ext)) {
+    return 'video'
+  }
+  return 'image'
+}
+
+/** Extract format string from mimeType or URL extension. */
+const inferFormat = (url: string, mimeType?: string): string | undefined => {
+  if (mimeType) {
+    const sub = mimeType.split('/')[1]
+    if (sub) {
+      return sub.split(';')[0]
+    }
+  }
+  const ext = url.split('.').pop()?.split('?')[0]?.toLowerCase()
+  return ext || undefined
+}
+
+// ===========================================================================
+// Source-mode composer (existing behavior, overhauled)
+// ===========================================================================
+
+const SourceComposer: React.FC<{ sourceKind: string }> = ({ sourceKind }) => {
   const { id } = useDocumentInfo()
   const { config } = useConfig()
   const socials = asRecord(asRecord(config.custom)?.socials)
@@ -106,9 +157,18 @@ export const SocialPublishPanelClient: React.FC<Props> = ({ sourceKind = 'produc
   const [history, setHistory] = useState<HistoryRow[]>([])
   const [scheduledAt, setScheduledAt] = useState('')
   const [validation, setValidation] = useState<ValidationResult>()
-  const [error, setError] = useState<string>()
   const [publishedRef, setPublishedRef] = useState<PublishedRef>()
   const [loading, setLoading] = useState(false)
+
+  // Media library drawer
+  const [ListDrawer, , { openDrawer }] = useListDrawer({
+    collectionSlugs: undefined as never,
+    uploads: true,
+  })
+
+  // URL input state
+  const [urlInput, setUrlInput] = useState('')
+  const [urlTypeOverride, setUrlTypeOverride] = useState<'image' | 'video'>('image')
 
   const apiRoute = typeof config.routes?.api === 'string' ? config.routes.api : '/api'
   const basePath = typeof socials?.apiBasePath === 'string' ? socials.apiBasePath : '/socials'
@@ -125,12 +185,47 @@ export const SocialPublishPanelClient: React.FC<Props> = ({ sourceKind = 'produc
     [envelope, platform, state],
   )
 
-  const updateState = (patch: Partial<ComposerState>): void => {
-    setStates((current) => {
-      const existing = current[platform]
-      return existing ? { ...current, [platform]: { ...existing, ...patch } } : current
-    })
-  }
+  const updateState = useCallback(
+    (patch: Partial<ComposerState>): void => {
+      setStates((current) => {
+        const existing = current[platform]
+        return existing ? { ...current, [platform]: { ...existing, ...patch } } : current
+      })
+    },
+    [platform],
+  )
+
+  // Format change handler: prune invalid media and toast
+  const handleFormatChange = useCallback(
+    (newFormat: string): void => {
+      setStates((current) => {
+        const existing = current[platform]
+        if (!existing) {
+          return current
+        }
+        const draft = envelopes[platform]?.draft
+        if (!draft) {
+          return { ...current, [platform]: { ...existing, format: newFormat } }
+        }
+        const { pruned, removed } = pruneSelectedMedia(
+          existing.selectedMedia,
+          draft.media,
+          platform,
+          newFormat,
+        )
+        if (removed.length > 0) {
+          toast.info(
+            `${removed.length} media item${removed.length > 1 ? 's' : ''} removed (not available for this format)`,
+          )
+        }
+        return {
+          ...current,
+          [platform]: { ...existing, format: newFormat, selectedMedia: pruned },
+        }
+      })
+    },
+    [envelopes, platform],
+  )
 
   useEffect(() => {
     if (!id) {
@@ -138,7 +233,6 @@ export const SocialPublishPanelClient: React.FC<Props> = ({ sourceKind = 'produc
     }
     const controller = new AbortController()
     const load = async (): Promise<void> => {
-      setError(undefined)
       try {
         const [previewResponse, historyResponse] = await Promise.all([
           fetch(`${sourceBase}/preview`, { signal: controller.signal }),
@@ -164,7 +258,7 @@ export const SocialPublishPanelClient: React.FC<Props> = ({ sourceKind = 'produc
         setHistory(historyBody.posts ?? [])
       } catch (caught) {
         if (!controller.signal.aborted) {
-          setError(caught instanceof Error ? caught.message : String(caught))
+          toast.error(caught instanceof Error ? caught.message : String(caught))
         }
       }
     }
@@ -242,7 +336,7 @@ export const SocialPublishPanelClient: React.FC<Props> = ({ sourceKind = 'produc
       } catch (caught) {
         if (!controller.signal.aborted) {
           setDestinations([])
-          setError(caught instanceof Error ? caught.message : String(caught))
+          toast.error(caught instanceof Error ? caught.message : String(caught))
         }
       }
     }
@@ -313,16 +407,126 @@ export const SocialPublishPanelClient: React.FC<Props> = ({ sourceKind = 'produc
     updateState({ selectedMedia: selected })
   }
 
+  const handleLibrarySelect = useCallback(
+    async (doc: { collectionSlug: string; docID: string }) => {
+      try {
+        const response = await fetch(`${apiRoute}/${doc.collectionSlug}/${doc.docID}`)
+        if (!response.ok) {
+          toast.error('Failed to load media document')
+          return
+        }
+        const mediaDoc = (await response.json()) as Record<string, unknown>
+        const mimeType = typeof mediaDoc.mimeType === 'string' ? mediaDoc.mimeType : undefined
+        const type = inferMediaType('', mimeType)
+        const format = inferFormat('', mimeType)
+
+        // Determine the best URL: prefer the largest jpeg size for webp/avif images
+        let url = typeof mediaDoc.url === 'string' ? mediaDoc.url : ''
+        if (
+          type === 'image' &&
+          format &&
+          ['avif', 'webp'].includes(format) &&
+          mediaDoc.sizes &&
+          typeof mediaDoc.sizes === 'object'
+        ) {
+          const sizes = mediaDoc.sizes as Record<string, Record<string, unknown>>
+          let bestWidth = 0
+          for (const [, sizeData] of Object.entries(sizes)) {
+            const sizeUrl = sizeData?.url
+            const sizeMime = sizeData?.mimeType
+            const sizeWidth = typeof sizeData?.width === 'number' ? sizeData.width : 0
+            if (
+              typeof sizeUrl === 'string' &&
+              typeof sizeMime === 'string' &&
+              sizeMime.includes('jpeg') &&
+              sizeWidth > bestWidth
+            ) {
+              bestWidth = sizeWidth
+              url = sizeUrl
+            }
+          }
+        }
+
+        // Make URL absolute
+        if (url.startsWith('/')) {
+          url = `${window.location.origin}${url}`
+        }
+
+        const newAsset: SocialDraftMedia = {
+          type,
+          altText: typeof mediaDoc.alt === 'string' ? mediaDoc.alt : undefined,
+          format,
+          height: typeof mediaDoc.height === 'number' ? mediaDoc.height : undefined,
+          url,
+          width: typeof mediaDoc.width === 'number' ? mediaDoc.width : undefined,
+        }
+
+        setEnvelopes((current) => {
+          const env = current[platform]
+          if (!env) {
+            return current
+          }
+          return {
+            ...current,
+            [platform]: {
+              ...env,
+              draft: {
+                ...env.draft,
+                media: [...env.draft.media, newAsset],
+              },
+            },
+          }
+        })
+        toast.success('Media added from library')
+      } catch {
+        toast.error('Failed to load media from library')
+      }
+    },
+    [apiRoute, platform],
+  )
+
+  const handleAddByUrl = useCallback(() => {
+    if (!urlInput.trim()) {
+      return
+    }
+    const url = urlInput.trim()
+    const type = urlTypeOverride
+    const format = inferFormat(url)
+    const newAsset: SocialDraftMedia = {
+      type,
+      format,
+      url: url.startsWith('/') ? `${window.location.origin}${url}` : url,
+    }
+
+    setEnvelopes((current) => {
+      const env = current[platform]
+      if (!env) {
+        return current
+      }
+      return {
+        ...current,
+        [platform]: {
+          ...env,
+          draft: {
+            ...env.draft,
+            media: [...env.draft.media, newAsset],
+          },
+        },
+      }
+    })
+    setUrlInput('')
+    toast.success('Media added by URL')
+  }, [platform, urlInput, urlTypeOverride])
+
   const publish = async (): Promise<void> => {
     if (!input) {
       return
     }
     if (validation && !validation.ok) {
-      setError('Resolve the validation errors before publishing.')
+      toast.error('Resolve the validation errors before publishing.')
       return
     }
     setLoading(true)
-    setError(undefined)
     setPublishedRef(undefined)
     try {
       const body = { ...input }
@@ -342,11 +546,11 @@ export const SocialPublishPanelClient: React.FC<Props> = ({ sourceKind = 'produc
       if (!response.ok) {
         throw new Error(result.error ?? `Publish failed (${response.status})`)
       }
-      setPublishedRef(
-        result.publishedRef ?? { externalId: '', meta: { scheduled: true }, platform },
-      )
+      const ref = result.publishedRef ?? { externalId: '', meta: { scheduled: true }, platform }
+      setPublishedRef(ref)
+      toast.success(ref.meta?.scheduled ? 'Scheduled successfully.' : 'Published successfully.')
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : String(caught))
+      toast.error(caught instanceof Error ? caught.message : String(caught))
     } finally {
       setLoading(false)
     }
@@ -371,6 +575,7 @@ export const SocialPublishPanelClient: React.FC<Props> = ({ sourceKind = 'produc
     (template) => template.appliesTo.length === 0 || template.appliesTo.includes(platform),
   )
   const assets = envelope.draft.media
+  const accepted = acceptedMediaTypes(platform, state.format)
   const mediaRequired =
     state.format !== 'LINK' && state.format !== 'STANDARD' && state.format !== 'ALERT'
   const copyLimit = envelope.capabilities.limits.captionMaxChars
@@ -386,6 +591,7 @@ export const SocialPublishPanelClient: React.FC<Props> = ({ sourceKind = 'produc
           {enabledPlatforms.map((idValue) => (
             <button
               aria-selected={platform === idValue}
+              data-platform={idValue}
               key={idValue}
               onClick={() => {
                 setPlatform(idValue)
@@ -436,7 +642,7 @@ export const SocialPublishPanelClient: React.FC<Props> = ({ sourceKind = 'produc
             <label>
               Format
               <select
-                onChange={(event) => updateState({ format: event.target.value })}
+                onChange={(event) => handleFormatChange(event.target.value)}
                 value={state.format}
               >
                 {platformFormats[platform].map((format) => (
@@ -459,6 +665,23 @@ export const SocialPublishPanelClient: React.FC<Props> = ({ sourceKind = 'produc
               />
             </label>
           )}
+
+          {(platform === 'instagram' || platform === 'facebook') && (
+            <label>
+              Title (first line)
+              <input
+                aria-label="Title (first line)"
+                onChange={(event) => updateState({ title: event.target.value })}
+                placeholder="Optional. Becomes the first line of the caption/message."
+                value={state.title}
+              />
+              <span className="socials-composer__count">
+                Instagram and Facebook have no separate title field; this becomes the first line of
+                the caption/message.
+              </span>
+            </label>
+          )}
+
           <label>
             {platform === 'gbp'
               ? 'Summary'
@@ -647,23 +870,30 @@ export const SocialPublishPanelClient: React.FC<Props> = ({ sourceKind = 'produc
             <fieldset className="socials-composer__media">
               <legend>
                 Media{' '}
-                {supportsMultipleMedia(platform, state.format) ? '(choose and order 2–10)' : ''}
+                {supportsMultipleMedia(platform, state.format) ? '(choose and order 2-10)' : ''}
               </legend>
               {assets.length === 0 && <p>No source media is available.</p>}
               <div className="socials-composer__media-grid">
                 {assets.map((asset) => {
                   const selected = state.selectedMedia.includes(asset.url)
+                  const isAccepted = accepted.includes(asset.type)
                   return (
                     <button
-                      aria-label={`Select ${asset.type} asset`}
-                      aria-pressed={selected}
-                      className={
-                        selected
-                          ? 'socials-composer__asset socials-composer__asset--selected'
-                          : 'socials-composer__asset'
+                      aria-label={
+                        isAccepted ? `Select ${asset.type} asset` : 'Not available for this format'
                       }
+                      aria-pressed={selected}
+                      className={[
+                        'socials-composer__asset',
+                        selected && 'socials-composer__asset--selected',
+                        !isAccepted && 'socials-composer__asset--disabled',
+                      ]
+                        .filter(Boolean)
+                        .join(' ')}
+                      disabled={!isAccepted}
                       key={asset.url}
-                      onClick={() => toggleMedia(asset.url)}
+                      onClick={() => isAccepted && toggleMedia(asset.url)}
+                      title={isAccepted ? undefined : 'Not available for this format'}
                       type="button"
                     >
                       {asset.type === 'image' ? (
@@ -682,6 +912,40 @@ export const SocialPublishPanelClient: React.FC<Props> = ({ sourceKind = 'produc
                     </button>
                   )
                 })}
+              </div>
+
+              <div className="socials-composer__add-media">
+                <Button onClick={openDrawer} size="small">
+                  Media library
+                </Button>
+                <div className="socials-composer__add-media-url">
+                  <input
+                    aria-label="Media URL"
+                    onChange={(event) => setUrlInput(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') {
+                        event.preventDefault()
+                        handleAddByUrl()
+                      }
+                    }}
+                    placeholder="https://..."
+                    type="url"
+                    value={urlInput}
+                  />
+                  <select
+                    aria-label="URL media type"
+                    onChange={(event) =>
+                      setUrlTypeOverride(event.target.value as 'image' | 'video')
+                    }
+                    value={urlTypeOverride}
+                  >
+                    <option value="image">Image</option>
+                    <option value="video">Video</option>
+                  </select>
+                  <Button disabled={!urlInput.trim()} onClick={handleAddByUrl} size="small">
+                    Add URL
+                  </Button>
+                </div>
               </div>
             </fieldset>
           )}
@@ -711,11 +975,6 @@ export const SocialPublishPanelClient: React.FC<Props> = ({ sourceKind = 'produc
           ) : (
             <p aria-live="polite" className="socials-composer__valid">
               Ready to publish
-            </p>
-          )}
-          {error && (
-            <p className="socials-composer__error" role="alert">
-              {error}
             </p>
           )}
           {publishedRef && (
@@ -751,7 +1010,7 @@ export const SocialPublishPanelClient: React.FC<Props> = ({ sourceKind = 'produc
           {state.link && (platform === 'pinterest' || state.format === 'LINK') && (
             <small>{state.link}</small>
           )}
-          <em>API preview — final rendering may vary by platform and device.</em>
+          <em>API preview - final rendering may vary by platform and device.</em>
         </aside>
       </div>
 
@@ -779,6 +1038,436 @@ export const SocialPublishPanelClient: React.FC<Props> = ({ sourceKind = 'produc
           </ul>
         </details>
       )}
+
+      <ListDrawer onSelect={handleLibrarySelect as never} />
     </section>
   )
+}
+
+// ===========================================================================
+// Standalone composer
+// ===========================================================================
+
+const StandaloneComposer: React.FC = () => {
+  const { config } = useConfig()
+  const socials = asRecord(asRecord(config.custom)?.socials)
+  const enabledPlatforms = Array.isArray(socials?.enabledPlatforms)
+    ? socials.enabledPlatforms.filter(
+        (value): value is PlatformId =>
+          typeof value === 'string' && PLATFORM_IDS.includes(value as PlatformId),
+      )
+    : []
+  const apiRoute = typeof config.routes?.api === 'string' ? config.routes.api : '/api'
+  const basePath = typeof socials?.apiBasePath === 'string' ? socials.apiBasePath : '/socials'
+  const endpointBase = `${apiRoute.replace(/\/$/, '')}${basePath}`
+
+  const [state, setState] = useState<StandaloneComposerState>(() =>
+    buildStandaloneInitialState(enabledPlatforms),
+  )
+  const [perChannelFormat, setPerChannelFormat] = useState<Partial<Record<PlatformId, string>>>({})
+  const [destinations, setDestinations] = useState<Partial<Record<PlatformId, Destination[]>>>({})
+  const [loading, setLoading] = useState(false)
+  const [results, setResults] = useState<ComposeResult | null>(null)
+
+  // Media library drawer
+  const [ListDrawer, , { openDrawer }] = useListDrawer({
+    collectionSlugs: undefined as never,
+    uploads: true,
+  })
+
+  // URL input state
+  const [urlInput, setUrlInput] = useState('')
+  const [urlTypeOverride, setUrlTypeOverride] = useState<'image' | 'video'>('image')
+
+  // Load destinations for selected channels
+  useEffect(() => {
+    const controllers: AbortController[] = []
+    for (const platform of state.channels) {
+      if (destinations[platform]) {
+        continue
+      }
+      const controller = new AbortController()
+      controllers.push(controller)
+      void (async () => {
+        try {
+          const response = await fetch(`${endpointBase}${destinationPath[platform]}`, {
+            signal: controller.signal,
+          })
+          const body = (await response.json()) as Record<string, unknown>
+          if (!response.ok) {
+            return
+          }
+          const values =
+            platform === 'pinterest'
+              ? body.boards
+              : platform === 'facebook'
+                ? body.pages
+                : platform === 'instagram'
+                  ? body.accounts
+                  : body.locations
+          const rows = Array.isArray(values)
+            ? values
+                .map(asRecord)
+                .filter((row): row is Record<string, unknown> => row !== undefined)
+            : []
+          const next = rows.flatMap((row) => {
+            const idValue =
+              platform === 'instagram'
+                ? row.igUserId
+                : platform === 'gbp'
+                  ? row.resourceName
+                  : row.id
+            if (typeof idValue !== 'string') {
+              return []
+            }
+            const label =
+              [row.name, row.pageName, row.title, row.storeCode].find(
+                (value): value is string => typeof value === 'string',
+              ) ?? idValue
+            return [{ id: idValue, label }]
+          })
+          setDestinations((current) => ({ ...current, [platform]: next }))
+        } catch {
+          // Silently ignore on abort
+        }
+      })()
+    }
+    return () => controllers.forEach((c) => c.abort())
+  }, [endpointBase, state.channels, destinations])
+
+  const toggleChannel = (platform: PlatformId): void => {
+    setState((current) => ({
+      ...current,
+      channels: current.channels.includes(platform)
+        ? current.channels.filter((p) => p !== platform)
+        : [...current.channels, platform],
+    }))
+  }
+
+  const handleLibrarySelect = useCallback(
+    async (doc: { collectionSlug: string; docID: string }) => {
+      try {
+        const response = await fetch(`${apiRoute}/${doc.collectionSlug}/${doc.docID}`)
+        if (!response.ok) {
+          toast.error('Failed to load media document')
+          return
+        }
+        const mediaDoc = (await response.json()) as Record<string, unknown>
+        const mimeType = typeof mediaDoc.mimeType === 'string' ? mediaDoc.mimeType : undefined
+        const type = inferMediaType('', mimeType)
+        const format = inferFormat('', mimeType)
+
+        let url = typeof mediaDoc.url === 'string' ? mediaDoc.url : ''
+        if (
+          type === 'image' &&
+          format &&
+          ['avif', 'webp'].includes(format) &&
+          mediaDoc.sizes &&
+          typeof mediaDoc.sizes === 'object'
+        ) {
+          const sizes = mediaDoc.sizes as Record<string, Record<string, unknown>>
+          let bestWidth = 0
+          for (const [, sizeData] of Object.entries(sizes)) {
+            const sizeUrl = sizeData?.url
+            const sizeMime = sizeData?.mimeType
+            const sizeWidth = typeof sizeData?.width === 'number' ? sizeData.width : 0
+            if (
+              typeof sizeUrl === 'string' &&
+              typeof sizeMime === 'string' &&
+              sizeMime.includes('jpeg') &&
+              sizeWidth > bestWidth
+            ) {
+              bestWidth = sizeWidth
+              url = sizeUrl
+            }
+          }
+        }
+
+        if (url.startsWith('/')) {
+          url = `${window.location.origin}${url}`
+        }
+
+        const newAsset: SocialDraftMedia = {
+          type,
+          altText: typeof mediaDoc.alt === 'string' ? mediaDoc.alt : undefined,
+          format,
+          height: typeof mediaDoc.height === 'number' ? mediaDoc.height : undefined,
+          url,
+          width: typeof mediaDoc.width === 'number' ? mediaDoc.width : undefined,
+        }
+
+        setState((current) => ({ ...current, media: [...current.media, newAsset] }))
+        toast.success('Media added from library')
+      } catch {
+        toast.error('Failed to load media from library')
+      }
+    },
+    [apiRoute],
+  )
+
+  const handleAddByUrl = useCallback(() => {
+    if (!urlInput.trim()) {
+      return
+    }
+    const url = urlInput.trim()
+    const newAsset: SocialDraftMedia = {
+      type: urlTypeOverride,
+      format: inferFormat(url),
+      url: url.startsWith('/') ? `${window.location.origin}${url}` : url,
+    }
+    setState((current) => ({ ...current, media: [...current.media, newAsset] }))
+    setUrlInput('')
+    toast.success('Media added by URL')
+  }, [urlInput, urlTypeOverride])
+
+  const publish = async (): Promise<void> => {
+    if (!state.title.trim()) {
+      toast.error('Title is required.')
+      return
+    }
+    if (state.channels.length === 0) {
+      toast.error('Select at least one channel.')
+      return
+    }
+    setLoading(true)
+    setResults(null)
+    try {
+      const body = compileStandalonePublishBody(state, perChannelFormat)
+      const response = await fetch(`${endpointBase}/compose/publish`, {
+        body: JSON.stringify(body),
+        headers: { 'Content-Type': 'application/json' },
+        method: 'POST',
+      })
+      const result = (await response.json()) as ComposeResult
+      setResults(result)
+      if (result.anyPublished) {
+        toast.success('Published to at least one channel.')
+      } else {
+        toast.error('All channels failed.')
+      }
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : String(caught))
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <section className="socials-composer">
+      <header className="socials-composer__header">
+        <div>
+          <h2>Standalone composer</h2>
+          <p>Compose one post from scratch and publish it to multiple channels at once.</p>
+        </div>
+      </header>
+
+      <div className="socials-composer__fields" style={{ marginTop: '1.5rem' }}>
+        <label>
+          Title *
+          <input
+            aria-label="Post title"
+            onChange={(event) => setState((s) => ({ ...s, title: event.target.value }))}
+            required
+            value={state.title}
+          />
+        </label>
+
+        <label>
+          Body
+          <textarea
+            aria-label="Post body"
+            onChange={(event) => setState((s) => ({ ...s, body: event.target.value }))}
+            rows={6}
+            value={state.body}
+          />
+        </label>
+
+        <label>
+          Link (optional)
+          <input
+            aria-label="Post link"
+            onChange={(event) => setState((s) => ({ ...s, link: event.target.value }))}
+            type="url"
+            value={state.link}
+          />
+        </label>
+
+        <fieldset className="socials-composer__media">
+          <legend>Media</legend>
+          {state.media.length > 0 && (
+            <div className="socials-composer__media-grid">
+              {state.media.map((asset, index) => (
+                <div
+                  className="socials-composer__asset socials-composer__asset--selected"
+                  key={index}
+                >
+                  {asset.type === 'image' ? (
+                    <img alt={asset.altText ?? ''} src={asset.url} />
+                  ) : (
+                    <>
+                      <video aria-label="Video asset" muted preload="metadata" src={asset.url} />
+                      <span>Video</span>
+                    </>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="socials-composer__add-media">
+            <Button onClick={openDrawer} size="small">
+              Media library
+            </Button>
+            <div className="socials-composer__add-media-url">
+              <input
+                aria-label="Media URL"
+                onChange={(event) => setUrlInput(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault()
+                    handleAddByUrl()
+                  }
+                }}
+                placeholder="https://..."
+                type="url"
+                value={urlInput}
+              />
+              <select
+                aria-label="URL media type"
+                onChange={(event) => setUrlTypeOverride(event.target.value as 'image' | 'video')}
+                value={urlTypeOverride}
+              >
+                <option value="image">Image</option>
+                <option value="video">Video</option>
+              </select>
+              <Button disabled={!urlInput.trim()} onClick={handleAddByUrl} size="small">
+                Add URL
+              </Button>
+            </div>
+          </div>
+        </fieldset>
+
+        <fieldset
+          style={{ border: '1px solid var(--socials-border)', borderRadius: 6, padding: '0.75rem' }}
+        >
+          <legend>Channels</legend>
+          <div className="socials-composer__channels">
+            {enabledPlatforms.map((platform) => (
+              <label
+                className={[
+                  'socials-composer__channel-chip',
+                  state.channels.includes(platform) && 'socials-composer__channel-chip--active',
+                ]
+                  .filter(Boolean)
+                  .join(' ')}
+                key={platform}
+              >
+                <input
+                  aria-label={PLATFORM_LABELS[platform]}
+                  checked={state.channels.includes(platform)}
+                  onChange={() => toggleChannel(platform)}
+                  type="checkbox"
+                />
+                {PLATFORM_LABELS[platform]}
+              </label>
+            ))}
+          </div>
+
+          {state.channels.map((platform) => (
+            <div key={platform} style={{ marginTop: '0.75rem' }}>
+              <div className="socials-composer__row">
+                <label>
+                  {PLATFORM_LABELS[platform]} destination
+                  <select
+                    onChange={(event) =>
+                      setState((s) => ({
+                        ...s,
+                        destinations: { ...s.destinations, [platform]: event.target.value },
+                      }))
+                    }
+                    value={state.destinations[platform] ?? ''}
+                  >
+                    <option value="">Select…</option>
+                    {(destinations[platform] ?? []).map((d) => (
+                      <option key={d.id} value={d.id}>
+                        {d.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  {PLATFORM_LABELS[platform]} format
+                  <select
+                    onChange={(event) =>
+                      setPerChannelFormat((f) => ({ ...f, [platform]: event.target.value }))
+                    }
+                    value={perChannelFormat[platform] ?? ''}
+                  >
+                    <option value="">Default</option>
+                    {platformFormats[platform].map((f) => (
+                      <option key={f.value} value={f.value}>
+                        {f.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+            </div>
+          ))}
+        </fieldset>
+
+        {results && (
+          <ul className="socials-composer__results">
+            {results.results.map((r) => (
+              <li
+                className={`socials-composer__result-item ${r.ok ? 'socials-composer__result-ok' : 'socials-composer__result-err'}`}
+                key={r.platform}
+              >
+                <strong>{PLATFORM_LABELS[r.platform]}</strong>
+                {r.ok ? (
+                  <span className="socials-composer__success">
+                    Published
+                    {r.publishedRef?.externalUrl && (
+                      <>
+                        {' '}
+                        <a href={r.publishedRef.externalUrl} rel="noreferrer" target="_blank">
+                          View
+                        </a>
+                      </>
+                    )}
+                  </span>
+                ) : (
+                  <span className="socials-composer__error">{r.error ?? 'Failed'}</span>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+
+        <Button
+          disabled={loading || state.channels.length === 0 || !state.title.trim()}
+          onClick={() => {
+            void publish()
+          }}
+        >
+          {loading ? 'Publishing…' : 'Publish to selected channels'}
+        </Button>
+      </div>
+
+      <ListDrawer onSelect={handleLibrarySelect as never} />
+    </section>
+  )
+}
+
+// ===========================================================================
+// Entry point
+// ===========================================================================
+
+export const SocialPublishPanelClient: React.FC<Props> = ({
+  mode = 'source',
+  sourceKind = 'product',
+}) => {
+  if (mode === 'standalone') {
+    return <StandaloneComposer />
+  }
+  return <SourceComposer sourceKind={sourceKind} />
 }
