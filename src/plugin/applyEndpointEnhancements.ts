@@ -13,6 +13,7 @@ import { createMetaOauthEndpoints } from '../server/endpoints/createMetaOauthEnd
 import { createMetaWebhookEndpoints } from '../server/endpoints/createMetaWebhookEndpoints.js'
 import { createPinterestBoardsEndpoints } from '../server/endpoints/createPinterestBoardsEndpoints.js'
 import { createPinterestOauthEndpoints } from '../server/endpoints/createPinterestOauthEndpoints.js'
+import { createPostDeleteEndpoints } from '../server/endpoints/createPostDeleteEndpoints.js'
 import { createSourcePublishEndpoints } from '../server/endpoints/createSourcePublishEndpoints.js'
 import { createTemplateEndpoints } from '../server/endpoints/createTemplateEndpoints.js'
 
@@ -38,6 +39,7 @@ export const applyEndpointEnhancements = (
     ...createTemplateEndpoints(options),
     ...createComposeEndpoints(options),
     ...createInternalSchedulerEndpoints(options),
+    ...createPostDeleteEndpoints(options),
   ]
 
   // Avoid duplicate registration on HMR — match by exact (method, path).

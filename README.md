@@ -34,6 +34,7 @@ The `1.x` API follows semantic versioning. Schema changes are called out in the 
   - [Facebook Pages](#facebook-pages)
   - [Google Business Profile](#google-business-profile)
 - [Publishing](#publishing)
+- [Deleting a published post](#deleting-a-published-post)
 - [Standalone composer](#standalone-composer)
 - [Image asset pipeline](#image-asset-pipeline)
 - [Scheduling (bring your own scheduler)](#scheduling-bring-your-own-scheduler)
@@ -605,6 +606,28 @@ When the task fires, the plugin re-resolves the source context from your host da
 
 ---
 
+## Deleting a published post
+
+Send `DELETE /api/socials/posts/:postId` with the `social-posts` row id. The endpoint is publisher-gated and available on all four platforms.
+
+```ts
+fetch(`/api/socials/posts/${postId}`, { method: 'DELETE' })
+// => { ok: true, postId: 42, status: 'deleted' }
+```
+
+The handler calls the platform adapter's `delete` method to remove the post upstream, then soft-deletes the local row by setting its status to `deleted`. The row is never hard-deleted: it stays in the database as both the audit record and the idempotency anchor. `meta.deletedAt` (ISO timestamp) and `meta.deletedBy` (the requesting user's id) are written alongside the status change.
+
+If the upstream platform returns a 404 or a "not found" error, the endpoint treats that as success. The post may already have been removed manually from the platform dashboard; the outcome is the same either way. Any other upstream error is returned to the caller and the row is left untouched.
+
+Publishing the same content again after deletion reuses the existing row rather than creating a new one. The row transitions back to `published` in place, keeping the full history on a single database record.
+
+The history panel in `SocialPublishPanelClient` shows a Delete button on each published row. Clicking it arms a confirmation prompt inline (same two-step pattern as the platform disconnect button), and confirming calls the endpoint and refreshes the list.
+
+> [!NOTE]
+> The `deleted` status is a new enum value added to the `soc_post_status` column. Postgres hosts must run `pnpm payload migrate:create` and `pnpm payload migrate` after upgrading to this version. SQLite and MongoDB hosts do not require a migration for this change.
+
+---
+
 ## Standalone composer
 
 The source-polymorphic routes above publish from a host record. The standalone composer publishes content you type directly, with no source record, to many channels at once.
@@ -911,6 +934,12 @@ POST  /api/socials/:platform/:sourceKind/:sourceId/publish     # publisher-gated
 GET   /api/socials/:platform/:sourceKind/:sourceId/history     # publisher-gated; the last 50 social-posts rows
 GET   /api/socials/templates/:sourceKind/:sourceId             # publisher-gated; resolved enabled templates
 POST  /api/socials/templates/preview                           # admin-gated; preview draft template fields + scopeKeys
+```
+
+### Post deletion
+
+```
+DELETE /api/socials/posts/:postId                    # publisher-gated; soft-deletes a published post upstream and locally
 ```
 
 ### Meta webhooks
