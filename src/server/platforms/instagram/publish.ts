@@ -15,6 +15,7 @@ import {
   INSTAGRAM_CONTAINER_LIFETIME_HOURS,
   SOCIAL_POSTS_SLUG,
 } from '../../../constants.js'
+import { resolvePlatformImageUrl } from '../../assets/resolvePlatformImage.js'
 import { PlatformApiError, ValidationError } from '../../utilities/errors.js'
 import { sha256Hex } from '../../utilities/hash.js'
 import { metaJson } from '../_meta/api.js'
@@ -46,6 +47,11 @@ import { buildDefaultInstagramCaption, countHashtags, countMentions } from './co
  *
  * Idempotency key:
  *   sha256("instagram:" + sourceKind + ":" + sourceId + ":" + igUserId + ":" + mediaType + ":" + primaryAssetUrl)
+ *
+ * Image conversion (assets.autoConvert) happens ONLY when constructing the
+ * outbound Instagram API container body, AFTER the idempotency key and
+ * primaryAssetUrl are locked to the ORIGINAL input URL. The converted URL
+ * never touches the key, primaryAssetUrl, sourceHash, or the reservation row.
  */
 
 export const INSTAGRAM_MEDIA_TYPES = ['IMAGE', 'REELS', 'STORIES', 'CAROUSEL'] as const
@@ -141,16 +147,21 @@ const validateCaption = (caption: string): void => {
   }
 }
 
+/**
+ * Build a single-image container body using the OUTBOUND image URL (may be a
+ * converted rendition). All key/hash logic uses the original URL from input.
+ */
 const buildSingleImageContainerBody = (
   caption: string,
   input: InstagramPublishInput,
+  outboundImageUrl: string,
 ): Record<string, unknown> => {
-  if (!input.imageUrl) {
+  if (!outboundImageUrl) {
     throw new ValidationError('imageUrl is required for IMAGE media')
   }
   const body: Record<string, unknown> = {
     caption,
-    image_url: input.imageUrl,
+    image_url: outboundImageUrl,
   }
   if (input.locationId) {
     body.location_id = input.locationId
@@ -189,10 +200,17 @@ const buildReelsContainerBody = (
   return body
 }
 
-const buildStoriesContainerBody = (input: InstagramPublishInput): Record<string, unknown> => {
+/**
+ * Build a STORIES container body using the OUTBOUND image URL (may be
+ * converted). Original URL is used for keys only.
+ */
+const buildStoriesContainerBody = (
+  input: InstagramPublishInput,
+  outboundImageUrl?: string,
+): Record<string, unknown> => {
   const body: Record<string, unknown> = { media_type: 'STORIES' }
-  if (input.imageUrl) {
-    body.image_url = input.imageUrl
+  if (outboundImageUrl) {
+    body.image_url = outboundImageUrl
   } else if (input.videoUrl) {
     body.video_url = input.videoUrl
   } else {
@@ -285,6 +303,10 @@ const createContainer = async (
   return response.id
 }
 
+/**
+ * Build carousel child containers using outbound (possibly converted) URLs.
+ * The carousel primaryAssetUrl (for keys) uses the original child URLs.
+ */
 const buildCarouselChildren = async (
   payload: Payload,
   options: NormalizedPluginOptions,
@@ -306,7 +328,14 @@ const buildCarouselChildren = async (
     children.map(async (child) => {
       const body: Record<string, unknown> = { is_carousel_item: true }
       if (child.imageUrl) {
-        body.image_url = child.imageUrl
+        // Resolve outbound URL for the child image (conversion if needed).
+        const resolved = await resolvePlatformImageUrl({
+          imageUrl: child.imageUrl,
+          options,
+          payload,
+          platform: 'instagram',
+        })
+        body.image_url = resolved.url
       } else if (child.videoUrl) {
         body.media_type = 'VIDEO'
         body.video_url = child.videoUrl
@@ -397,6 +426,8 @@ export const publishInstagramMedia = async (args: {
   }
   const mediaType = input.mediaType ?? 'IMAGE'
 
+  // Derive primaryAssetUrl and idempotencyKey from the ORIGINAL input URL.
+  // These must never be touched by format conversion.
   const primaryAssetUrl = resolvePrimaryAssetUrl(input)
   if (!primaryAssetUrl && mediaType !== 'CAROUSEL') {
     throw new ValidationError('imageUrl or videoUrl is required')
@@ -421,6 +452,21 @@ export const publishInstagramMedia = async (args: {
     }
   }
 
+  // ---- Outbound URL resolution (conversion only touches the API request body) ----
+  // Resolve the image URL for single-image and STORIES media types.
+  let outboundImageUrl: string | undefined
+  if ((mediaType === 'IMAGE' || mediaType === 'STORIES') && input.imageUrl) {
+    const imgMeta = ctx.images.find((img) => img.url === input.imageUrl)
+    const resolved = await resolvePlatformImageUrl({
+      declaredFormat: imgMeta?.format,
+      imageUrl: input.imageUrl,
+      options,
+      payload,
+      platform: 'instagram',
+    })
+    outboundImageUrl = resolved.url
+  }
+
   // ---- Container assembly + publish ----
   let containerId: string
   if (mediaType === 'IMAGE') {
@@ -428,7 +474,7 @@ export const publishInstagramMedia = async (args: {
       payload,
       options,
       input.igUserId,
-      buildSingleImageContainerBody(caption, input),
+      buildSingleImageContainerBody(caption, input, outboundImageUrl ?? ''),
     )
   } else if (mediaType === 'REELS') {
     containerId = await createContainer(
@@ -442,7 +488,7 @@ export const publishInstagramMedia = async (args: {
       payload,
       options,
       input.igUserId,
-      buildStoriesContainerBody(input),
+      buildStoriesContainerBody(input, outboundImageUrl),
     )
   } else if (mediaType === 'CAROUSEL') {
     if (!input.carouselChildren) {
@@ -497,6 +543,7 @@ export const publishInstagramMedia = async (args: {
     }
   }
 
+  // sourceHash is derived from the ORIGINAL primaryAssetUrl, not the converted one.
   const sourceHash = sha256Hex(
     JSON.stringify({
       caption,

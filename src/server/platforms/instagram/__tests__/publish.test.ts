@@ -9,17 +9,23 @@ import type {
 } from '../../../../types/index.js'
 
 import { PlatformApiError, ValidationError } from '../../../utilities/errors.js'
+import { buildPublicationIdentity } from '../../../utilities/publicationIdentity.js'
 
 vi.mock('../../_meta/api.js', () => ({
   makeMetaRequest: vi.fn(),
   metaJson: vi.fn(),
 }))
+vi.mock('../../../assets/resolvePlatformImage.js', () => ({
+  resolvePlatformImageUrl: vi.fn(),
+}))
 
+import { resolvePlatformImageUrl } from '../../../assets/resolvePlatformImage.js'
 import { makeMetaRequest, metaJson } from '../../_meta/api.js'
 import { deleteInstagramMedia, publishInstagramMedia } from '../publish.js'
 
 const mockedMetaJson = vi.mocked(metaJson)
 const mockedRequest = vi.mocked(makeMetaRequest)
+const mockedResolve = vi.mocked(resolvePlatformImageUrl)
 
 const options = {
   copyOverrides: {},
@@ -77,6 +83,13 @@ beforeEach(() => {
     logger: undefined,
     update: vi.fn().mockResolvedValue({ id: 'row_existing' }),
   }
+  // Default: pass through (no conversion)
+  mockedResolve.mockImplementation(({ imageUrl }) =>
+    Promise.resolve({
+      converted: false,
+      url: imageUrl,
+    }),
+  )
 })
 
 describe('publishInstagramMedia — validation', () => {
@@ -173,6 +186,9 @@ describe('publishInstagramMedia — two-phase flow', () => {
 
     vi.clearAllMocks()
     payload.find.mockResolvedValue({ docs: [] })
+    mockedResolve.mockImplementation(({ imageUrl }) =>
+      Promise.resolve({ converted: false, url: imageUrl }),
+    )
     setupFlow()
     await publishInstagramMedia({
       ctx: ctx(),
@@ -306,5 +322,171 @@ describe('deleteInstagramMedia', () => {
     await expect(
       deleteInstagramMedia({ options, payload: asPayload(payload), publishedRef: ref() }),
     ).rejects.toBeInstanceOf(ValidationError)
+  })
+})
+
+describe('publishInstagramMedia — idempotency key uses ORIGINAL url when autoConvert fires', () => {
+  const ORIGINAL_URL = 'https://cdn.example.com/image.avif'
+  const CONVERTED_URL = 'https://cdn.example.com/renditions/socials-rendition-abcd1234.jpg'
+
+  const autoConvertOptions = {
+    assets: {
+      autoConvert: true,
+      jpegQuality: 82,
+      preflight: true,
+      renditionCollection: 'media',
+    },
+    copyOverrides: {},
+    platforms: { instagram: { apiVersion: 'v25.0', enabled: true } },
+  } as unknown as NormalizedPluginOptions
+
+  beforeEach(() => {
+    // Simulate conversion: returns a different URL.
+    mockedResolve.mockResolvedValue({ converted: true, format: 'jpeg', url: CONVERTED_URL })
+    setupFlow()
+  })
+
+  it('idempotencyKey matches buildPublicationIdentity for the ORIGINAL url', async () => {
+    const input = {
+      igUserId: 'ig1',
+      imageUrl: ORIGINAL_URL,
+      mediaType: 'IMAGE' as const,
+    }
+    const testCtx = ctx({ images: [{ format: 'avif', role: 'main', url: ORIGINAL_URL }] })
+
+    await publishInstagramMedia({
+      ctx: testCtx,
+      input,
+      options: autoConvertOptions,
+      payload: asPayload(payload),
+    })
+
+    const saved = payload.create.mock.calls[0][0].data
+    const expected = buildPublicationIdentity({
+      ctx: testCtx,
+      input,
+      platform: 'instagram',
+      sourceId: testCtx.sourceId,
+      sourceKind: testCtx.sourceKind,
+    })
+
+    // Keys must be derived from the ORIGINAL url, not the converted one.
+    expect(saved.idempotencyKey).toBe(expected.idempotencyKey)
+    // The stored imageUrl must be the original.
+    expect(saved.imageUrl).toBe(ORIGINAL_URL)
+
+    // The outbound API container body must carry the CONVERTED url.
+    const containerBody = createBodies()[0]
+    expect(containerBody.image_url).toBe(CONVERTED_URL)
+  })
+
+  it('sourceHash includes the ORIGINAL primaryAssetUrl, not the converted one', async () => {
+    const input = {
+      igUserId: 'ig1',
+      imageUrl: ORIGINAL_URL,
+      mediaType: 'IMAGE' as const,
+    }
+    const testCtx = ctx({ images: [{ format: 'avif', role: 'main', url: ORIGINAL_URL }] })
+
+    await publishInstagramMedia({
+      ctx: testCtx,
+      input,
+      options: autoConvertOptions,
+      payload: asPayload(payload),
+    })
+
+    const saved = payload.create.mock.calls[0][0].data
+    const { sha256Hex } = await import('../../../utilities/hash.js')
+
+    const recomputedWithOriginal = sha256Hex(
+      JSON.stringify({
+        caption: saved.body,
+        carouselChildren: undefined,
+        igUserId: 'ig1',
+        mediaType: 'IMAGE',
+        primaryAssetUrl: ORIGINAL_URL,
+      }),
+    )
+    const recomputedWithConverted = sha256Hex(
+      JSON.stringify({
+        caption: saved.body,
+        carouselChildren: undefined,
+        igUserId: 'ig1',
+        mediaType: 'IMAGE',
+        primaryAssetUrl: CONVERTED_URL,
+      }),
+    )
+
+    expect(saved.sourceHash).toBe(recomputedWithOriginal)
+    expect(saved.sourceHash).not.toBe(recomputedWithConverted)
+  })
+
+  it('STORIES: outbound body uses converted url, key uses original', async () => {
+    const input = {
+      igUserId: 'ig1',
+      imageUrl: ORIGINAL_URL,
+      mediaType: 'STORIES' as const,
+    }
+    const testCtx = ctx({ images: [{ format: 'avif', role: 'main', url: ORIGINAL_URL }] })
+
+    await publishInstagramMedia({
+      ctx: testCtx,
+      input,
+      options: autoConvertOptions,
+      payload: asPayload(payload),
+    })
+
+    const expected = buildPublicationIdentity({
+      ctx: testCtx,
+      input,
+      platform: 'instagram',
+      sourceId: testCtx.sourceId,
+      sourceKind: testCtx.sourceKind,
+    })
+
+    const saved = payload.create.mock.calls[0][0].data
+    expect(saved.idempotencyKey).toBe(expected.idempotencyKey)
+
+    const containerBody = createBodies()[0]
+    expect(containerBody.image_url).toBe(CONVERTED_URL)
+  })
+
+  it('with autoConvert OFF and an allowed format, passes through unchanged', async () => {
+    const passthroughOptions = {
+      assets: { autoConvert: false, jpegQuality: 82, preflight: true },
+      copyOverrides: {},
+      platforms: { instagram: { apiVersion: 'v25.0', enabled: true } },
+    } as unknown as NormalizedPluginOptions
+
+    const JPEG_URL = 'https://cdn.example.com/image.jpg'
+    mockedResolve.mockResolvedValue({ converted: false, format: 'jpeg', url: JPEG_URL })
+
+    const input = {
+      igUserId: 'ig1',
+      imageUrl: JPEG_URL,
+      mediaType: 'IMAGE' as const,
+    }
+    const testCtx = ctx({ images: [{ format: 'jpeg', role: 'main', url: JPEG_URL }] })
+
+    await publishInstagramMedia({
+      ctx: testCtx,
+      input,
+      options: passthroughOptions,
+      payload: asPayload(payload),
+    })
+
+    const saved = payload.create.mock.calls[0][0].data
+    const expected = buildPublicationIdentity({
+      ctx: testCtx,
+      input,
+      platform: 'instagram',
+      sourceId: testCtx.sourceId,
+      sourceKind: testCtx.sourceKind,
+    })
+    expect(saved.idempotencyKey).toBe(expected.idempotencyKey)
+
+    const containerBody = createBodies()[0]
+    // No conversion: outbound body also uses the original url.
+    expect(containerBody.image_url).toBe(JPEG_URL)
   })
 })
