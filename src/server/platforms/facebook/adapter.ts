@@ -12,6 +12,7 @@ import type {
 } from '../../../types/index.js'
 
 import { PLATFORM_IMAGE_CONSTRAINTS } from '../../assets/imagePreflight.js'
+import { resolveConfiguredText } from '../../copy/resolveConfiguredCopy.js'
 import { getCredentials, recordConnectionError } from '../../services/connectionService.js'
 import { ValidationError } from '../../utilities/errors.js'
 import { refreshMetaAccessToken } from '../_meta/api.js'
@@ -132,8 +133,12 @@ export const createFacebookAdapter = (
     },
 
     preview(args: PreviewArgs): Promise<PreviewResult> {
-      const message =
-        options.copyOverrides.facebookMessage?.(args.ctx) ?? buildDefaultFacebookMessage(args.ctx)
+      const message = resolveConfiguredText(
+        'facebookMessage',
+        args.ctx,
+        options,
+        buildDefaultFacebookMessage,
+      )
       const primary = args.ctx.images[0]
       return Promise.resolve({
         body: message,
@@ -177,8 +182,7 @@ export const createFacebookAdapter = (
         const link = input?.link ?? ctx.link
         const message =
           input?.message?.trim() ||
-          options.copyOverrides.facebookMessage?.(ctx) ||
-          buildDefaultFacebookMessage(ctx)
+          resolveConfiguredText('facebookMessage', ctx, options, buildDefaultFacebookMessage)
         if (!link && !message) {
           issues.push({
             message: 'LINK posts need either a link or a non-empty message',

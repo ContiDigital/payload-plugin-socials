@@ -26,6 +26,7 @@ The `1.x` API follows semantic versioning. Schema changes are called out in the 
 - [Configuration](#configuration)
 - [Source resolvers](#source-resolvers)
 - [Post templates](#post-templates)
+- [Copy transformations](#copy-transformations)
 - [Per-platform setup](#per-platform-setup)
   - [Pinterest](#pinterest)
   - [Instagram Business](#instagram-business)
@@ -308,6 +309,61 @@ const title = renderTemplate('{{title}} | {{modelLabel}}', buildTemplateScope(ct
 const copy = resolveTemplateCopy(templateDoc.templates, ctx, { boardName: 'Statues' })
 // => { pinterestTitle?, pinterestDescription?, pinterestHashtags?: string[], ... }
 ```
+
+---
+
+## Copy transformations
+
+The `transformations` option is the recommended way to customize copy when you need source-kind-aware behaviour. It takes precedence over `copyOverrides` and is resolved at publish and preview time.
+
+Each key is a source kind (for example `'product'`) and each value is a map of field names to transforms. The optional `'*'` key acts as a wildcard and applies to any source kind that has no explicit entry. Precedence from highest to lowest:
+
+1. `transformations[ctx.sourceKind][field]` — kind-specific
+2. `transformations['*'][field]` — wildcard fallback
+3. `copyOverrides[field]` — legacy function-only overrides (still works)
+4. The built-in default builder
+
+A transform can be either a `{{ variable | filter }}` template string (rendered through the same engine as post templates) or a function that receives the `SocialSourceContext` directly:
+
+```ts
+payloadPluginSocials({
+  // ...
+  transformations: {
+    product: {
+      // Template string: uses the existing interpolation engine.
+      pinterestTitle: '{{ title | upper }} | {{ modelLabel | default:Shop Now }}',
+
+      // Template with truncation:
+      pinterestDescription:
+        '{{ category }} crafted from {{ material }}. {{ description | truncate:300 }}',
+
+      // Function: full access to the source context.
+      pinterestHashtags: (ctx) => {
+        const base = ['#marble', '#luxury']
+        if (ctx.metadata?.googleColor) {
+          base.push(`#${String(ctx.metadata.googleColor).replace(/\s+/g, '')}`)
+        }
+        return base
+      },
+    },
+
+    blogPost: {
+      instagramCaption: (ctx) =>
+        `${ctx.baseTitle}\n\n${ctx.baseDescription.slice(0, 200)}\n\n${ctx.link}`,
+    },
+
+    // Wildcard: applies when no kind-specific entry matches.
+    '*': {
+      facebookMessage: '{{ title }}\n\n{{ description | truncate:300 }}',
+      gbpSummary: '{{ title }} -- {{ description | truncate:250 }}',
+    },
+  },
+})
+```
+
+For `pinterestHashtags`, a string value is split on whitespace and commas and each token gets a `#` prefix when one is missing. A function value should return a `string[]` of `#tag` values directly.
+
+`copyOverrides` continues to work for simple global function overrides. Use `transformations` when you need per-kind behaviour, template strings, or both.
 
 ---
 

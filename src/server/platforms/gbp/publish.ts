@@ -7,6 +7,7 @@ import type {
 } from '../../../types/index.js'
 
 import { GBP_SUMMARY_MAX_CHARS, SOCIAL_POSTS_SLUG } from '../../../constants.js'
+import { resolveConfiguredText } from '../../copy/resolveConfiguredCopy.js'
 import { PlatformApiError, ValidationError } from '../../utilities/errors.js'
 import { sha256Hex } from '../../utilities/hash.js'
 import { GBP_HOSTS, gbpJson, makeGbpRequest } from './api.js'
@@ -75,7 +76,7 @@ export type GbpPublishInput = {
     termsConditions?: string
   }
   publishedByUserId?: number | string
-  /** Body. Falls back to host copyOverride / default builder. */
+  /** Body. Falls back to transformations → copyOverrides → default builder. */
   summary?: string
   /** Topic. Default `STANDARD`. */
   topicType?: GbpTopicType
@@ -238,7 +239,7 @@ export const publishGbpLocalPost = async (args: {
   const { accountId, locationId } = validateLocationResource(input.locationResourceName)
   const topicType: GbpTopicType = input.topicType ?? 'STANDARD'
 
-  const fallback = options.copyOverrides.gbpSummary?.(ctx) ?? buildDefaultGbpSummary(ctx)
+  const fallback = resolveConfiguredText('gbpSummary', ctx, options, buildDefaultGbpSummary)
   const summary = (input.summary?.trim() || fallback).slice(0, GBP_SUMMARY_MAX_CHARS)
 
   validateInput(input, summary, topicType)

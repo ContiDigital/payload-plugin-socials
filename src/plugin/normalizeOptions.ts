@@ -11,9 +11,11 @@ import type {
   NormalizedSchedulingConfig,
   PayloadPluginSocialsConfig,
   PinterestPluginConfig,
+  SocialCopyFieldTransforms,
   SocialsAdminConfig,
   SocialsAssetsConfig,
   SocialsSchedulingConfig,
+  SocialsTransformations,
 } from '../types/index.js'
 
 import {
@@ -33,6 +35,7 @@ import {
   SOCIALS_QUEUE_NAME,
 } from '../constants.js'
 import { coerceEncryptionKey } from '../server/utilities/encryption.js'
+import { SOCIAL_COPY_FIELD_KEYS } from '../types/index.js'
 
 const ONE_DAY_SECONDS = 24 * 60 * 60
 const THIRTY_DAYS_SECONDS = 30 * ONE_DAY_SECONDS
@@ -82,6 +85,75 @@ const normalizeAssets = (config: SocialsAssetsConfig | undefined): NormalizedAss
   }
 
   return { autoConvert, jpegQuality, preflight, renditionCollection }
+}
+
+// ---------------------------------------------------------------------------
+// Transformations normalizer
+// ---------------------------------------------------------------------------
+
+const isValidTransformValue = (value: unknown): value is ((ctx: unknown) => unknown) | string => {
+  if (typeof value === 'function') {
+    return true
+  }
+  if (typeof value === 'string' && value.trim().length > 0) {
+    return true
+  }
+  return false
+}
+
+const normalizeFieldTransforms = (
+  raw: Record<string, unknown> | undefined,
+): SocialCopyFieldTransforms => {
+  if (!raw || typeof raw !== 'object') {
+    return {}
+  }
+  // Accumulate validated entries into a Partial<SocialCopyFieldTransforms> to
+  // avoid a cast at the return site; SOCIAL_COPY_FIELD_KEYS guards unknown keys.
+  const out: Partial<SocialCopyFieldTransforms> = {}
+  for (const key of SOCIAL_COPY_FIELD_KEYS) {
+    const value = raw[key]
+    if (!isValidTransformValue(value)) {
+      continue
+    }
+    if (key === 'pinterestHashtags') {
+      // pinterestHashtags uses SocialHashtagsTransform (string | fn returning string[])
+      out.pinterestHashtags = value as SocialCopyFieldTransforms['pinterestHashtags']
+    } else {
+      out[key] = value as SocialCopyFieldTransforms[typeof key]
+    }
+  }
+  return Object.freeze(out) as SocialCopyFieldTransforms
+}
+
+/**
+ * Normalize the operator-supplied `transformations` config option.
+ *
+ * - Returns `{}` (frozen) when the input is absent or not an object.
+ * - Drops any key that is not in `SOCIAL_COPY_FIELD_KEYS` (tolerant).
+ * - Drops values that are neither a non-empty string nor a function.
+ * - Freezes the top-level map and each per-kind sub-map.
+ */
+export const normalizeTransformations = (
+  input: SocialsTransformations | undefined,
+): SocialsTransformations => {
+  if (!input || typeof input !== 'object') {
+    return Object.freeze({}) as SocialsTransformations
+  }
+
+  const result: Record<string, SocialCopyFieldTransforms> = {}
+
+  for (const kind of Object.keys(input)) {
+    const raw = (input as Record<string, unknown>)[kind]
+    if (raw && typeof raw === 'object') {
+      const normalized = normalizeFieldTransforms(raw as Record<string, unknown>)
+      // Only include the kind entry if at least one field survived.
+      if (Object.keys(normalized).length > 0) {
+        result[kind] = normalized
+      }
+    }
+  }
+
+  return Object.freeze(result) as SocialsTransformations
 }
 
 // ---------------------------------------------------------------------------
@@ -373,6 +445,9 @@ const buildNormalizedOptions = (
     scheduling: normalizeScheduling(options.scheduling),
     sources: options.sources ?? {},
     testMode: Boolean(options.testMode),
+    transformations: overrides.disabled
+      ? (Object.freeze({}) as SocialsTransformations)
+      : normalizeTransformations(options.transformations),
     webhooks: options.webhooks?.meta?.verifyToken.trim()
       ? {
           meta: {

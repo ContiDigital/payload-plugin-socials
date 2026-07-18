@@ -13,6 +13,10 @@ import {
   SOCIAL_POSTS_SLUG,
 } from '../../../constants.js'
 import { resolvePlatformImageUrl } from '../../assets/resolvePlatformImage.js'
+import {
+  resolveConfiguredHashtags,
+  resolveConfiguredText,
+} from '../../copy/resolveConfiguredCopy.js'
 import { ValidationError } from '../../utilities/errors.js'
 import { sha256Hex } from '../../utilities/hash.js'
 import { pinterestJson } from './api.js'
@@ -103,11 +107,15 @@ const resolveDefaults = (
   ctx: SocialSourceContext,
   options: NormalizedPluginOptions,
 ): { altText: string; description: string; title: string } => {
-  const o = options.copyOverrides
   return {
-    altText: o.pinterestAltText?.(ctx) ?? buildDefaultPinterestAltText(ctx),
-    description: o.pinterestDescription?.(ctx) ?? buildDefaultPinterestDescription(ctx),
-    title: o.pinterestTitle?.(ctx) ?? buildDefaultPinterestTitle(ctx),
+    altText: resolveConfiguredText('pinterestAltText', ctx, options, buildDefaultPinterestAltText),
+    description: resolveConfiguredText(
+      'pinterestDescription',
+      ctx,
+      options,
+      buildDefaultPinterestDescription,
+    ),
+    title: resolveConfiguredText('pinterestTitle', ctx, options, buildDefaultPinterestTitle),
   }
 }
 
@@ -133,13 +141,12 @@ export const buildPinterestPreview = (
 ): PinterestPreview => {
   const defaults = resolveDefaults(ctx, options)
   const defaultImage = ctx.images.find((img) => img.role === 'main') ?? ctx.images[0]
-  const overrideHashtags = options.copyOverrides.pinterestHashtags?.(ctx)
   return {
     altText: defaults.altText,
     availableImages: ctx.images,
     defaultImageUrl: defaultImage?.url ?? '',
     description: defaults.description,
-    hashtags: overrideHashtags ?? buildDefaultPinterestHashtags(ctx),
+    hashtags: resolveConfiguredHashtags(ctx, options, buildDefaultPinterestHashtags),
     link: ctx.link,
     source: {
       id: ctx.sourceId,
