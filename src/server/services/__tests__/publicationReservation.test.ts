@@ -93,7 +93,7 @@ describe('publication reservations', () => {
         where: expect.objectContaining({
           and: expect.arrayContaining([
             { id: { equals: 'post_99' } },
-            { status: { in: ['cancelled', 'draft', 'failed'] } },
+            { status: { in: expect.arrayContaining(['cancelled', 'deleted', 'draft', 'failed']) } },
           ]),
         }),
       }),
@@ -113,5 +113,62 @@ describe('publication reservations', () => {
         data: expect.objectContaining({ lastError: 'access_token=[REDACTED]', status: 'failed' }),
       }),
     )
+  })
+
+  // -------------------------------------------------------------------------
+  // Republish-in-place: deleted rows are re-claimable
+  // -------------------------------------------------------------------------
+
+  it('reclaims a deleted row for republish (same row id, no duplicate)', async () => {
+    const update = vi.fn().mockResolvedValue({ docs: [{ id: 'post_del' }], errors: [] })
+    const payload = {
+      find: vi.fn().mockResolvedValue({
+        docs: [{ id: 'post_del', externalId: null, status: 'deleted' }],
+      }),
+      update,
+    } as unknown as Payload
+
+    const reservation = await reservePublication(args(payload))
+    expect(reservation).toEqual({ claimed: true, postId: 'post_del' })
+    expect(update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: 'publishing' }),
+        where: expect.objectContaining({
+          and: expect.arrayContaining([
+            { id: { equals: 'post_del' } },
+            { status: { in: expect.arrayContaining(['deleted']) } },
+          ]),
+        }),
+      }),
+    )
+  })
+
+  it('reclaims a deleted row with the same idempotencyKey and does not create a new row', async () => {
+    const create = vi.fn()
+    const update = vi.fn().mockResolvedValue({ docs: [{ id: 'post_del' }], errors: [] })
+    const payload = {
+      create,
+      find: vi.fn().mockResolvedValue({
+        docs: [{ id: 'post_del', externalId: null, status: 'deleted' }],
+      }),
+      update,
+    } as unknown as Payload
+
+    await reservePublication(args(payload))
+    // create must NOT have been called — we are reusing the existing row.
+    expect(create).not.toHaveBeenCalled()
+    expect(update).toHaveBeenCalledOnce()
+  })
+
+  it('throws ConflictError when a deleted row cannot be claimed (concurrent reclaim)', async () => {
+    // update returns empty docs — another process already claimed it.
+    const payload = {
+      find: vi.fn().mockResolvedValue({
+        docs: [{ id: 'post_del', externalId: null, status: 'deleted' }],
+      }),
+      update: vi.fn().mockResolvedValue({ docs: [], errors: [] }),
+    } as unknown as Payload
+
+    await expect(reservePublication(args(payload))).rejects.toBeInstanceOf(ConflictError)
   })
 })

@@ -139,6 +139,7 @@ export const POST_STATUSES = [
   'published',
   'failed',
   'cancelled',
+  'deleted',
 ] as const
 export type PostStatus = (typeof POST_STATUSES)[number]
 

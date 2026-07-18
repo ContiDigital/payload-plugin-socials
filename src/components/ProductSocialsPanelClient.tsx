@@ -159,6 +159,9 @@ const SourceComposer: React.FC<{ sourceKind: string }> = ({ sourceKind }) => {
   const [validation, setValidation] = useState<ValidationResult>()
   const [publishedRef, setPublishedRef] = useState<PublishedRef>()
   const [loading, setLoading] = useState(false)
+  // Two-step delete confirm: stores the post id that is armed for deletion.
+  const [confirmingDeleteId, setConfirmingDeleteId] = useState<number | string>()
+  const [deletingId, setDeletingId] = useState<number | string>()
 
   // Media library drawer
   const [ListDrawer, , { openDrawer }] = useListDrawer({
@@ -225,6 +228,27 @@ const SourceComposer: React.FC<{ sourceKind: string }> = ({ sourceKind }) => {
       })
     },
     [envelopes, platform],
+  )
+
+  const loadHistory = useCallback(
+    async (signal?: AbortSignal): Promise<void> => {
+      try {
+        const historyResponse = await fetch(`${sourceBase}/history`, { signal })
+        const historyBody = (await historyResponse.json()) as {
+          error?: string
+          posts?: HistoryRow[]
+        }
+        if (!historyResponse.ok) {
+          throw new Error(historyBody.error ?? 'History failed')
+        }
+        setHistory(historyBody.posts ?? [])
+      } catch (caught) {
+        if (!(caught instanceof DOMException && caught.name === 'AbortError')) {
+          toast.error(caught instanceof Error ? caught.message : String(caught))
+        }
+      }
+    },
+    [sourceBase],
   )
 
   useEffect(() => {
@@ -549,10 +573,32 @@ const SourceComposer: React.FC<{ sourceKind: string }> = ({ sourceKind }) => {
       const ref = result.publishedRef ?? { externalId: '', meta: { scheduled: true }, platform }
       setPublishedRef(ref)
       toast.success(ref.meta?.scheduled ? 'Scheduled successfully.' : 'Published successfully.')
+      // Refresh the history list after a successful publish.
+      await loadHistory()
     } catch (caught) {
       toast.error(caught instanceof Error ? caught.message : String(caught))
     } finally {
       setLoading(false)
+    }
+  }
+
+  const deletePost = async (postId: number | string): Promise<void> => {
+    setDeletingId(postId)
+    setConfirmingDeleteId(undefined)
+    try {
+      const response = await fetch(`${endpointBase}/posts/${encodeURIComponent(String(postId))}`, {
+        method: 'DELETE',
+      })
+      const result = (await response.json()) as { error?: string; ok?: boolean }
+      if (!response.ok) {
+        throw new Error(result.error ?? `Delete failed (${response.status})`)
+      }
+      toast.success('Post deleted.')
+      await loadHistory()
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : String(caught))
+    } finally {
+      setDeletingId(undefined)
     }
   }
 
@@ -1021,17 +1067,64 @@ const SourceComposer: React.FC<{ sourceKind: string }> = ({ sourceKind }) => {
           </summary>
           <ul>
             {history.slice(0, 5).map((row) => (
-              <li key={row.id}>
-                {row.status ?? 'unknown'}
-                {row.publishedAt ? ` · ${new Date(row.publishedAt).toLocaleString()}` : ''}
-                {row.externalUrl && (
-                  <>
-                    {' '}
-                    ·{' '}
-                    <a href={row.externalUrl} rel="noreferrer" target="_blank">
-                      open
-                    </a>
-                  </>
+              <li key={row.id} style={{ alignItems: 'center', display: 'flex', gap: '0.5rem' }}>
+                <span style={{ flex: 1 }}>
+                  <span
+                    style={{
+                      color:
+                        row.status === 'published'
+                          ? 'var(--theme-success-500)'
+                          : row.status === 'deleted'
+                            ? 'var(--theme-elevation-400)'
+                            : undefined,
+                    }}
+                  >
+                    {row.status ?? 'unknown'}
+                  </span>
+                  {row.publishedAt ? ` · ${new Date(row.publishedAt).toLocaleString()}` : ''}
+                  {row.externalUrl && (
+                    <>
+                      {' '}
+                      ·{' '}
+                      <a href={row.externalUrl} rel="noreferrer" target="_blank">
+                        open
+                      </a>
+                    </>
+                  )}
+                </span>
+                {row.status === 'published' && (
+                  <span style={{ display: 'flex', gap: '0.25rem' }}>
+                    {confirmingDeleteId === row.id ? (
+                      <>
+                        <button
+                          disabled={deletingId === row.id}
+                          onClick={() => {
+                            void deletePost(row.id)
+                          }}
+                          style={{ color: 'var(--theme-error-500)', fontSize: '0.8rem' }}
+                          type="button"
+                        >
+                          Confirm delete
+                        </button>
+                        <button
+                          onClick={() => setConfirmingDeleteId(undefined)}
+                          style={{ fontSize: '0.8rem' }}
+                          type="button"
+                        >
+                          Cancel
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        disabled={deletingId === row.id}
+                        onClick={() => setConfirmingDeleteId(row.id)}
+                        style={{ color: 'var(--theme-error-400)', fontSize: '0.8rem' }}
+                        type="button"
+                      >
+                        Delete
+                      </button>
+                    )}
+                  </span>
                 )}
               </li>
             ))}

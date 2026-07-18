@@ -33,6 +33,15 @@ export type PublicationReservation = {
   publishedRef?: PublishedRef
 }
 
+/**
+ * Statuses that an existing row may have when it is eligible for re-claim.
+ *
+ * `deleted` rows are treated as re-claimable so that publishing the same
+ * content after deletion overwrites the SAME row back to published, preserving
+ * the audit trail as a single row per idempotency key (CLAUDE.md §2.18 #7).
+ */
+const RECLAIMABLE_STATUSES = ['cancelled', 'deleted', 'draft', 'failed'] as const
+
 export const reservePublication = async (args: {
   destinationId: string
   idempotencyKey: string
@@ -63,10 +72,7 @@ export const reservePublication = async (args: {
       limit: 1,
       overrideAccess: true,
       where: {
-        and: [
-          { id: { equals: existing.id } },
-          { status: { in: ['cancelled', 'draft', 'failed'] } },
-        ],
+        and: [{ id: { equals: existing.id } }, { status: { in: [...RECLAIMABLE_STATUSES] } }],
       },
     } as never)) as unknown as { docs?: unknown[] }
     if ((result.docs?.length ?? 0) !== 1) {
