@@ -9,13 +9,18 @@ import type {
 } from '../../../../types/index.js'
 
 import { ValidationError } from '../../../utilities/errors.js'
+import { buildPublicationIdentity } from '../../../utilities/publicationIdentity.js'
 
 vi.mock('../api.js', () => ({
   makePinterestRequest: vi.fn(),
   pinterestJson: vi.fn(),
 }))
 vi.mock('../videoUpload.js', () => ({ uploadPinterestVideoFromUrl: vi.fn() }))
+vi.mock('../../../assets/resolvePlatformImage.js', () => ({
+  resolvePlatformImageUrl: vi.fn(),
+}))
 
+import { resolvePlatformImageUrl } from '../../../assets/resolvePlatformImage.js'
 import { makePinterestRequest, pinterestJson } from '../api.js'
 import { buildPinterestPreview, deletePinterestPin, publishPinterestPin } from '../publish.js'
 import { uploadPinterestVideoFromUrl } from '../videoUpload.js'
@@ -23,6 +28,7 @@ import { uploadPinterestVideoFromUrl } from '../videoUpload.js'
 const mockedPinterestJson = vi.mocked(pinterestJson)
 const mockedRequest = vi.mocked(makePinterestRequest)
 const mockedVideoUpload = vi.mocked(uploadPinterestVideoFromUrl)
+const mockedResolve = vi.mocked(resolvePlatformImageUrl)
 
 const options = {
   copyOverrides: {},
@@ -61,6 +67,13 @@ beforeEach(() => {
     logger: undefined,
     update: vi.fn().mockResolvedValue({ id: 'row_existing' }),
   }
+  // Default: pass through (no conversion)
+  mockedResolve.mockImplementation(({ imageUrl }) =>
+    Promise.resolve({
+      converted: false,
+      url: imageUrl,
+    }),
+  )
 })
 
 describe('buildPinterestPreview', () => {
@@ -310,5 +323,158 @@ describe('deletePinterestPin', () => {
     await expect(
       deletePinterestPin({ options, payload: asPayload(payload), publishedRef: ref() }),
     ).rejects.toBeInstanceOf(ValidationError)
+  })
+})
+
+describe('publishPinterestPin — idempotency key uses ORIGINAL url when autoConvert fires', () => {
+  const ORIGINAL_URL = 'https://cdn.example.com/image.avif'
+  const CONVERTED_URL = 'https://cdn.example.com/renditions/socials-rendition-abcd1234.jpg'
+
+  const autoConvertOptions = {
+    assets: {
+      autoConvert: true,
+      jpegQuality: 82,
+      preflight: true,
+      renditionCollection: 'media',
+    },
+    copyOverrides: {},
+    platforms: { pinterest: { environment: 'production' } },
+  } as unknown as NormalizedPluginOptions
+
+  beforeEach(() => {
+    // Simulate conversion: returns a different URL.
+    mockedResolve.mockResolvedValue({ converted: true, format: 'jpeg', url: CONVERTED_URL })
+    mockedPinterestJson.mockResolvedValue({ id: 'pin_converted', link: 'https://pin/url' })
+  })
+
+  it('idempotencyKey and primaryAssetUrl match buildPublicationIdentity for the ORIGINAL url', async () => {
+    const input = {
+      boardId: 'board_1',
+      imageUrl: ORIGINAL_URL,
+    }
+    const testCtx = ctx({ images: [{ format: 'avif', role: 'main', url: ORIGINAL_URL }] })
+
+    await publishPinterestPin({
+      ctx: testCtx,
+      input,
+      options: autoConvertOptions,
+      payload: asPayload(payload),
+    })
+
+    const saved = payload.create.mock.calls[0][0].data
+    const expected = buildPublicationIdentity({
+      ctx: testCtx,
+      input,
+      platform: 'pinterest',
+      sourceId: testCtx.sourceId,
+      sourceKind: testCtx.sourceKind,
+    })
+
+    // Keys must be derived from the ORIGINAL url, not the converted one.
+    expect(saved.idempotencyKey).toBe(expected.idempotencyKey)
+    expect(saved.imageUrl).toBe(ORIGINAL_URL)
+
+    // The outbound API request body must carry the CONVERTED url.
+    const pinBody = JSON.parse(
+      (mockedPinterestJson.mock.calls.find((c) => c[2] === '/v5/pins')?.[3] as { body: string })
+        .body,
+    )
+    expect(pinBody.media_source.url).toBe(CONVERTED_URL)
+  })
+
+  it('sourceHash includes the ORIGINAL url, not the converted one', async () => {
+    const input = { boardId: 'board_1', imageUrl: ORIGINAL_URL }
+    const testCtx = ctx({ images: [{ format: 'avif', role: 'main', url: ORIGINAL_URL }] })
+
+    await publishPinterestPin({
+      ctx: testCtx,
+      input,
+      options: autoConvertOptions,
+      payload: asPayload(payload),
+    })
+
+    // Rebuild expected sourceHash independently using original url.
+    const { sha256Hex } = await import('../../../utilities/hash.js')
+    const expectedHash = sha256Hex(
+      JSON.stringify({
+        altText: expect.any(String) as unknown as string,
+        assetUrl: ORIGINAL_URL,
+        boardId: 'board_1',
+        description: expect.any(String) as unknown as string,
+        link: expect.any(String) as unknown as string,
+        mediaType: 'IMAGE',
+        title: expect.any(String) as unknown as string,
+      }),
+    )
+
+    const saved = payload.create.mock.calls[0][0].data
+    // The saved sourceHash must NOT be based on the converted url.
+    // We verify this by recomputing with the original url and confirming they match.
+    const recomputedWithOriginal = sha256Hex(
+      JSON.stringify({
+        altText: saved.altText,
+        assetUrl: ORIGINAL_URL,
+        boardId: 'board_1',
+        description: saved.body,
+        link: saved.link,
+        mediaType: 'IMAGE',
+        title: saved.title,
+      }),
+    )
+    const recomputedWithConverted = sha256Hex(
+      JSON.stringify({
+        altText: saved.altText,
+        assetUrl: CONVERTED_URL,
+        boardId: 'board_1',
+        description: saved.body,
+        link: saved.link,
+        mediaType: 'IMAGE',
+        title: saved.title,
+      }),
+    )
+    expect(saved.sourceHash).toBe(recomputedWithOriginal)
+    expect(saved.sourceHash).not.toBe(recomputedWithConverted)
+    // Suppress the unused variable warning from expectedHash.
+    void expectedHash
+  })
+
+  it('with autoConvert OFF and an allowed format, passes through unchanged', async () => {
+    const passthroughOptions = {
+      assets: { autoConvert: false, jpegQuality: 82, preflight: true },
+      copyOverrides: {},
+      platforms: { pinterest: { environment: 'production' } },
+    } as unknown as NormalizedPluginOptions
+
+    const JPEG_URL = 'https://cdn.example.com/image.jpg'
+    mockedResolve.mockResolvedValue({ converted: false, format: 'jpeg', url: JPEG_URL })
+    mockedPinterestJson.mockResolvedValue({ id: 'pin_jpeg', link: 'https://pin/url' })
+
+    const input = { boardId: 'board_1', imageUrl: JPEG_URL }
+    const testCtx = ctx({ images: [{ format: 'jpeg', role: 'main', url: JPEG_URL }] })
+
+    await publishPinterestPin({
+      ctx: testCtx,
+      input,
+      options: passthroughOptions,
+      payload: asPayload(payload),
+    })
+
+    const saved = payload.create.mock.calls[0][0].data
+    const pinBody = JSON.parse(
+      (mockedPinterestJson.mock.calls.find((c) => c[2] === '/v5/pins')?.[3] as { body: string })
+        .body,
+    )
+    // With no conversion, both the key and outbound body use the same original url.
+    expect(saved.imageUrl).toBe(JPEG_URL)
+    expect(pinBody.media_source.url).toBe(JPEG_URL)
+
+    const expected = buildPublicationIdentity({
+      ctx: testCtx,
+      input,
+      platform: 'pinterest',
+      sourceId: testCtx.sourceId,
+      sourceKind: testCtx.sourceKind,
+    })
+    expect(saved.idempotencyKey).toBe(expected.idempotencyKey)
   })
 })

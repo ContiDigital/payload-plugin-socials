@@ -34,6 +34,7 @@ import { buildAuthorizeUrl, exchangeCodeForTokens } from '../oauth.js'
 import { deletePinterestPin, publishPinterestPin } from '../publish.js'
 
 const options = {
+  assets: { autoConvert: false, jpegQuality: 82, preflight: true },
   copyOverrides: {},
   platforms: { pinterest: { environment: 'production' } },
 } as unknown as NormalizedPluginOptions

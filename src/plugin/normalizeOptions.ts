@@ -3,6 +3,7 @@ import type {
   FacebookPluginConfig,
   GbpPluginConfig,
   InstagramPluginConfig,
+  NormalizedAssetsConfig,
   NormalizedFacebookConfig,
   NormalizedGbpConfig,
   NormalizedPinterestConfig,
@@ -11,6 +12,7 @@ import type {
   PayloadPluginSocialsConfig,
   PinterestPluginConfig,
   SocialsAdminConfig,
+  SocialsAssetsConfig,
   SocialsSchedulingConfig,
 } from '../types/index.js'
 
@@ -60,6 +62,26 @@ const normalizeScheduling = (
     }
   }
   return out
+}
+
+const normalizeAssets = (config: SocialsAssetsConfig | undefined): NormalizedAssetsConfig => {
+  const preflight = config?.preflight !== false
+  const autoConvert = config?.autoConvert === true
+  const renditionCollection = config?.renditionCollection?.trim() || undefined
+
+  if (autoConvert && !renditionCollection) {
+    throw new Error(
+      `${PLUGIN_SLUG}: assets.autoConvert requires assets.renditionCollection to be set`,
+    )
+  }
+
+  const rawQuality = config?.jpegQuality
+  let jpegQuality = 82
+  if (typeof rawQuality === 'number' && Number.isFinite(rawQuality)) {
+    jpegQuality = Math.max(1, Math.min(100, Math.round(rawQuality)))
+  }
+
+  return { autoConvert, jpegQuality, preflight, renditionCollection }
 }
 
 // ---------------------------------------------------------------------------
@@ -309,6 +331,7 @@ const buildNormalizedOptions = (
     api: {
       basePath: normalizePath(options.api?.basePath ?? DEFAULT_API_BASE_PATH),
     },
+    assets: normalizeAssets(options.assets),
     authorize: options.authorize ?? (() => Promise.resolve(false)),
     coordination: options.coordination ?? {},
     copyOverrides: options.copyOverrides ?? {},
