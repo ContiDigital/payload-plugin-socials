@@ -29,6 +29,7 @@ const makeOptions = (
   ({
     admin: { injectInto: [], mode: 'route', navLabel: 'Socials', route: '/socials' },
     api: { basePath: '/socials' },
+    assets: { autoConvert: false, jpegQuality: 82, preflight: true },
     authorize: () => true,
     coordination: {},
     copyOverrides,
