@@ -278,6 +278,11 @@ describe('publishInstagramMedia — idempotency + status errors', () => {
   })
 })
 
+/**
+ * deleteInstagramMedia: Meta's Graph API has no delete endpoint for published
+ * IG Business media. The function throws synchronously with an actionable
+ * message for ANY call — no network request is made.
+ */
 describe('deleteInstagramMedia', () => {
   const ref = (over: Partial<PublishedRef> = {}): PublishedRef => ({
     externalId: 'media_1',
@@ -285,43 +290,51 @@ describe('deleteInstagramMedia', () => {
     ...over,
   })
 
-  it('rejects a publishedRef for another platform', async () => {
-    await expect(
+  it('throws immediately with the unsupported message for a valid instagram ref', () => {
+    expect(() =>
+      deleteInstagramMedia({ options, payload: asPayload(payload), publishedRef: ref() }),
+    ).toThrow(/Instagram does not support/)
+  })
+
+  it('throws a ValidationError', () => {
+    expect(() =>
+      deleteInstagramMedia({ options, payload: asPayload(payload), publishedRef: ref() }),
+    ).toThrow(ValidationError)
+  })
+
+  it('makes no network request (no fetch, no makeMetaRequest, no metaJson)', () => {
+    expect(() =>
+      deleteInstagramMedia({ options, payload: asPayload(payload), publishedRef: ref() }),
+    ).toThrow()
+    expect(mockedRequest).not.toHaveBeenCalled()
+    expect(mockedMetaJson).not.toHaveBeenCalled()
+  })
+
+  it('throws even for a publishedRef from another platform', () => {
+    expect(() =>
       deleteInstagramMedia({
         options,
         payload: asPayload(payload),
         publishedRef: ref({ platform: 'pinterest' }),
       }),
-    ).rejects.toBeInstanceOf(ValidationError)
+    ).toThrow(ValidationError)
   })
 
-  it('is a no-op without an external id', async () => {
-    await deleteInstagramMedia({
-      options,
-      payload: asPayload(payload),
-      publishedRef: ref({ externalId: undefined }),
-    })
+  it('throws even when externalId is absent', () => {
+    expect(() =>
+      deleteInstagramMedia({
+        options,
+        payload: asPayload(payload),
+        publishedRef: ref({ externalId: undefined }),
+      }),
+    ).toThrow()
     expect(mockedRequest).not.toHaveBeenCalled()
   })
 
-  it('deletes upstream and flips the local row to cancelled', async () => {
-    mockedRequest.mockResolvedValue({ ok: true, status: 200 } as unknown as Response)
-    payload.find.mockResolvedValue({ docs: [{ id: 'row_1' }] })
-    await deleteInstagramMedia({ options, payload: asPayload(payload), publishedRef: ref() })
-    expect(payload.update).toHaveBeenCalledWith(
-      expect.objectContaining({ data: { status: 'cancelled' } }),
-    )
-  })
-
-  it('throws on a non-404 failure', async () => {
-    mockedRequest.mockResolvedValue({
-      ok: false,
-      status: 500,
-      text: () => Promise.resolve('error'),
-    } as unknown as Response)
-    await expect(
+  it('message contains the localOnly reconcile instruction', () => {
+    expect(() =>
       deleteInstagramMedia({ options, payload: asPayload(payload), publishedRef: ref() }),
-    ).rejects.toBeInstanceOf(ValidationError)
+    ).toThrow(/localOnly=true/)
   })
 })
 

@@ -27,7 +27,7 @@ const run = (endpoint: Endpoint, req: PayloadRequest) =>
 
 const getEndpoint = () => createPostDeleteEndpoints(options)[0]
 
-/** Minimal published row. */
+/** Minimal published row — pinterest (non-Instagram) by default. */
 const publishedRow = {
   id: 'post_1',
   externalId: 'pin_abc',
@@ -37,12 +37,49 @@ const publishedRow = {
   status: 'published',
 }
 
+/** Instagram row variant. */
+const igRow = {
+  id: 'ig_post_1',
+  externalId: 'ig_media_abc',
+  externalUrl: 'https://www.instagram.com/p/abc',
+  meta: { mediaType: 'IMAGE' },
+  platform: 'instagram',
+  status: 'published',
+}
+
+/** Facebook row variant. */
+const fbRow = {
+  id: 'fb_post_1',
+  externalId: 'fb_post_xyz',
+  externalUrl: 'https://www.facebook.com/posts/xyz',
+  meta: {},
+  platform: 'facebook',
+  status: 'published',
+}
+
+type AnyRow = {
+  externalId: string
+  externalUrl: string
+  id: string
+  meta: Record<string, unknown>
+  platform: string
+  status: string
+}
+
 const adapterDelete = vi.fn()
 
 const mockAdapter = (deleteImpl: () => Promise<void> = () => Promise.resolve()) => {
   adapterDelete.mockImplementation(deleteImpl)
   vi.mocked(getPlatformAdapter).mockReturnValue({
     id: 'pinterest',
+    delete: adapterDelete,
+  } as unknown as PlatformAdapter)
+}
+
+const mockFacebookAdapter = (deleteImpl: () => Promise<void> = () => Promise.resolve()) => {
+  adapterDelete.mockImplementation(deleteImpl)
+  vi.mocked(getPlatformAdapter).mockReturnValue({
+    id: 'facebook',
     delete: adapterDelete,
   } as unknown as PlatformAdapter)
 }
@@ -59,9 +96,39 @@ const makeReq = (
   const update = overPayload.update ?? vi.fn().mockResolvedValue({ id: 'post_1' })
   return {
     payload: { findByID, update },
+    query: {},
     routeParams: { postId: 'post_1' },
     user: { id: 42 },
     ...overReq,
+  } as unknown as ReqWithMocks
+}
+
+const makeIgReq = (
+  overPayload: { findByID?: ReturnType<typeof vi.fn>; update?: ReturnType<typeof vi.fn> } = {},
+  overReq: Record<string, unknown> = {},
+): ReqWithMocks => {
+  const findByID = overPayload.findByID ?? vi.fn().mockResolvedValue(igRow)
+  const update = overPayload.update ?? vi.fn().mockResolvedValue({ id: 'ig_post_1' })
+  return {
+    payload: { findByID, update },
+    query: {},
+    routeParams: { postId: 'ig_post_1' },
+    user: { id: 42 },
+    ...overReq,
+  } as unknown as ReqWithMocks
+}
+
+const makeLocalOnlyReq = (
+  row: AnyRow = publishedRow,
+  userId: number | string = 42,
+): ReqWithMocks => {
+  const findByID = vi.fn().mockResolvedValue(row)
+  const update = vi.fn().mockResolvedValue({ id: row.id })
+  return {
+    payload: { findByID, update },
+    query: { localOnly: 'true' },
+    routeParams: { postId: String(row.id) },
+    user: { id: userId },
   } as unknown as ReqWithMocks
 }
 
@@ -79,7 +146,11 @@ describe('createPostDeleteEndpoints — endpoint shape', () => {
   })
 })
 
-describe('createPostDeleteEndpoints — happy path', () => {
+// ---------------------------------------------------------------------------
+// Normal delete (non-Instagram)
+// ---------------------------------------------------------------------------
+
+describe('createPostDeleteEndpoints — happy path (non-Instagram)', () => {
   it('calls adapter.delete and marks the row deleted', async () => {
     const req = makeReq()
     const res = await run(getEndpoint(), req)
@@ -145,7 +216,161 @@ describe('createPostDeleteEndpoints — happy path', () => {
     expect(res.status).toBe(200)
     expect((await res.json()).ok).toBe(true)
   })
+
+  it('does NOT set deletedLocalOnly on a normal delete', async () => {
+    const req = makeReq()
+    await run(getEndpoint(), req)
+    const updateCall = req.payload.update.mock.calls[0][0] as {
+      data: { meta: Record<string, unknown> }
+    }
+    expect(updateCall.data.meta.deletedLocalOnly).toBeUndefined()
+  })
 })
+
+// ---------------------------------------------------------------------------
+// Facebook plain delete — adapter still called
+// ---------------------------------------------------------------------------
+
+describe('createPostDeleteEndpoints — Facebook plain delete', () => {
+  it('calls adapter.delete for facebook rows and marks the row deleted', async () => {
+    mockFacebookAdapter()
+    const findByID = vi.fn().mockResolvedValue(fbRow)
+    const update = vi.fn().mockResolvedValue({ id: 'fb_post_1' })
+    const req = makeReq({ findByID, update }, { routeParams: { postId: 'fb_post_1' } })
+    const res = await run(getEndpoint(), req)
+
+    expect(res.status).toBe(200)
+    expect(adapterDelete).toHaveBeenCalledTimes(1)
+    expect(adapterDelete).toHaveBeenCalledWith(
+      expect.objectContaining({
+        publishedRef: expect.objectContaining({ platform: 'facebook' }),
+      }),
+    )
+    expect(update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ status: 'deleted' }) }),
+    )
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Instagram plain delete — 422, adapter NOT called
+// ---------------------------------------------------------------------------
+
+describe('createPostDeleteEndpoints — Instagram plain delete (unsupported)', () => {
+  it('returns HTTP 422 for an instagram row without calling adapter or touching the row', async () => {
+    const req = makeIgReq()
+    const res = await run(getEndpoint(), req)
+
+    expect(res.status).toBe(422)
+    const body = (await res.json()) as { error?: string; ok?: boolean }
+    expect(body.ok).toBe(false)
+    expect(body.error).toMatch(/Instagram does not support/)
+    expect(body.error).toMatch(/localOnly=true/)
+
+    // Adapter must NOT be called.
+    expect(adapterDelete).not.toHaveBeenCalled()
+    // Row must NOT be touched.
+    expect(req.payload.update).not.toHaveBeenCalled()
+  })
+
+  it('actionable message names the reconcile path', async () => {
+    const req = makeIgReq()
+    const res = await run(getEndpoint(), req)
+    const { error } = (await res.json()) as { error: string }
+    expect(error).toContain('Instagram app')
+    expect(error).toContain('mark-deleted')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// localOnly mode — any platform, adapter NOT called
+// ---------------------------------------------------------------------------
+
+describe('createPostDeleteEndpoints — localOnly (?localOnly=true)', () => {
+  it('soft-deletes the pinterest row without calling the adapter', async () => {
+    const req = makeLocalOnlyReq(publishedRow as AnyRow, 77)
+    const res = await run(getEndpoint(), req)
+
+    expect(res.status).toBe(200)
+    expect((await res.json()).ok).toBe(true)
+    expect(adapterDelete).not.toHaveBeenCalled()
+    expect(req.payload.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          meta: expect.objectContaining({
+            deletedAt: expect.any(String),
+            deletedBy: 77,
+            deletedLocalOnly: true,
+          }),
+          status: 'deleted',
+        }),
+      }),
+    )
+  })
+
+  it('soft-deletes an instagram row in localOnly mode without calling the adapter', async () => {
+    const req = makeLocalOnlyReq(igRow as AnyRow, 55)
+    req.routeParams = { postId: 'ig_post_1' }
+    const res = await run(getEndpoint(), req)
+
+    expect(res.status).toBe(200)
+    expect((await res.json()).ok).toBe(true)
+    expect(adapterDelete).not.toHaveBeenCalled()
+    expect(req.payload.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          meta: expect.objectContaining({ deletedLocalOnly: true }),
+          status: 'deleted',
+        }),
+      }),
+    )
+  })
+
+  it('same 404 guard applies in localOnly mode', async () => {
+    const findByID = vi.fn().mockRejectedValue(new Error('not found'))
+    const req = {
+      payload: { findByID, update: vi.fn() },
+      query: { localOnly: 'true' },
+      routeParams: { postId: 'ghost' },
+      user: { id: 1 },
+    } as unknown as ReqWithMocks
+    const res = await run(getEndpoint(), req)
+    expect(res.status).toBe(404)
+  })
+
+  it('same non-published guard applies in localOnly mode', async () => {
+    const findByID = vi.fn().mockResolvedValue({ ...publishedRow, status: 'failed' })
+    const req = {
+      payload: { findByID, update: vi.fn() },
+      query: { localOnly: 'true' },
+      routeParams: { postId: 'post_1' },
+      user: { id: 1 },
+    } as unknown as ReqWithMocks
+    const res = await run(getEndpoint(), req)
+    expect(res.status).toBe(400)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Reclaim: deletedLocalOnly instagram row can be re-published
+// ---------------------------------------------------------------------------
+
+describe('createPostDeleteEndpoints — deletedLocalOnly row is re-claimable', () => {
+  it('localOnly=true produces a deleted row with status "deleted" that the publish path can reuse', async () => {
+    // After localOnly soft-delete, the row has status "deleted".
+    // The publish path (publicationReservation) treats "deleted" as re-claimable.
+    // This test verifies the endpoint writes status: 'deleted' so the invariant holds.
+    const req = makeLocalOnlyReq(igRow as AnyRow)
+    const res = await run(getEndpoint(), req)
+    expect(res.status).toBe(200)
+    const updateArg = req.payload.update.mock.calls[0][0] as { data: { status: string } }
+    expect(updateArg.data.status).toBe('deleted')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Error cases (pre-existing)
+// ---------------------------------------------------------------------------
 
 describe('createPostDeleteEndpoints — error cases', () => {
   it('returns 401 when unauthenticated', async () => {

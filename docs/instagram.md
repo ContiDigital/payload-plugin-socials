@@ -109,6 +109,46 @@ The simplest setup for Instagram publishing is to add `formatOptions` to your
 upload collection's `imageSizes` so that Payload itself generates a JPEG
 derivative at upload time, and point your source resolver at that derivative URL.
 
+## Deleting posts
+
+Meta's Graph API does not expose a delete endpoint for published Instagram
+Business media. Calling `DELETE /{ig-media-id}` always returns `OAuthException`
+code 10, regardless of the token or permissions used. This is a permanent
+platform limitation as of Meta Graph API v25.0.
+
+The plugin removes Instagram API deletion as a capability:
+
+- `DELETE {basePath}/posts/:postId` on an Instagram row returns **HTTP 422**
+  with an actionable message rather than attempting the upstream call. The local
+  row is left untouched.
+- The Instagram adapter's `delete` method throws immediately with the same
+  message so programmatic callers see a clear error rather than a cryptic Meta
+  API failure.
+
+### Reconcile flow: mark-deleted
+
+When an operator removes a post directly from the Instagram app, the local
+`social-posts` row stays in `published` status with a live `externalId`. The
+idempotency short-circuit would then return a stale reference forever and block
+republishing. Use the **mark-deleted** reconcile path to bring the ledger back
+in sync:
+
+```
+DELETE {basePath}/posts/:postId?localOnly=true
+```
+
+This skips all upstream API calls for any platform, soft-deletes the local row
+(sets `status: 'deleted'`, `meta.deletedAt`, `meta.deletedBy`, and
+`meta.deletedLocalOnly: true`), and makes the row re-claimable for republish.
+
+In the `SocialPublishPanelClient` history panel, published Instagram rows show
+a **"Mark deleted (removed in app)"** button instead of the normal Delete. The
+same two-step confirm pattern applies (click to arm, click to confirm), then the
+row is soft-deleted locally and the list refreshes.
+
+A row marked deleted this way republishes in place on the next publish, exactly
+like any other `deleted` row.
+
 ## Gotchas
 
 - **Public, US-ASCII URLs.** Meta fetches `image_url` and `video_url`

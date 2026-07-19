@@ -3,6 +3,7 @@ import type { Endpoint } from 'payload'
 import type { NormalizedPluginOptions, PlatformId, PublishedRef } from '../../types/index.js'
 
 import { PLATFORM_IDS, SOCIAL_POSTS_SLUG } from '../../constants.js'
+import { INSTAGRAM_DELETE_UNSUPPORTED_MESSAGE } from '../platforms/instagram/adapter.js'
 import { getPlatformAdapter } from '../platforms/registry.js'
 import { assertAccess } from '../utilities/access.js'
 import { NotFoundError, ValidationError } from '../utilities/errors.js'
@@ -11,12 +12,26 @@ import { errorResponse, getRouteParam, jsonResponse } from '../utilities/http.js
 /**
  * DELETE {basePath}/posts/:postId
  *
- * Soft-deletes a published social-posts row:
+ * Soft-deletes a published social-posts row. Two modes:
+ *
+ * **Normal mode (default)**
  *   1. Validates the row exists and is in `published` state with an externalId.
- *   2. Calls the platform adapter's `delete` method (404 / "not found" from the
- *      upstream platform is treated as success — deletion is idempotent).
- *   3. Updates the row to status `deleted` and records deletion metadata in
- *      `meta.deletedAt` and `meta.deletedBy`. Never hard-deletes the row.
+ *   2. For Instagram rows: returns HTTP 422 immediately with an actionable
+ *      message — Meta's Graph API does not expose a delete endpoint for
+ *      published IG Business media. The adapter is never called.
+ *   3. For other platforms: calls the platform adapter's `delete` method.
+ *      404 / "not found" from the upstream platform is treated as success
+ *      (deletion is idempotent).
+ *   4. Updates the row to status `deleted` and records `meta.deletedAt` and
+ *      `meta.deletedBy`. Never hard-deletes the row.
+ *
+ * **localOnly mode (?localOnly=true)**
+ *   Skips all upstream platform calls entirely and soft-deletes the local row
+ *   only. Sets `meta.deletedLocalOnly: true` to flag that the upstream post
+ *   was not removed via the API (e.g. it was already deleted in the platform
+ *   app). The same published + externalId guards apply. The resulting
+ *   `deleted` row is re-claimable for republish-in-place, exactly like rows
+ *   deleted via the normal path.
  *
  * Access: publisher scope.
  */
@@ -30,6 +45,13 @@ export const createPostDeleteEndpoints = (options: NormalizedPluginOptions): End
         if (!postId) {
           throw new ValidationError('postId route parameter is required')
         }
+
+        // Detect localOnly flag from query string.
+        const localOnly =
+          req.query &&
+          typeof req.query === 'object' &&
+          'localOnly' in req.query &&
+          req.query.localOnly === 'true'
 
         // Load the social-posts row.
         let row: Record<string, unknown>
@@ -75,19 +97,27 @@ export const createPostDeleteEndpoints = (options: NormalizedPluginOptions): End
           platform,
         }
 
-        // Call the platform adapter's delete method.
-        // 404 / "not found" errors from upstream are treated as idempotent success.
-        const adapter = getPlatformAdapter(platform)
-        if (typeof adapter.delete === 'function') {
-          try {
-            await adapter.delete({ options, payload: req.payload, publishedRef, req })
-          } catch (deleteError) {
-            // If the upstream says the post is already gone (404 / "not found"),
-            // treat it as success. Any other upstream error is fatal — we must NOT
-            // mark the row deleted if the upstream deletion failed.
-            const isAlreadyGone = isUpstreamNotFoundError(deleteError)
-            if (!isAlreadyGone) {
-              throw deleteError
+        if (!localOnly) {
+          // Instagram: API deletion is not supported — return 422 without touching
+          // the adapter or the local row.
+          if (platform === 'instagram') {
+            return jsonResponse({ error: INSTAGRAM_DELETE_UNSUPPORTED_MESSAGE, ok: false }, 422)
+          }
+
+          // Other platforms: call the adapter's delete method.
+          // 404 / "not found" errors from upstream are treated as idempotent success.
+          const adapter = getPlatformAdapter(platform)
+          if (typeof adapter.delete === 'function') {
+            try {
+              await adapter.delete({ options, payload: req.payload, publishedRef, req })
+            } catch (deleteError) {
+              // If the upstream says the post is already gone (404 / "not found"),
+              // treat it as success. Any other upstream error is fatal — we must NOT
+              // mark the row deleted if the upstream deletion failed.
+              const isAlreadyGone = isUpstreamNotFoundError(deleteError)
+              if (!isAlreadyGone) {
+                throw deleteError
+              }
             }
           }
         }
@@ -103,6 +133,7 @@ export const createPostDeleteEndpoints = (options: NormalizedPluginOptions): End
           ...existingMeta,
           deletedAt: new Date().toISOString(),
           ...(deletedByUserId !== undefined ? { deletedBy: deletedByUserId } : {}),
+          ...(localOnly ? { deletedLocalOnly: true } : {}),
         }
 
         await req.payload.update({

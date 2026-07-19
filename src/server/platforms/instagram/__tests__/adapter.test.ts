@@ -27,9 +27,9 @@ vi.mock('../publish.js', async (importActual) => ({
 }))
 
 import { getCredentials, recordConnectionError } from '../../../services/connectionService.js'
-import { createInstagramAdapter } from '../adapter.js'
+import { createInstagramAdapter, INSTAGRAM_DELETE_UNSUPPORTED_MESSAGE } from '../adapter.js'
 import { getInstagramInsightsForRef } from '../insights.js'
-import { deleteInstagramMedia, publishInstagramMedia } from '../publish.js'
+import { publishInstagramMedia } from '../publish.js'
 
 const buildOptions = (systemUserAccessToken = ''): NormalizedPluginOptions =>
   ({
@@ -141,7 +141,7 @@ describe('instagram adapter — isConnected', () => {
   })
 })
 
-describe('instagram adapter — publish + delete', () => {
+describe('instagram adapter — publish', () => {
   it('publishes a valid input', async () => {
     vi.mocked(publishInstagramMedia).mockResolvedValue({
       alreadyExisted: false,
@@ -178,13 +178,39 @@ describe('instagram adapter — publish + delete', () => {
     ).rejects.toThrow('boom')
     expect(recordConnectionError).toHaveBeenCalledWith(payload, 'instagram', expect.any(Error))
   })
+})
 
-  it('delegates delete', async () => {
+describe('instagram adapter — delete (unsupported)', () => {
+  it('throws the clear unsupported message immediately, without any network call', () => {
     const ref: PublishedRef = { externalId: 'media_1', platform: 'instagram' }
-    await adapter.delete?.({ options, payload, publishedRef: ref })
-    expect(deleteInstagramMedia).toHaveBeenCalledWith({ options, payload, publishedRef: ref })
+    // The method must throw synchronously (it's typed as never).
+    expect(() => adapter.delete?.({ options, payload, publishedRef: ref })).toThrow(
+      INSTAGRAM_DELETE_UNSUPPORTED_MESSAGE,
+    )
   })
 
+  it('throws a ValidationError (not a generic Error)', () => {
+    const ref: PublishedRef = { externalId: 'media_1', platform: 'instagram' }
+    expect(() => adapter.delete?.({ options, payload, publishedRef: ref })).toThrow(ValidationError)
+  })
+
+  it('does not invoke any fetch or Meta API call', () => {
+    const ref: PublishedRef = { externalId: 'media_1', platform: 'instagram' }
+    const fetchSpy = vi.spyOn(globalThis, 'fetch')
+    expect(() => adapter.delete?.({ options, payload, publishedRef: ref })).toThrow()
+    expect(fetchSpy).not.toHaveBeenCalled()
+    fetchSpy.mockRestore()
+  })
+
+  it('message contains actionable reconcile instruction', () => {
+    const ref: PublishedRef = { externalId: 'media_1', platform: 'instagram' }
+    expect(() => adapter.delete?.({ options, payload, publishedRef: ref })).toThrow(
+      /localOnly=true/,
+    )
+  })
+})
+
+describe('instagram adapter — getInsights', () => {
   it('delegates insights with the published ref', async () => {
     const ref: PublishedRef = { externalId: 'media_1', platform: 'instagram' }
     vi.mocked(getInstagramInsightsForRef).mockResolvedValue({ metrics: { views: 7 } } as never)

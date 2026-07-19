@@ -159,7 +159,7 @@ const SourceComposer: React.FC<{ sourceKind: string }> = ({ sourceKind }) => {
   const [validation, setValidation] = useState<ValidationResult>()
   const [publishedRef, setPublishedRef] = useState<PublishedRef>()
   const [loading, setLoading] = useState(false)
-  // Two-step delete confirm: stores the post id that is armed for deletion.
+  // Two-step delete/mark-deleted confirm: stores the post id that is armed.
   const [confirmingDeleteId, setConfirmingDeleteId] = useState<number | string>()
   const [deletingId, setDeletingId] = useState<number | string>()
 
@@ -582,6 +582,10 @@ const SourceComposer: React.FC<{ sourceKind: string }> = ({ sourceKind }) => {
     }
   }
 
+  /**
+   * Normal delete: calls the platform adapter upstream and soft-deletes the row.
+   * Not used for Instagram (see markDeletedPost below).
+   */
   const deletePost = async (postId: number | string): Promise<void> => {
     setDeletingId(postId)
     setConfirmingDeleteId(undefined)
@@ -594,6 +598,32 @@ const SourceComposer: React.FC<{ sourceKind: string }> = ({ sourceKind }) => {
         throw new Error(result.error ?? `Delete failed (${response.status})`)
       }
       toast.success('Post deleted.')
+      await loadHistory()
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : String(caught))
+    } finally {
+      setDeletingId(undefined)
+    }
+  }
+
+  /**
+   * Instagram reconcile path: skips the upstream API entirely and marks the row
+   * deleted locally (deletedLocalOnly: true). Use this after manually deleting
+   * the post in the Instagram app so the local ledger stays in sync.
+   */
+  const markDeletedPost = async (postId: number | string): Promise<void> => {
+    setDeletingId(postId)
+    setConfirmingDeleteId(undefined)
+    try {
+      const response = await fetch(
+        `${endpointBase}/posts/${encodeURIComponent(String(postId))}?localOnly=true`,
+        { method: 'DELETE' },
+      )
+      const result = (await response.json()) as { error?: string; ok?: boolean }
+      if (!response.ok) {
+        throw new Error(result.error ?? `Mark-deleted failed (${response.status})`)
+      }
+      toast.success('Post marked as deleted locally.')
       await loadHistory()
     } catch (caught) {
       toast.error(caught instanceof Error ? caught.message : String(caught))
@@ -625,6 +655,10 @@ const SourceComposer: React.FC<{ sourceKind: string }> = ({ sourceKind }) => {
   const mediaRequired =
     state.format !== 'LINK' && state.format !== 'STANDARD' && state.format !== 'ALERT'
   const copyLimit = envelope.capabilities.limits.captionMaxChars
+
+  // Whether the active platform uses the localOnly reconcile path instead of a
+  // live upstream delete. Instagram posts cannot be removed via the API.
+  const isInstagram = platform === 'instagram'
 
   return (
     <section className="socials-composer">
@@ -1099,12 +1133,16 @@ const SourceComposer: React.FC<{ sourceKind: string }> = ({ sourceKind }) => {
                         <button
                           disabled={deletingId === row.id}
                           onClick={() => {
-                            void deletePost(row.id)
+                            if (isInstagram) {
+                              void markDeletedPost(row.id)
+                            } else {
+                              void deletePost(row.id)
+                            }
                           }}
                           style={{ color: 'var(--theme-error-500)', fontSize: '0.8rem' }}
                           type="button"
                         >
-                          Confirm delete
+                          {isInstagram ? 'Confirm mark deleted' : 'Confirm delete'}
                         </button>
                         <button
                           onClick={() => setConfirmingDeleteId(undefined)}
@@ -1121,7 +1159,7 @@ const SourceComposer: React.FC<{ sourceKind: string }> = ({ sourceKind }) => {
                         style={{ color: 'var(--theme-error-400)', fontSize: '0.8rem' }}
                         type="button"
                       >
-                        Delete
+                        {isInstagram ? 'Mark deleted (removed in app)' : 'Delete'}
                       </button>
                     )}
                   </span>
