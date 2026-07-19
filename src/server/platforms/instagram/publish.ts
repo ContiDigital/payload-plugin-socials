@@ -614,53 +614,28 @@ export const publishInstagramMedia = async (args: {
   }
 }
 
-export const deleteInstagramMedia = async (args: {
+/**
+ * Instagram does not expose a delete endpoint for published Business media
+ * through its API. Calling DELETE /{ig-media-id} always fails with
+ * OAuthException code 10, regardless of the token or permissions used.
+ *
+ * This function is kept as an export for consumers that import it by name, but
+ * it no longer makes any network request. It immediately throws so callers
+ * receive a clear, actionable message instead of a cryptic Meta API error.
+ *
+ * To reconcile a post that was removed directly in the Instagram app, use the
+ * localOnly reconcile path: DELETE {basePath}/posts/:postId?localOnly=true
+ */
+export const deleteInstagramMedia = (_args: {
   options: NormalizedPluginOptions
   payload: Payload
   publishedRef: PublishedRef
-}): Promise<void> => {
-  const { options, payload, publishedRef } = args
-  if (publishedRef.platform !== 'instagram') {
-    throw new ValidationError(`Cannot delete: publishedRef is for ${publishedRef.platform}`)
-  }
-  if (!publishedRef.externalId) {
-    return
-  }
-
-  const { makeMetaRequest } = await import('../_meta/api.js')
-  const response = await makeMetaRequest(
-    payload,
-    options,
-    'instagram',
-    `/${encodeURIComponent(publishedRef.externalId)}`,
-    { init: { method: 'DELETE' } },
+}): never => {
+  throw new ValidationError(
+    'Instagram does not support removing published posts through its API. ' +
+      'Delete the post in the Instagram app, then use mark-deleted to reconcile: ' +
+      'DELETE {basePath}/posts/:postId?localOnly=true',
   )
-
-  if (!response.ok && response.status !== 404) {
-    throw new ValidationError(
-      `Instagram media delete failed: ${response.status} ${await response.text().catch(() => '')}`,
-    )
-  }
-
-  const result = await payload.find({
-    collection: SOCIAL_POSTS_SLUG as never,
-    depth: 0,
-    limit: 1,
-    overrideAccess: true,
-    where: {
-      externalId: { equals: publishedRef.externalId },
-      platform: { equals: 'instagram' },
-    },
-  })
-  const doc = result.docs[0] as { id: number | string } | undefined
-  if (doc) {
-    await payload.update({
-      id: doc.id as never,
-      collection: SOCIAL_POSTS_SLUG as never,
-      data: { status: 'cancelled' } as never,
-      overrideAccess: true,
-    })
-  }
 }
 
 // Surface the lifetime constant for the admin UI banner copy.

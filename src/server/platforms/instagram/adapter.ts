@@ -22,7 +22,6 @@ import { revokeMetaAuthorization } from '../_meta/revoke.js'
 import { buildDefaultInstagramCaption, countHashtags, countMentions } from './copy.js'
 import { getInstagramInsightsForRef } from './insights.js'
 import {
-  deleteInstagramMedia,
   INSTAGRAM_MEDIA_TYPES,
   type InstagramPublishInput,
   publishInstagramMedia,
@@ -69,6 +68,16 @@ const checkFormatIssue = (
     `Configure a JPEG imageSize on your upload collection or enable assets.autoConvert.`
   )
 }
+
+/**
+ * The message surfaced when any caller attempts an Instagram API deletion.
+ * Kept as a named constant so tests can assert on the exact text without
+ * duplicating the string.
+ */
+export const INSTAGRAM_DELETE_UNSUPPORTED_MESSAGE =
+  'Instagram does not support removing published posts through its API. ' +
+  'Delete the post in the Instagram app, then use mark-deleted to reconcile: ' +
+  'DELETE {basePath}/posts/:postId?localOnly=true'
 
 export const createInstagramAdapter = (
   options: NormalizedPluginOptions,
@@ -276,8 +285,22 @@ export const createInstagramAdapter = (
       }
     },
 
-    async delete({ options: opts, payload, publishedRef }) {
-      await deleteInstagramMedia({ options: opts, payload, publishedRef })
+    /**
+     * Instagram does not support deleting published posts via its API.
+     * Meta's Graph API always returns OAuthException code 10 for
+     * DELETE /{ig-media-id}, regardless of token or permissions.
+     *
+     * This method throws immediately without making any network request.
+     * To reconcile a post deleted in the Instagram app, use the localOnly
+     * reconcile path: DELETE {basePath}/posts/:postId?localOnly=true
+     */
+    delete(_args: {
+      options: NormalizedPluginOptions
+      payload: unknown
+      publishedRef: PublishedRef
+      req?: unknown
+    }): never {
+      throw new ValidationError(INSTAGRAM_DELETE_UNSUPPORTED_MESSAGE)
     },
 
     async getInsights({ options: opts, payload, publishedRef }) {

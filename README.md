@@ -621,7 +621,24 @@ If the upstream platform returns a 404 or a "not found" error, the endpoint trea
 
 Publishing the same content again after deletion reuses the existing row rather than creating a new one. The row transitions back to `published` in place, keeping the full history on a single database record.
 
-The history panel in `SocialPublishPanelClient` shows a Delete button on each published row. Clicking it arms a confirmation prompt inline (same two-step pattern as the platform disconnect button), and confirming calls the endpoint and refreshes the list.
+The history panel in `SocialPublishPanelClient` shows a Delete button on each published row for Pinterest, Facebook, and GBP. Clicking it arms a confirmation prompt inline (same two-step pattern as the platform disconnect button), and confirming calls the endpoint and refreshes the list.
+
+### Instagram: API deletion not supported
+
+Meta's Graph API does not expose a delete endpoint for published Instagram Business media. `DELETE /{ig-media-id}` always returns `OAuthException` code 10, regardless of token or permissions. Instagram API deletion is removed as a capability in this plugin.
+
+Calling `DELETE /api/socials/posts/:postId` on an Instagram row returns **HTTP 422** with an actionable message and leaves the local row untouched.
+
+### Reconcile flow: mark-deleted
+
+When an operator removes a post from the Instagram app directly, the local row stays `published` with a live `externalId`. The idempotency short-circuit would then return a stale reference forever and block republishing. Use `?localOnly=true` to reconcile:
+
+```ts
+fetch(`/api/socials/posts/${postId}?localOnly=true`, { method: 'DELETE' })
+// => { ok: true, postId: 42, status: 'deleted' }
+```
+
+This skips all upstream platform calls for any platform, soft-deletes the local row (`status: 'deleted'`, `meta.deletedAt`, `meta.deletedBy`, `meta.deletedLocalOnly: true`), and makes the row re-claimable for republish-in-place. The same published and externalId guards apply. In the history panel, published Instagram rows show **"Mark deleted (removed in app)"** instead of Delete, which calls this path after the same two-step confirm.
 
 > [!NOTE]
 > The `deleted` status is a new enum value added to the `soc_post_status` column. Postgres hosts must run `pnpm payload migrate:create` and `pnpm payload migrate` after upgrading to this version. SQLite and MongoDB hosts do not require a migration for this change.
@@ -940,7 +957,10 @@ POST  /api/socials/templates/preview                           # admin-gated; pr
 
 ```
 DELETE /api/socials/posts/:postId                    # publisher-gated; soft-deletes a published post upstream and locally
+DELETE /api/socials/posts/:postId?localOnly=true     # publisher-gated; local-only soft-delete (reconcile path for IG + any platform)
 ```
+
+Instagram rows return 422 on the plain DELETE. Use `?localOnly=true` after deleting the post in the Instagram app.
 
 ### Meta webhooks
 
