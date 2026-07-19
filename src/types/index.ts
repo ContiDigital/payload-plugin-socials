@@ -794,6 +794,13 @@ export type NormalizedAssetsConfig = {
 
 export type NormalizedPluginOptions = {
   admin: {
+    /**
+     * The resolved Payload admin base path (e.g. '/admin', '/cms').
+     * Populated by `applyAdminEnhancements` from `config.routes.admin`.
+     * Used by OAuth callback endpoints to build the post-auth redirect URL.
+     * Defaults to '/admin' when not yet set.
+     */
+    adminBase: string
     injectInto: NonNullable<SocialsAdminConfig['injectInto']>
     mode: AdminMode
     navLabel: string

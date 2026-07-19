@@ -10,7 +10,9 @@ import {
   compileComposerInput,
   compileStandalonePublishBody,
   getSelectedAssets,
+  parseComposeResponse,
   pruneSelectedMedia,
+  shouldFetchEnvelope,
   supportsMultipleMedia,
 } from '../socialComposerModel.js'
 
@@ -510,5 +512,80 @@ describe('compileStandalonePublishBody', () => {
     expect(result.content.body).toBeUndefined()
     expect(result.content.link).toBeUndefined()
     expect(result.content.images).toBeUndefined()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Fix 3: parseComposeResponse - standalone composer error-shape guard
+// ---------------------------------------------------------------------------
+
+describe('parseComposeResponse', () => {
+  it('returns ok:true with data when response is ok and body.results is an array', () => {
+    const body = {
+      anyPublished: true,
+      results: [{ ok: true, platform: 'pinterest' as const }],
+    }
+    const parsed = parseComposeResponse(true, body)
+    expect(parsed.ok).toBe(true)
+    if (parsed.ok) {
+      expect(parsed.data).toBe(body)
+    }
+  })
+
+  it('returns ok:false with the server error message on non-ok HTTP', () => {
+    const body = { error: 'Unauthorized' }
+    const parsed = parseComposeResponse(false, body)
+    expect(parsed.ok).toBe(false)
+    if (!parsed.ok) {
+      expect(parsed.error).toBe('Unauthorized')
+    }
+  })
+
+  it('returns ok:false with a generic message when the body has no error field', () => {
+    const parsed = parseComposeResponse(false, {})
+    expect(parsed.ok).toBe(false)
+    if (!parsed.ok) {
+      expect(typeof parsed.error).toBe('string')
+      expect(parsed.error.length).toBeGreaterThan(0)
+    }
+  })
+
+  it('returns ok:false when body.results is not an array even if HTTP 200', () => {
+    // A 200 response with a non-array results shape should be treated as error.
+    const parsed = parseComposeResponse(true, { results: 'oops' })
+    expect(parsed.ok).toBe(false)
+  })
+
+  it('returns ok:false when body is null', () => {
+    const parsed = parseComposeResponse(true, null)
+    expect(parsed.ok).toBe(false)
+  })
+
+  it('returns ok:false when body is a string (unexpected)', () => {
+    const parsed = parseComposeResponse(false, 'Internal Server Error')
+    expect(parsed.ok).toBe(false)
+    if (!parsed.ok) {
+      expect(typeof parsed.error).toBe('string')
+    }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Fix 4: shouldFetchEnvelope - envelope cache guard
+// ---------------------------------------------------------------------------
+
+describe('shouldFetchEnvelope', () => {
+  it('returns true when no envelope exists for the platform', () => {
+    expect(shouldFetchEnvelope({}, 'pinterest')).toBe(true)
+    expect(shouldFetchEnvelope({ instagram: undefined }, 'pinterest')).toBe(true)
+  })
+
+  it('returns false when an envelope already exists', () => {
+    expect(shouldFetchEnvelope({ pinterest: { draft: {}, preview: {} } }, 'pinterest')).toBe(false)
+  })
+
+  it('returns false even when the stored value is undefined (key present)', () => {
+    // The key being present means we've visited this tab before.
+    expect(shouldFetchEnvelope({ pinterest: undefined }, 'pinterest')).toBe(false)
   })
 })

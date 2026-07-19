@@ -169,9 +169,12 @@ export const SocialTemplateFieldBuilder: React.FC<SocialTemplateFieldBuilderProp
   const { setValue, value } = useField<string>({ path })
   const { config } = useConfig()
 
-  // ---------- config.custom.socials -----------------------------------------
+  // ---------- config.admin?.custom.socials ------------------------------------
+  //
+  // Fix 1: read from config.admin?.custom (serialized to browser by Payload)
+  // instead of config.custom (stripped by Payload 3.86 serverOnlyConfigProperties).
 
-  const socials = asRecord(asRecord(config.custom)?.socials)
+  const socials = asRecord(asRecord(config.admin?.custom)?.socials)
   const sourceKinds: SourceKindEntry[] = Array.isArray(socials?.sourceKinds)
     ? (socials.sourceKinds as unknown[]).flatMap((entry) => {
         const rec = asRecord(entry)

@@ -23,7 +23,9 @@ import {
   type ComposerState,
   getSelectedAssets,
   type MediaType,
+  parseComposeResponse,
   pruneSelectedMedia,
+  shouldFetchEnvelope,
   type StandaloneComposerState,
   supportsMultipleMedia,
 } from './socialComposerModel.js'
@@ -60,16 +62,6 @@ type PreviewEnvelope = {
   draft: SocialDraft
   error?: string
   preview: PreviewResult
-}
-
-type ComposeResult = {
-  anyPublished: boolean
-  results: Array<{
-    error?: string
-    ok: boolean
-    platform: PlatformId
-    publishedRef?: PublishedRef
-  }>
 }
 
 const asRecord = (value: unknown): Record<string, unknown> | undefined =>
@@ -141,7 +133,11 @@ const inferFormat = (url: string, mimeType?: string): string | undefined => {
 const SourceComposer: React.FC<{ sourceKind: string }> = ({ sourceKind }) => {
   const { id } = useDocumentInfo()
   const { config } = useConfig()
-  const socials = asRecord(asRecord(config.custom)?.socials)
+
+  // Fix 1: read from config.admin?.custom (serialized to browser) instead of
+  // config.custom (stripped by Payload 3.86 serverOnlyConfigProperties).
+  const socials = asRecord(asRecord(config.admin?.custom)?.socials)
+
   const enabledPlatforms = Array.isArray(socials?.enabledPlatforms)
     ? socials.enabledPlatforms.filter(
         (value): value is PlatformId =>
@@ -163,8 +159,8 @@ const SourceComposer: React.FC<{ sourceKind: string }> = ({ sourceKind }) => {
   const [confirmingDeleteId, setConfirmingDeleteId] = useState<number | string>()
   const [deletingId, setDeletingId] = useState<number | string>()
 
-  // Media library drawer
-  const [ListDrawer, , { openDrawer }] = useListDrawer({
+  // Fix 5 (source): destructure closeDrawer from the tuple.
+  const [ListDrawer, , { closeDrawer, openDrawer }] = useListDrawer({
     collectionSlugs: undefined as never,
     uploads: true,
   })
@@ -251,8 +247,15 @@ const SourceComposer: React.FC<{ sourceKind: string }> = ({ sourceKind }) => {
     [sourceBase],
   )
 
+  // Fix 4: cache-first envelope loading. Only fetch the preview when no
+  // envelope exists for this platform yet. This prevents overwriting media
+  // the user added via Add URL / Media library on tab return.
   useEffect(() => {
     if (!id) {
+      return
+    }
+    // Skip fetch if an envelope already exists for this platform.
+    if (!shouldFetchEnvelope(envelopes, platform)) {
       return
     }
     const controller = new AbortController()
@@ -288,7 +291,10 @@ const SourceComposer: React.FC<{ sourceKind: string }> = ({ sourceKind }) => {
     }
     void load()
     return () => controller.abort()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, platform, sourceBase])
+  // Note: envelopes intentionally omitted from deps — this effect is
+  // cache-first: once an envelope exists it is never re-fetched by this effect.
 
   useEffect(() => {
     if (!id) {
@@ -431,8 +437,11 @@ const SourceComposer: React.FC<{ sourceKind: string }> = ({ sourceKind }) => {
     updateState({ selectedMedia: selected })
   }
 
+  // Fix 5 (source): call closeDrawer before processing selection so the
+  // drawer closes immediately. Payload's ListDrawer does not auto-close.
   const handleLibrarySelect = useCallback(
     async (doc: { collectionSlug: string; docID: string }) => {
+      closeDrawer()
       try {
         const response = await fetch(`${apiRoute}/${doc.collectionSlug}/${doc.docID}`)
         if (!response.ok) {
@@ -506,7 +515,7 @@ const SourceComposer: React.FC<{ sourceKind: string }> = ({ sourceKind }) => {
         toast.error('Failed to load media from library')
       }
     },
-    [apiRoute, platform],
+    [apiRoute, closeDrawer, platform],
   )
 
   const handleAddByUrl = useCallback(() => {
@@ -1181,7 +1190,10 @@ const SourceComposer: React.FC<{ sourceKind: string }> = ({ sourceKind }) => {
 
 const StandaloneComposer: React.FC = () => {
   const { config } = useConfig()
-  const socials = asRecord(asRecord(config.custom)?.socials)
+
+  // Fix 1: read from config.admin?.custom (serialized to browser).
+  const socials = asRecord(asRecord(config.admin?.custom)?.socials)
+
   const enabledPlatforms = Array.isArray(socials?.enabledPlatforms)
     ? socials.enabledPlatforms.filter(
         (value): value is PlatformId =>
@@ -1198,10 +1210,22 @@ const StandaloneComposer: React.FC = () => {
   const [perChannelFormat, setPerChannelFormat] = useState<Partial<Record<PlatformId, string>>>({})
   const [destinations, setDestinations] = useState<Partial<Record<PlatformId, Destination[]>>>({})
   const [loading, setLoading] = useState(false)
-  const [results, setResults] = useState<ComposeResult | null>(null)
+  const [results, setResults] = useState<
+    Array<{
+      error?: string
+      ok: boolean
+      platform: PlatformId
+      publishedRef?: {
+        externalId: string
+        externalUrl?: string
+        meta?: Record<string, unknown>
+        platform: PlatformId
+      }
+    }>
+  >([])
 
-  // Media library drawer
-  const [ListDrawer, , { openDrawer }] = useListDrawer({
+  // Fix 5 (standalone): destructure closeDrawer from the tuple.
+  const [ListDrawer, , { closeDrawer, openDrawer }] = useListDrawer({
     collectionSlugs: undefined as never,
     uploads: true,
   })
@@ -1275,8 +1299,10 @@ const StandaloneComposer: React.FC = () => {
     }))
   }
 
+  // Fix 5 (standalone): call closeDrawer before processing selection.
   const handleLibrarySelect = useCallback(
     async (doc: { collectionSlug: string; docID: string }) => {
+      closeDrawer()
       try {
         const response = await fetch(`${apiRoute}/${doc.collectionSlug}/${doc.docID}`)
         if (!response.ok) {
@@ -1333,7 +1359,7 @@ const StandaloneComposer: React.FC = () => {
         toast.error('Failed to load media from library')
       }
     },
-    [apiRoute],
+    [apiRoute, closeDrawer],
   )
 
   const handleAddByUrl = useCallback(() => {
@@ -1351,6 +1377,7 @@ const StandaloneComposer: React.FC = () => {
     toast.success('Media added by URL')
   }, [urlInput, urlTypeOverride])
 
+  // Fix 3: guard compose response shape before rendering results.
   const publish = async (): Promise<void> => {
     if (!state.title.trim()) {
       toast.error('Title is required.')
@@ -1361,7 +1388,7 @@ const StandaloneComposer: React.FC = () => {
       return
     }
     setLoading(true)
-    setResults(null)
+    setResults([])
     try {
       const body = compileStandalonePublishBody(state, perChannelFormat)
       const response = await fetch(`${endpointBase}/compose/publish`, {
@@ -1369,9 +1396,14 @@ const StandaloneComposer: React.FC = () => {
         headers: { 'Content-Type': 'application/json' },
         method: 'POST',
       })
-      const result = (await response.json()) as ComposeResult
-      setResults(result)
-      if (result.anyPublished) {
+      const rawBody: unknown = await response.json()
+      const parsed = parseComposeResponse(response.ok, rawBody)
+      if (!parsed.ok) {
+        toast.error(parsed.error)
+        return
+      }
+      setResults(parsed.data.results)
+      if (parsed.data.anyPublished) {
         toast.success('Published to at least one channel.')
       } else {
         toast.error('All channels failed.')
@@ -1546,9 +1578,9 @@ const StandaloneComposer: React.FC = () => {
           ))}
         </fieldset>
 
-        {results && (
+        {results.length > 0 && (
           <ul className="socials-composer__results">
-            {results.results.map((r) => (
+            {results.map((r) => (
               <li
                 className={`socials-composer__result-item ${r.ok ? 'socials-composer__result-ok' : 'socials-composer__result-err'}`}
                 key={r.platform}

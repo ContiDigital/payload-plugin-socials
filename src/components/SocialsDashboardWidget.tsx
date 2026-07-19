@@ -18,7 +18,11 @@ const asRecord = (value: unknown): Record<string, unknown> | undefined =>
 
 export const SocialsDashboardWidget: React.FC<Props> = ({ enabledPlatforms }) => {
   const { config } = useConfig()
-  const socials = asRecord(asRecord(config.custom)?.socials)
+
+  // Fix 1: read from config.admin?.custom (serialized to browser) instead of
+  // config.custom (stripped by Payload 3.86 serverOnlyConfigProperties).
+  const socials = asRecord(asRecord(config.admin?.custom)?.socials)
+
   const configuredPlatforms = Array.isArray(socials?.enabledPlatforms)
     ? socials.enabledPlatforms.filter((value): value is string => typeof value === 'string')
     : []

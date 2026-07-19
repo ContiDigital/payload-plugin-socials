@@ -1,6 +1,7 @@
 'use client'
 
-import React, { useState } from 'react'
+import { toast } from '@payloadcms/ui'
+import React, { useEffect, useState } from 'react'
 
 import { SocialPublishPanelClient } from './ProductSocialsPanelClient.js'
 import { SocialsDashboardWidget } from './SocialsDashboardWidget.js'
@@ -19,6 +20,30 @@ type Tab = 'compose' | 'connections'
  */
 export const SocialsAdminViewClient: React.FC<Props> = ({ enabledPlatforms }) => {
   const [activeTab, setActiveTab] = useState<Tab>('compose')
+
+  // Fix 2: read the `connected` query param on mount. When present, default to
+  // the Connections tab, fire a success toast naming the platform, then strip
+  // the param from the URL via history.replaceState so a page reload does not
+  // re-trigger the toast.
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return
+    }
+    const params = new URLSearchParams(window.location.search)
+    const connected = params.get('connected')
+    if (!connected) {
+      return
+    }
+    setActiveTab('connections')
+    // Capitalise the first letter for a friendlier toast message.
+    const label = connected.charAt(0).toUpperCase() + connected.slice(1)
+    toast.success(`${label} connected`)
+    // Remove the ?connected param without adding a new history entry.
+    params.delete('connected')
+    const newSearch = params.toString()
+    const newUrl = newSearch ? `${window.location.pathname}?${newSearch}` : window.location.pathname
+    window.history.replaceState(null, '', newUrl)
+  }, [])
 
   return (
     <div>

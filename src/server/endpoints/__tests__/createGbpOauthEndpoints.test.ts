@@ -16,7 +16,7 @@ import { createGbpOauthEndpoints } from '../createGbpOauthEndpoints.js'
 
 const buildOptions = (over: Record<string, unknown> = {}): NormalizedPluginOptions =>
   ({
-    admin: { route: '/admin' },
+    admin: { adminBase: '/admin', route: '/socials' },
     api: { basePath: '/socials' },
     platforms: {
       gbp: {
@@ -74,7 +74,8 @@ describe('gbp oauth callback', () => {
       mkReq({ cookie: `${STATE_COOKIE_NAME}=s1`, search: { code: 'c', state: 's1' } }),
     )
     expect(res.status).toBe(302)
-    expect(res.headers.get('location')).toBe('/admin?connected=gbp')
+    // Fix 2: redirect must include the admin base prefix.
+    expect(res.headers.get('location')).toBe('/admin/socials?connected=gbp')
     expect(adapter.exchangeCallback).toHaveBeenCalledWith(expect.objectContaining({ code: 'c' }))
   })
 
