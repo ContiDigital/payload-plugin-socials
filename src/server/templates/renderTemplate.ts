@@ -5,8 +5,10 @@ import type { SocialSourceContext } from '../../types/index.js'
  *
  * Syntax: `{{ path | filter:arg | filter }}`
  *
- *   - `path` is a dot path resolved against the scope object
- *     (`{{ title }}`, `{{ metadata.googleMaterial }}`).
+ *   - `path` is a dot path resolved against the scope object. Universal
+ *     source-context fields are top level (`{{ title }}`, `{{ description }}`,
+ *     `{{ link }}`); host-specific fields live under `metadata`
+ *     (`{{ metadata.anyKeyYourResolverExposes }}`).
  *   - filters run left to right over the stringified value:
  *       `upper`, `lower`, `trim`,
  *       `truncate:N`  (cap at N chars with a trailing ellipsis),
@@ -113,12 +115,8 @@ export const buildTemplateScope = (
 ): Record<string, unknown> => ({
   baseDescription: ctx.baseDescription,
   baseTitle: ctx.baseTitle,
-  category: ctx.metadata?.categoryLabel,
-  color: ctx.metadata?.googleColor,
   description: ctx.baseDescription,
-  dimensions: ctx.metadata?.dimensions,
   link: ctx.link,
-  material: ctx.metadata?.googleMaterial,
   metadata: ctx.metadata ?? {},
   modelLabel: ctx.modelLabel ?? undefined,
   sourceId: ctx.sourceId,

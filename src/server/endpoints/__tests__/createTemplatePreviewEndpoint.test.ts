@@ -120,10 +120,9 @@ describe('createTemplatePreviewEndpoint', () => {
     expect(body.resolved.pinterestTitle).toBe('HERON')
     expect(body.resolved.instagramCaption).toBe('Heron — Polished bronze sculpture')
 
-    // scopeKeys includes static alias tokens
+    // scopeKeys includes the universal source-context tokens
     expect(body.scopeKeys).toContain('title')
     expect(body.scopeKeys).toContain('description')
-    expect(body.scopeKeys).toContain('material')
     expect(body.scopeKeys).toContain('link')
 
     // scopeKeys includes discovered metadata.* leaf keys

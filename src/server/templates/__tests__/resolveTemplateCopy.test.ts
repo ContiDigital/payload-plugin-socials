@@ -21,7 +21,7 @@ describe('resolveTemplateCopy', () => {
     const resolved = resolveTemplateCopy(
       {
         gbpSummary: '{{title}} now showing.',
-        instagramCaption: '{{title}} | {{material}}',
+        instagramCaption: '{{title}} | {{metadata.googleMaterial}}',
         pinterestTitle: '{{title}} ({{modelLabel}})',
       },
       ctx(),
@@ -53,7 +53,10 @@ describe('resolveTemplateCopy', () => {
 
   it('splits hashtags and normalizes a leading #', () => {
     const resolved = resolveTemplateCopy(
-      { pinterestHashtags: '{{material}} #{{color}} luxury, FinesGallery' },
+      {
+        pinterestHashtags:
+          '{{metadata.googleMaterial}} #{{metadata.googleColor}} luxury, FinesGallery',
+      },
       ctx(),
     )
     expect(resolved.pinterestHashtags).toEqual(['#marble', '#white', '#luxury', '#FinesGallery'])

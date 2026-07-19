@@ -355,9 +355,11 @@ payloadPluginSocials({
       // Template string: uses the existing interpolation engine.
       pinterestTitle: '{{ title | upper }} | {{ modelLabel | default:Shop Now }}',
 
-      // Template with truncation:
+      // Template with truncation. Host-specific fields come from metadata.*
+      // (whatever keys your resolver exposes); universal fields like title,
+      // description and link are top level.
       pinterestDescription:
-        '{{ category }} crafted from {{ material }}. {{ description | truncate:300 }}',
+        '{{ metadata.categoryLabel }} crafted from {{ metadata.googleMaterial }}. {{ description | truncate:300 }}',
 
       // Function: full access to the source context.
       pinterestHashtags: (ctx) => {

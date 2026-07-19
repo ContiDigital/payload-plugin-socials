@@ -30,12 +30,8 @@
 export const TEMPLATE_SCOPE_TOKENS = [
   'baseDescription',
   'baseTitle',
-  'category',
-  'color',
   'description',
-  'dimensions',
   'link',
-  'material',
   'metadata',
   'modelLabel',
   'sourceId',
