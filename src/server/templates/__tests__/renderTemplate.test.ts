@@ -92,10 +92,20 @@ describe('buildTemplateScope', () => {
     ...over,
   })
 
-  it('exposes friendly aliases from the context', () => {
+  it('exposes the universal source-context fields at the top level', () => {
     const scope = buildTemplateScope(ctx())
-    expect(renderTemplate('{{title}} | {{material}} | {{category}} | {{modelLabel}}', scope)).toBe(
-      'Marble Lion | marble | Statues | ML-01',
+    expect(renderTemplate('{{title}} | {{description}} | {{link}} | {{modelLabel}}', scope)).toBe(
+      'Marble Lion | A regal marble lion. | https://example.com/p | ML-01',
+    )
+  })
+
+  it('does not invent domain aliases; host fields come only through metadata', () => {
+    const scope = buildTemplateScope(ctx())
+    // `material` / `category` are not universal scope tokens; they render empty.
+    expect(renderTemplate('[{{material}}][{{category}}]', scope)).toBe('[][]')
+    // The same values are reachable via the metadata keys the resolver exposes.
+    expect(renderTemplate('{{metadata.googleMaterial}} / {{metadata.categoryLabel}}', scope)).toBe(
+      'marble / Statues',
     )
   })
 
