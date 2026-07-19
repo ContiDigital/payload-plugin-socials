@@ -15,7 +15,9 @@ type SocialTemplateRow = {
   appliesTo?: null | PlatformId[]
   description?: null | string
   id: number | string
+  isDefault?: boolean | null
   name: string
+  sourceKind?: null | string
   templates?: null | SocialTemplateFields
 }
 
@@ -37,14 +39,20 @@ export const createResolvedTemplatesEndpoint = (options: NormalizedPluginOptions
         limit: 100,
         overrideAccess: true,
         sort: 'name',
-        where: { enabled: { equals: true } },
+        // Templates are bound to a source kind — only return the ones authored
+        // for the collection the composer is publishing from.
+        where: {
+          and: [{ enabled: { equals: true } }, { sourceKind: { equals: sourceKind } }],
+        },
       })
       const templates = (result.docs as unknown as SocialTemplateRow[]).map((row) => ({
         id: row.id,
         name: row.name,
         appliesTo: row.appliesTo ?? [],
         description: row.description ?? undefined,
+        isDefault: row.isDefault === true,
         resolved: resolveTemplateCopy(row.templates ?? {}, ctx),
+        sourceKind: row.sourceKind ?? sourceKind,
       }))
 
       return jsonResponse({

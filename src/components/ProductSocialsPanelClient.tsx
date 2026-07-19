@@ -1,7 +1,7 @@
 'use client'
 
 import { Button, toast, useConfig, useDocumentInfo, useListDrawer } from '@payloadcms/ui'
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import type { PlatformId } from '../constants.js'
 import type {
@@ -22,11 +22,13 @@ import {
   compileComposerInput,
   compileStandalonePublishBody,
   type ComposerState,
+  filterTemplatesForContext,
   formatLocalDateTimeMin,
   getEffectiveAssets,
   mergeDraftMedia,
   normalizeSelectedUploadMedia,
   parseComposeResponse,
+  pickDefaultTemplate,
   pruneSelectedMedia,
   reorderSelectedMedia,
   shouldFetchEnvelope,
@@ -55,6 +57,7 @@ type ResolvedTemplate = {
   appliesTo: PlatformId[]
   description?: string
   id: number | string
+  isDefault?: boolean
   name: string
   resolved: {
     facebookMessage?: string
@@ -65,6 +68,7 @@ type ResolvedTemplate = {
     pinterestHashtags?: string[]
     pinterestTitle?: string
   }
+  sourceKind?: string
 }
 type PreviewEnvelope = {
   capabilities: PlatformCapabilities
@@ -143,7 +147,13 @@ const SourceComposerAuthorized: React.FC<{ sourceKind: string }> = ({ sourceKind
   const [states, setStates] = useState<Partial<Record<PlatformId, ComposerState>>>({})
   const [destinations, setDestinations] = useState<Destination[]>([])
   const [templates, setTemplates] = useState<ResolvedTemplate[]>([])
+  const [templatesLoaded, setTemplatesLoaded] = useState(false)
   const [selectedTemplateId, setSelectedTemplateId] = useState('')
+  // Platforms whose default template has already been auto-applied. Kept in a
+  // ref so re-applying does not fight an operator who switched back to
+  // "Platform defaults": the default is offered once per platform, not on every
+  // render where no template is selected.
+  const autoAppliedRef = useRef<Set<PlatformId>>(new Set())
   const [history, setHistory] = useState<HistoryRow[]>([])
   const [scheduledAt, setScheduledAt] = useState('')
   const [validation, setValidation] = useState<ValidationResult>()
@@ -322,6 +332,7 @@ const SourceComposerAuthorized: React.FC<{ sourceKind: string }> = ({ sourceKind
         const body = (await response.json()) as { templates?: ResolvedTemplate[] }
         if (response.ok) {
           setTemplates(body.templates ?? [])
+          setTemplatesLoaded(true)
         }
       })
       .catch(() => undefined)
@@ -433,6 +444,29 @@ const SourceComposerAuthorized: React.FC<{ sourceKind: string }> = ({ sourceKind
       updateState({ copy: resolved.gbpSummary })
     }
   }
+
+  // Auto-apply the default template for a platform the first time its composer
+  // state is ready. Runs once per platform (autoAppliedRef guard) so switching
+  // back to "Platform defaults" is not immediately overridden.
+  useEffect(() => {
+    if (!templatesLoaded) {
+      return
+    }
+    if (!states[platform]) {
+      return
+    }
+    if (autoAppliedRef.current.has(platform)) {
+      return
+    }
+    autoAppliedRef.current.add(platform)
+    const preferred = pickDefaultTemplate(
+      filterTemplatesForContext(templates, sourceKind, platform),
+    )
+    if (preferred) {
+      applyTemplate(String(preferred.id))
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [templatesLoaded, platform, states, templates, sourceKind])
 
   const toggleMedia = (url: string): void => {
     if (!state) {
@@ -625,9 +659,7 @@ const SourceComposerAuthorized: React.FC<{ sourceKind: string }> = ({ sourceKind
     )
   }
 
-  const filteredTemplates = templates.filter(
-    (template) => template.appliesTo.length === 0 || template.appliesTo.includes(platform),
-  )
+  const filteredTemplates = filterTemplatesForContext(templates, sourceKind, platform)
   const assets = mergedDraft.media
   const accepted = acceptedMediaTypes(platform, state.format)
   // Bug 2: multi-asset formats surface order badges + drag/arrow reordering.

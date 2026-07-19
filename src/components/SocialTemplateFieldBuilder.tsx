@@ -178,6 +178,10 @@ export const SocialTemplateFieldBuilder: React.FC<SocialTemplateFieldBuilderProp
   path,
 }) => {
   const { setValue, value } = useField<string>({ path })
+  // The builder is locked to the collection the template row declares. Read the
+  // document's own `sourceKind` field live so the sample-record picker, token
+  // discovery, and live preview all target that collection's resolver.
+  const { value: docSourceKind } = useField<string>({ path: 'sourceKind' })
   const { config } = useConfig()
 
   // ---------- config.admin?.custom.socials ------------------------------------
@@ -210,7 +214,10 @@ export const SocialTemplateFieldBuilder: React.FC<SocialTemplateFieldBuilderProp
   // ---------- UI state -------------------------------------------------------
 
   const [rawMode, setRawMode] = useState(false)
-  const [selectedKind, setSelectedKind] = useState(sourceKinds[0]?.kind ?? '')
+  // The template's bound source kind drives the preview. Empty until the
+  // operator picks a collection on the row.
+  const selectedKind = typeof docSourceKind === 'string' ? docSourceKind : ''
+  const boundKind = sourceKinds.find((sk) => sk.kind === selectedKind)
   const [selectedId, setSelectedId] = useState('')
   const [previewText, setPreviewText] = useState<string>()
   const [previewError, setPreviewError] = useState<string>()
@@ -398,51 +405,46 @@ export const SocialTemplateFieldBuilder: React.FC<SocialTemplateFieldBuilderProp
         </span>
       </div>
 
-      {/* Live preview */}
+      {/* Live preview — locked to the template's bound source kind */}
       {sourceKinds.length > 0 && (
         <details className="stfb__preview-section">
           <summary className="stfb__preview-summary">Live preview</summary>
-          <div className="stfb__preview-controls">
-            {sourceKinds.length > 1 && (
-              <label className="stfb__preview-label">
-                Source kind
-                <select
-                  aria-label="Preview source kind"
-                  className="stfb__preview-select"
-                  onChange={(e) => setSelectedKind(e.target.value)}
-                  value={selectedKind}
-                >
-                  {sourceKinds.map((sk) => (
-                    <option key={sk.kind} value={sk.kind}>
-                      {sk.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            )}
-            <label className="stfb__preview-label">
-              Record ID
-              <input
-                aria-label="Preview record ID"
-                className="stfb__preview-id"
-                onChange={(e) => setSelectedId(e.target.value)}
-                placeholder="Enter a record ID to preview"
-                type="text"
-                value={selectedId}
-              />
-            </label>
-          </div>
+          {selectedKind ? (
+            <>
+              <div className="stfb__preview-controls">
+                <span className="stfb__preview-label-text">
+                  Previewing a <strong>{boundKind?.label ?? selectedKind}</strong> record.
+                </span>
+                <label className="stfb__preview-label">
+                  Record ID
+                  <input
+                    aria-label="Preview record ID"
+                    className="stfb__preview-id"
+                    onChange={(e) => setSelectedId(e.target.value)}
+                    placeholder="Enter a record ID to preview"
+                    type="text"
+                    value={selectedId}
+                  />
+                </label>
+              </div>
 
-          {previewError && (
-            <p className="stfb__preview-error" role="alert">
-              {previewError}
+              {previewError && (
+                <p className="stfb__preview-error" role="alert">
+                  {previewError}
+                </p>
+              )}
+              {previewText !== undefined && !previewError && (
+                <div aria-live="polite" className="stfb__preview-output">
+                  <span className="stfb__preview-label-text">Rendered output:</span>
+                  <pre className="stfb__preview-text">{previewText || '(empty)'}</pre>
+                </div>
+              )}
+            </>
+          ) : (
+            <p className="stfb__preview-hint">
+              Choose the collection this template is for (the “Source kind” field above) to preview
+              it against a record.
             </p>
-          )}
-          {previewText !== undefined && !previewError && (
-            <div aria-live="polite" className="stfb__preview-output">
-              <span className="stfb__preview-label-text">Rendered output:</span>
-              <pre className="stfb__preview-text">{previewText || '(empty)'}</pre>
-            </div>
           )}
         </details>
       )}

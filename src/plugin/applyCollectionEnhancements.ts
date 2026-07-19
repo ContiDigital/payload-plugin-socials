@@ -95,7 +95,7 @@ export const applyCollectionEnhancements = (
     config.collections.push(buildSocialPostsCollection(options.authorize))
   }
   if (!config.collections.some((c) => c.slug === SOCIAL_TEMPLATES_SLUG)) {
-    config.collections.push(buildSocialTemplatesCollection(options.authorize))
+    config.collections.push(buildSocialTemplatesCollection(options))
   }
 
   // Inject Socials tab into each host collection.

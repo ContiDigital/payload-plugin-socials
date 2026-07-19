@@ -724,3 +724,43 @@ export const shouldFetchEnvelope = (
   envelopes: Partial<Record<string, unknown>>,
   platform: string,
 ): boolean => !(platform in envelopes)
+
+// ---------------------------------------------------------------------------
+// Kind-scoped template selection
+// ---------------------------------------------------------------------------
+
+/** The template fields the composer needs to filter and auto-apply. */
+export type ComposerTemplateSummary = {
+  appliesTo: PlatformId[]
+  id: number | string
+  isDefault?: boolean
+  sourceKind?: string
+}
+
+/**
+ * Templates a composer should offer for a given source kind + platform.
+ *
+ * A template is included when its `sourceKind` matches the composer's kind AND
+ * its `appliesTo` either includes the platform or is empty (empty = every
+ * platform, the "informational" default). Templates authored for a different
+ * collection never appear, so a product-field template can no longer show up
+ * on a blog post and render empty.
+ */
+export const filterTemplatesForContext = <T extends ComposerTemplateSummary>(
+  templates: T[],
+  kind: string,
+  platform: PlatformId,
+): T[] =>
+  templates.filter(
+    (template) =>
+      template.sourceKind === kind &&
+      (template.appliesTo.length === 0 || template.appliesTo.includes(platform)),
+  )
+
+/**
+ * The default template to auto-apply from an already context-filtered list, if
+ * any. Returns the first template flagged `isDefault`; `undefined` otherwise.
+ */
+export const pickDefaultTemplate = <T extends { isDefault?: boolean }>(
+  templates: T[],
+): T | undefined => templates.find((template) => template.isDefault === true)
