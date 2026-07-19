@@ -97,8 +97,11 @@ export const buildSocialsConnectionsGlobal = (authorize?: AuthorizeFn): GlobalCo
     update: () => false,
   },
   admin: {
-    group: 'Socials',
-    hidden: ({ user }) => !user,
+    // Hidden from the admin nav and document view entirely. This global is
+    // internal AES-256-GCM token storage; hand-editing the encrypted envelopes
+    // corrupts the tokens. Operators manage connections from the Connections
+    // tab in the plugin admin view, never by editing this global directly.
+    hidden: true,
   },
   fields: [
     {

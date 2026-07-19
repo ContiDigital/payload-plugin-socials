@@ -155,6 +155,8 @@ After installation:
 4. **Publish a post**: open any record in the host collection where you injected the Socials tab, fill in a platform's fields, and click publish.
 5. **Schedule a post (optional)**: choose a date and time in the composer. The plugin upserts a `queued` `social-posts` row and queues the publish task with `waitUntil`.
 
+Some platforms connect through a system-user or service-account token supplied in your server configuration rather than through OAuth. Those connections show up in the Connections tab as connected with a "Managed by server configuration" badge and offer no Connect or Disconnect button. You change them by editing the server environment and redeploying, not from the admin UI. The `socials-connections` global itself is hidden from the admin nav and document view. It is internal AES-256-GCM token storage, and hand-editing the encrypted envelopes corrupts the tokens, so manage every connection from the Connections tab instead.
+
 ---
 
 ## Configuration

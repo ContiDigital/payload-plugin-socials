@@ -35,6 +35,14 @@ Best for a single business publishing from a server. The token does not expire.
    with expiration set to **Never** and the scopes below.
 4. Store it as `META_SYSTEM_USER_TOKEN`.
 
+A system-user connection shows up in the Connections tab as connected with a
+"Managed by server configuration" badge. It has no Connect or Disconnect button,
+because the credential lives in your server environment. You connect or
+disconnect it by changing that environment and redeploying, not from the admin
+UI. The `socials-connections` global that holds the encrypted token is hidden
+from the admin nav on purpose. It is internal AES-256-GCM storage, and editing
+the envelopes by hand corrupts the tokens.
+
 ### OAuth user login (for multi-tenant)
 
 Each tenant authorizes their own Facebook account. The short-lived user token is
