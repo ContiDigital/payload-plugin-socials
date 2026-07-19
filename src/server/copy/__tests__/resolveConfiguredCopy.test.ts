@@ -27,7 +27,13 @@ const makeOptions = (
   copyOverrides: NormalizedPluginOptions['copyOverrides'] = {},
 ): NormalizedPluginOptions =>
   ({
-    admin: { injectInto: [], mode: 'route', navLabel: 'Socials', route: '/socials' },
+    admin: {
+      adminBase: '/admin',
+      injectInto: [],
+      mode: 'route',
+      navLabel: 'Socials',
+      route: '/socials',
+    },
     api: { basePath: '/socials' },
     assets: { autoConvert: false, jpegQuality: 82, preflight: true },
     authorize: () => true,

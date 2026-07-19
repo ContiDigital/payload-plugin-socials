@@ -395,6 +395,9 @@ const buildNormalizedOptions = (
         )
   return {
     admin: {
+      // adminBase is populated to '/admin' by default here; applyAdminEnhancements
+      // overwrites it with the actual value derived from config.routes.admin.
+      adminBase: '/admin',
       injectInto: adminConfig.injectInto ?? [],
       mode: normalizeAdminMode(adminConfig.mode),
       navLabel: normalizeNonEmptyString(adminConfig.navLabel, DEFAULT_ADMIN_NAV_LABEL),

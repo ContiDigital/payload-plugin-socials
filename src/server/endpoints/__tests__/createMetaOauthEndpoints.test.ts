@@ -20,7 +20,7 @@ import {
 
 const buildOptions = (over: Record<string, unknown> = {}): NormalizedPluginOptions =>
   ({
-    admin: { route: '/admin' },
+    admin: { adminBase: '/admin', route: '/admin' },
     api: { basePath: '/socials' },
     platforms: {
       facebook: { appId: 'fa', appSecret: 'fs', enabled: true, redirectUri: 'https://h/fb' },
@@ -89,8 +89,25 @@ describe('meta oauth callback', () => {
       mkReq({ cookie: `${STATE_COOKIE_NAMES.instagram}=s1`, search: { code: 'c', state: 's1' } }),
     )
     expect(res.status).toBe(302)
-    expect(res.headers.get('location')).toBe('/admin?connected=instagram')
+    // Fix 2: redirect must include the admin base prefix.
+    expect(res.headers.get('location')).toBe('/admin/admin?connected=instagram')
     expect(adapter.exchangeCallback).toHaveBeenCalledWith(expect.objectContaining({ code: 'c' }))
+  })
+
+  it('uses a custom admin base in the redirect', async () => {
+    const customOptions = {
+      ...buildOptions(),
+      admin: { adminBase: '/cms', route: '/admin' },
+    } as unknown as NormalizedPluginOptions
+    const ep = find(
+      createMetaOauthEndpointsForPlatform(customOptions, 'instagram'),
+      '/instagram/oauth/callback',
+    )
+    const res = await ep.handler(
+      mkReq({ cookie: `${STATE_COOKIE_NAMES.instagram}=s1`, search: { code: 'c', state: 's1' } }),
+    )
+    expect(res.status).toBe(302)
+    expect(res.headers.get('location')).toBe('/cms/admin?connected=instagram')
   })
 
   it('403s on a state mismatch', async () => {

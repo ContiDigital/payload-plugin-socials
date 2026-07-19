@@ -82,7 +82,7 @@ describe('applyAdminEnhancements', () => {
     expect(Object.keys(views(config))).toEqual(['socials'])
   })
 
-  it('exposes plugin config to client components via config.custom', () => {
+  it('exposes plugin config to client components via config.custom (server path)', () => {
     const { config, options } = optionsWith({ mode: 'route' })
     applyAdminEnhancements(config, options)
     const custom = (
@@ -90,5 +90,52 @@ describe('applyAdminEnhancements', () => {
     ).socials
     expect(custom?.apiBasePath).toBe('/socials')
     expect(custom?.enabledPlatforms).toContain('pinterest')
+  })
+
+  // Fix 1: admin.custom.socials must be populated so useConfig() in the browser
+  // can read enabledPlatforms, apiBasePath, sourceKinds, and adminRoute.
+  it('populates admin.custom.socials for client-side useConfig() readers', () => {
+    const { config, options } = optionsWith({ mode: 'route' })
+    applyAdminEnhancements(config, options)
+    const adminCustom = config.admin?.custom as
+      | {
+          socials?: {
+            adminRoute?: string
+            apiBasePath?: string
+            enabledPlatforms?: string[]
+            sourceKinds?: unknown[]
+          }
+        }
+      | undefined
+    expect(adminCustom?.socials?.apiBasePath).toBe('/socials')
+    expect(adminCustom?.socials?.enabledPlatforms).toContain('pinterest')
+    expect(adminCustom?.socials?.adminRoute).toBe('/socials')
+    expect(Array.isArray(adminCustom?.socials?.sourceKinds)).toBe(true)
+  })
+
+  it('does not clobber existing admin.custom keys when adding socials', () => {
+    const { config, options } = optionsWith({ mode: 'route' })
+    // Pre-populate admin.custom with a key from another plugin.
+    config.admin = { custom: { anotherPlugin: { foo: 'bar' } } }
+    applyAdminEnhancements(config, options)
+    const adminCustom = config.admin?.custom as Record<string, unknown>
+    expect(adminCustom.anotherPlugin).toEqual({ foo: 'bar' })
+    expect(adminCustom.socials).toBeDefined()
+  })
+
+  // Fix 2: adminBase must be stored on options.admin so OAuth callback endpoints
+  // can build the correct post-auth redirect URL.
+  it('stores the resolved adminBase on options.admin', () => {
+    const { config, options } = optionsWith({ mode: 'route' }, {
+      routes: { admin: '/cms' },
+    } as Partial<Config>)
+    applyAdminEnhancements(config, options)
+    expect(options.admin.adminBase).toBe('/cms')
+  })
+
+  it('defaults adminBase to /admin when config.routes.admin is absent', () => {
+    const { config, options } = optionsWith({ mode: 'route' })
+    applyAdminEnhancements(config, options)
+    expect(options.admin.adminBase).toBe('/admin')
   })
 })

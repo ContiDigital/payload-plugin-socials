@@ -126,9 +126,14 @@ export const createOauthCallbackEndpoint = (
       }
       await adapter.exchangeCallback({ code, options, payload: req.payload, req })
 
+      // Resolve the admin base path from options.admin.adminBase (populated by
+      // applyAdminEnhancements from config.routes.admin; defaults to '/admin').
+      // This ensures the redirect lands on the correct admin URL and not a bare
+      // plugin route that would 404 without the admin prefix.
+      const adminBase = options.admin.adminBase ?? '/admin'
       return new Response(null, {
         headers: {
-          Location: `${options.admin.route}?connected=${cfg.connectedValue}`,
+          Location: `${adminBase}${options.admin.route}?connected=${cfg.connectedValue}`,
           'Set-Cookie': clearStateCookie(cfg.cookieName),
         },
         status: 302,

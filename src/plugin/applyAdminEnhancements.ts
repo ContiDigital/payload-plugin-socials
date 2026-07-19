@@ -62,13 +62,26 @@ export const applyAdminEnhancements = (
   }
   const components = config.admin.components
 
+  // Resolve the Payload admin base path from config.routes.admin (default '/admin').
+  // Stored on options.admin so that endpoint factories (e.g. oauthEndpointFactory)
+  // can build the correct post-auth redirect URL without needing the Payload Config.
+  const adminBase = ((config.routes as { admin?: string } | undefined)?.admin ?? '/admin').replace(
+    /\/+$/,
+    '',
+  )
+  options.admin.adminBase = adminBase
+
   // Expose plugin-config bits that client components need (basePath, route,
   // sourceKinds for the template builder's record-search picker).
-  if (!config.custom) {
-    config.custom = {}
-  }
-  const custom = config.custom as Record<string, unknown>
-  custom.socials = {
+  //
+  // Payload 3.86+ strips root config.custom from the client-side config
+  // (listed in serverOnlyConfigProperties). We therefore write the socials
+  // object to BOTH paths:
+  //   - config.custom.socials          → server-side readers (SocialsAdminView,
+  //                                      req.payload.config.custom)
+  //   - config.admin.custom.socials    → client-side readers via useConfig()
+  //                                      (the admin.custom object IS serialized)
+  const socialsCustom = {
     adminRoute: options.admin.route,
     apiBasePath: options.api.basePath,
     enabledPlatforms: Object.entries(options.platforms)
@@ -83,12 +96,20 @@ export const applyAdminEnhancements = (
     })),
   }
 
+  // Server-side path (kept for SocialsAdminView and server hooks).
+  if (!config.custom) {
+    config.custom = {}
+  }
+  ;(config.custom as Record<string, unknown>).socials = socialsCustom
+
+  // Client-side path: config.admin.custom IS serialized to the browser.
+  // Spread any existing keys so we do not clobber other plugins' entries.
+  config.admin.custom = {
+    ...(config.admin.custom as Record<string, unknown> | undefined),
+    socials: socialsCustom,
+  }
+
   if (options.admin.mode === 'route' || options.admin.mode === 'both') {
-    // The view `path` is relative to the admin base, so the nav link href must
-    // include that base. Default to '/admin' but respect a host override.
-    const adminBase = (
-      (config.routes as { admin?: string } | undefined)?.admin ?? '/admin'
-    ).replace(/\/+$/, '')
     const navLink: NavComponent = {
       clientProps: { href: `${adminBase}${options.admin.route}`, label: options.admin.navLabel },
       exportName: 'SocialsNavLink',

@@ -409,3 +409,69 @@ export const compileStandalonePublishBody = (
     targets,
   }
 }
+
+// ---------------------------------------------------------------------------
+// Compose response guard (Fix 3: standalone composer crash on error response)
+// ---------------------------------------------------------------------------
+
+export type ComposeResult = {
+  anyPublished: boolean
+  results: Array<{
+    error?: string
+    ok: boolean
+    platform: PlatformId
+    publishedRef?: {
+      externalId: string
+      externalUrl?: string
+      meta?: Record<string, unknown>
+      platform: PlatformId
+    }
+  }>
+}
+
+/**
+ * Parse and validate a response from the standalone compose endpoint.
+ *
+ * On a non-ok HTTP response OR a body that does not have an array `results`
+ * property, returns `{ ok: false, error }` with the server's error message (or
+ * a generic fallback). Only when the body looks like a valid ComposeResult is
+ * `{ ok: true, data }` returned.
+ *
+ * Extracting this decision keeps the component thin and the guard fully
+ * testable without a DOM/browser environment.
+ */
+export const parseComposeResponse = (
+  httpOk: boolean,
+  body: unknown,
+): { data: ComposeResult; ok: true } | { error: string; ok: false } => {
+  const rec =
+    body !== null && typeof body === 'object' ? (body as Record<string, unknown>) : undefined
+
+  if (!httpOk || !rec || !Array.isArray(rec.results)) {
+    const errorMsg =
+      typeof rec?.error === 'string' && rec.error
+        ? rec.error
+        : `Publish failed${httpOk ? '' : ' (server error)'}`
+    return { error: errorMsg, ok: false }
+  }
+
+  return { data: body as ComposeResult, ok: true }
+}
+
+// ---------------------------------------------------------------------------
+// Envelope cache helper (Fix 4: media preserved on tab switch)
+// ---------------------------------------------------------------------------
+
+/**
+ * Return true when the source composer should fetch a fresh preview envelope
+ * for the given platform.
+ *
+ * Cache-first: if an envelope already exists in state (because the user has
+ * visited this platform tab before), we do NOT refetch — that would wipe any
+ * media the user added via Add URL or the Media library. The initial fetch
+ * per platform still happens when no envelope exists.
+ */
+export const shouldFetchEnvelope = (
+  envelopes: Partial<Record<string, unknown>>,
+  platform: string,
+): boolean => !(platform in envelopes)

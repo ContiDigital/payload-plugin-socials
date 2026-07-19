@@ -19,9 +19,9 @@ import {
   createPinterestOauthStartEndpoint,
 } from '../createPinterestOauthEndpoints.js'
 
-const buildOptions = (enabled = true): NormalizedPluginOptions =>
+const buildOptions = (enabled = true, adminBase = '/admin'): NormalizedPluginOptions =>
   ({
-    admin: { route: '/socials' },
+    admin: { adminBase, route: '/socials' },
     api: { basePath: '/socials' },
     platforms: { pinterest: { enabled } },
   }) as unknown as NormalizedPluginOptions
@@ -87,9 +87,20 @@ describe('callback endpoint', () => {
       mkReq({ cookie: `${STATE_COOKIE_NAME}=abc`, search: { code: 'c0de', state: 'abc' } }),
     )
     expect(res.status).toBe(302)
-    expect(res.headers.get('location')).toBe('/socials?connected=pinterest')
+    // Fix 2: redirect must include the admin base prefix.
+    expect(res.headers.get('location')).toBe('/admin/socials?connected=pinterest')
     expect(res.headers.get('set-cookie')).toContain('Max-Age=0')
     expect(adapter.exchangeCallback).toHaveBeenCalledWith(expect.objectContaining({ code: 'c0de' }))
+  })
+
+  it('uses a custom admin base in the redirect', async () => {
+    const customOptions = buildOptions(true, '/cms')
+    const ep = createPinterestOauthCallbackEndpoint(customOptions)
+    const res = await ep.handler(
+      mkReq({ cookie: `${STATE_COOKIE_NAME}=abc`, search: { code: 'c0de', state: 'abc' } }),
+    )
+    expect(res.status).toBe(302)
+    expect(res.headers.get('location')).toBe('/cms/socials?connected=pinterest')
   })
 
   it('returns the provider error and clears the cookie', async () => {
