@@ -22,6 +22,7 @@ import {
   compileComposerInput,
   compileStandalonePublishBody,
   type ComposerState,
+  filenameFromUrl,
   filterTemplatesForContext,
   formatLocalDateTimeMin,
   getEffectiveAssets,
@@ -34,7 +35,6 @@ import {
   shouldFetchEnvelope,
   type StandaloneComposerState,
   supportsMultipleMedia,
-  videoPosterFrameSrc,
 } from './socialComposerModel.js'
 import { useSocialsAccess } from './useSocialsAccess.js'
 import './SocialPublishPanelClient.scss'
@@ -122,6 +122,81 @@ const inferFormat = (url: string, mimeType?: string): string | undefined => {
   }
   const ext = url.split('.').pop()?.split('?')[0]?.toLowerCase()
   return ext || undefined
+}
+
+// ---------------------------------------------------------------------------
+// Fix A: load-on-demand video preview
+//
+// Large, non-faststart mp4s (moov atom at the end) cannot yield a first frame
+// to a bare <video preload="metadata"> without downloading most of the file, so
+// eager frame painting renders blank. We never mount a frame-painting <video>
+// for tiles; tiles show a lightweight placeholder (or the asset's poster image
+// when present) with no fetch on mount. The big preview stays a placeholder
+// until the operator clicks "Load video preview".
+// ---------------------------------------------------------------------------
+
+const VideoGlyph: React.FC = () => (
+  <svg
+    aria-hidden="true"
+    className="socials-composer__video-glyph"
+    fill="none"
+    viewBox="0 0 24 24"
+    xmlns="http://www.w3.org/2000/svg"
+  >
+    <rect height="16" rx="3" stroke="currentColor" strokeWidth="1.6" width="20" x="2" y="4" />
+    <path d="M10 9l5 3-5 3V9z" fill="currentColor" />
+  </svg>
+)
+
+const VideoPlaceholderBody: React.FC<{ asset: SocialDraftMedia }> = ({ asset }) =>
+  asset.posterUrl ? (
+    <img alt={asset.altText ?? ''} src={asset.posterUrl} />
+  ) : (
+    <div className="socials-composer__video-placeholder">
+      <VideoGlyph />
+      <span className="socials-composer__video-filename">{filenameFromUrl(asset.url)}</span>
+    </div>
+  )
+
+/** Grid tile for a video asset: placeholder card, never a network fetch. */
+const VideoTile: React.FC<{ asset: SocialDraftMedia }> = ({ asset }) => (
+  <>
+    <VideoPlaceholderBody asset={asset} />
+    <span className="socials-composer__asset-kind">Video</span>
+  </>
+)
+
+/**
+ * Big preview for a selected video: placeholder + "Load video preview" button;
+ * only on click do we mount the real <video>. Reset to the placeholder when the
+ * selected asset changes so a different large file is not fetched until the
+ * operator opts in again.
+ */
+const VideoPreviewPane: React.FC<{ asset: SocialDraftMedia; label: string }> = ({
+  asset,
+  label,
+}) => {
+  const [loaded, setLoaded] = useState(false)
+  useEffect(() => {
+    setLoaded(false)
+  }, [asset.url])
+  if (loaded) {
+    return (
+      <video aria-label={label} controls muted playsInline preload="metadata" src={asset.url} />
+    )
+  }
+  return (
+    <div className="socials-composer__video-loadable">
+      <VideoPlaceholderBody asset={asset} />
+      <button
+        className="socials-composer__video-load"
+        onClick={() => setLoaded(true)}
+        type="button"
+      >
+        Load video preview
+      </button>
+    </div>
+  )
 }
 
 // ===========================================================================
@@ -1031,16 +1106,7 @@ const SourceComposerAuthorized: React.FC<{ sourceKind: string }> = ({ sourceKind
                       {asset.type === 'image' ? (
                         <img alt={asset.altText ?? ''} src={asset.url} />
                       ) : (
-                        <>
-                          <video
-                            aria-label="Video asset"
-                            muted
-                            playsInline
-                            preload="metadata"
-                            src={videoPosterFrameSrc(asset.url)}
-                          />
-                          <span className="socials-composer__asset-kind">Video</span>
-                        </>
+                        <VideoTile asset={asset} />
                       )}
                       <button
                         aria-label={
@@ -1175,13 +1241,9 @@ const SourceComposerAuthorized: React.FC<{ sourceKind: string }> = ({ sourceKind
           <span className="socials-composer__preview-platform">{PLATFORM_LABELS[platform]}</span>
           {previewAsset?.type === 'image' && <img alt={state.altText} src={previewAsset.url} />}
           {previewAsset?.type === 'video' && (
-            <video
-              aria-label={state.altText || 'Selected video preview'}
-              controls
-              muted
-              playsInline
-              preload="metadata"
-              src={videoPosterFrameSrc(previewAsset.url)}
+            <VideoPreviewPane
+              asset={previewAsset}
+              label={state.altText || 'Selected video preview'}
             />
           )}
           <strong>{state.title || envelope.draft.content.title}</strong>
@@ -1642,16 +1704,7 @@ const StandaloneComposerAuthorized: React.FC = () => {
                   {asset.type === 'image' ? (
                     <img alt={asset.altText ?? ''} src={asset.url} />
                   ) : (
-                    <>
-                      <video
-                        aria-label="Video asset"
-                        muted
-                        playsInline
-                        preload="metadata"
-                        src={videoPosterFrameSrc(asset.url)}
-                      />
-                      <span className="socials-composer__asset-kind">Video</span>
-                    </>
+                    <VideoTile asset={asset} />
                   )}
                   {mediaReorderable && (
                     <span className="socials-composer__asset-order">{index + 1}</span>

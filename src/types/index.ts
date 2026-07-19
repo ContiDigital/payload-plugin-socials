@@ -116,6 +116,13 @@ export type SocialDraftMedia = {
   /** Image format from mimeType (e.g. "jpeg", "png", "webp"). */
   format?: MediaAssetFormat
   height?: number
+  /**
+   * Optional poster/thumbnail image URL for a video asset. When present, the
+   * composer shows it as the tile and preview image instead of a placeholder
+   * glyph, with no extra network request. Hosts can supply it via a resolver or
+   * a generic `posterUrl` / `poster.url` field on the upload doc.
+   */
+  posterUrl?: string
   role?: SocialImageRole
   type: 'image' | 'video'
   url: string

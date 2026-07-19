@@ -13,10 +13,12 @@ import {
   buildStandaloneInitialState,
   compileComposerInput,
   compileStandalonePublishBody,
+  filenameFromUrl,
   filterTemplatesForContext,
   formatFromMime,
   formatLocalDateTimeMin,
   getSelectedAssets,
+  isVideoAsset,
   mediaTypeFromMime,
   mergeDraftMedia,
   normalizeSelectedUploadMedia,
@@ -901,6 +903,88 @@ describe('normalizeSelectedUploadMedia', () => {
 
   it('returns undefined when no usable url can be resolved', () => {
     expect(normalizeSelectedUploadMedia({ mimeType: 'video/mp4' }, uploadCtx)).toBeUndefined()
+  })
+
+  it('carries a flat posterUrl for a video doc, absolutized from origin', () => {
+    const asset = normalizeSelectedUploadMedia(
+      {
+        mimeType: 'video/mp4',
+        posterUrl: '/api/media/file/poster.jpg',
+        url: '/api/media/file/clip.mp4',
+      },
+      uploadCtx,
+    )
+    expect(asset?.posterUrl).toBe('https://host.test/api/media/file/poster.jpg')
+  })
+
+  it('reads a nested poster.url for a video doc and passes an absolute value through', () => {
+    const asset = normalizeSelectedUploadMedia(
+      {
+        mimeType: 'video/mp4',
+        poster: { url: 'https://cdn.test/poster.jpg' },
+        url: 'https://cdn.test/clip.mp4',
+      },
+      uploadCtx,
+    )
+    expect(asset?.posterUrl).toBe('https://cdn.test/poster.jpg')
+  })
+
+  it('leaves posterUrl undefined for a video doc with no poster field', () => {
+    const asset = normalizeSelectedUploadMedia(
+      { mimeType: 'video/mp4', url: 'https://cdn.test/clip.mp4' },
+      uploadCtx,
+    )
+    expect(asset?.posterUrl).toBeUndefined()
+  })
+
+  it('never sets posterUrl on an image doc even when a poster field is present', () => {
+    const asset = normalizeSelectedUploadMedia(
+      {
+        mimeType: 'image/jpeg',
+        posterUrl: '/api/media/file/poster.jpg',
+        url: 'https://cdn.test/pic.jpg',
+      },
+      uploadCtx,
+    )
+    expect(asset?.type).toBe('image')
+    expect(asset?.posterUrl).toBeUndefined()
+  })
+})
+
+describe('filenameFromUrl', () => {
+  it('returns the last path segment', () => {
+    expect(filenameFromUrl('https://cdn.test/videos/clip.mp4')).toBe('clip.mp4')
+  })
+
+  it('strips the query string and fragment', () => {
+    expect(filenameFromUrl('https://cdn.test/videos/clip.mp4?v=2#t=0.1')).toBe('clip.mp4')
+  })
+
+  it('decodes percent-encoding', () => {
+    expect(filenameFromUrl('https://cdn.test/my%20clip.mp4')).toBe('my clip.mp4')
+  })
+
+  it('ignores a trailing slash', () => {
+    expect(filenameFromUrl('https://cdn.test/videos/clip.mp4/')).toBe('clip.mp4')
+  })
+
+  it('falls back to the raw url when there is no usable segment', () => {
+    expect(filenameFromUrl('')).toBe('')
+  })
+
+  it('falls back to the raw segment when decoding fails', () => {
+    // A lone percent sign is not valid percent-encoding and throws in decodeURIComponent.
+    expect(filenameFromUrl('https://cdn.test/bad%.mp4')).toBe('bad%.mp4')
+  })
+})
+
+describe('isVideoAsset', () => {
+  it('is true for a video asset', () => {
+    expect(isVideoAsset({ type: 'video' })).toBe(true)
+  })
+
+  it('is false for an image asset', () => {
+    expect(isVideoAsset({ type: 'image' })).toBe(false)
   })
 })
 

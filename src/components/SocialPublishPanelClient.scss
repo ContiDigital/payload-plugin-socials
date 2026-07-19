@@ -246,6 +246,67 @@
   opacity: 0.35;
 }
 
+/* Fix A: lightweight video placeholder (no eager frame paint / no fetch). */
+.socials-composer__video-placeholder {
+  align-items: center;
+  background: var(--theme-elevation-100);
+  color: var(--theme-elevation-500);
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  height: 100%;
+  justify-content: center;
+  padding: 0.4rem;
+  text-align: center;
+  width: 100%;
+}
+.socials-composer__video-glyph {
+  block-size: 2rem;
+  inline-size: 2rem;
+}
+.socials-composer__video-filename {
+  font-size: 0.65rem;
+  line-height: 1.2;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Big-preview load-on-demand card: placeholder + "Load video preview" button. */
+.socials-composer__video-loadable {
+  align-items: center;
+  aspect-ratio: 1;
+  background: var(--theme-elevation-100);
+  border-radius: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  justify-content: center;
+  overflow: hidden;
+  position: relative;
+}
+.socials-composer__video-loadable img,
+.socials-composer__video-loadable .socials-composer__video-placeholder {
+  border-radius: 6px;
+  inset: 0;
+  object-fit: cover;
+  position: absolute;
+}
+.socials-composer__video-load {
+  background: var(--theme-elevation-0);
+  border: 1px solid var(--socials-border);
+  border-radius: 4px;
+  color: var(--theme-text);
+  cursor: pointer;
+  font-size: 0.75rem;
+  padding: 0.35rem 0.75rem;
+  position: relative;
+  z-index: 1;
+}
+.socials-composer__video-load:hover {
+  background: var(--theme-elevation-50);
+}
+
 /* Add media row */
 .socials-composer__add-media {
   display: flex;
