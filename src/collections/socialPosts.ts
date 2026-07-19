@@ -55,6 +55,7 @@ export const buildSocialPostsCollection = (authorize?: AuthorizeFn): CollectionC
       'publishedAt',
       'lastError',
     ],
+    group: 'Socials',
     hidden: ({ user }) => !user,
     useAsTitle: 'title',
   },

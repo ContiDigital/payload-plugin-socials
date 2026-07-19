@@ -97,6 +97,7 @@ export const buildSocialsConnectionsGlobal = (authorize?: AuthorizeFn): GlobalCo
     update: () => false,
   },
   admin: {
+    group: 'Socials',
     hidden: ({ user }) => !user,
   },
   fields: [
