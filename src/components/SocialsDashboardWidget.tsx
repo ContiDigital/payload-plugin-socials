@@ -6,7 +6,9 @@ import React, { useCallback, useEffect, useState } from 'react'
 import type { ConnectionState } from '../types/index.js'
 
 import { PLATFORM_IDS, PLATFORM_LABELS, type PlatformId } from '../constants.js'
+import { resolveSocialsEndpointBase } from './accessModel.js'
 import { connectionButtonLabel, describeConnectionRow } from './connectionRowModel.js'
+import { useSocialsAccess } from './useSocialsAccess.js'
 
 type Props = {
   enabledPlatforms?: string[]
@@ -17,7 +19,24 @@ type ConnectionMap = Partial<Record<PlatformId, ConnectionState>>
 const asRecord = (value: unknown): Record<string, unknown> | undefined =>
   value && typeof value === 'object' ? (value as Record<string, unknown>) : undefined
 
-export const SocialsDashboardWidget: React.FC<Props> = ({ enabledPlatforms }) => {
+/**
+ * Visibility gate: the widget disappears entirely for a user the host
+ * `authorize` rejects for the `admin` scope. Its data endpoint
+ * (`{basePath}/connections`) requires admin, so gating on `publisher` left a
+ * publisher-but-not-admin user staring at a permanently empty widget. It probes
+ * `{basePath}/access` once and renders nothing until the answer arrives, so an
+ * unauthorized user never sees the panel, and never sees a toast.
+ */
+export const SocialsDashboardWidget: React.FC<Props> = (props) => {
+  const { config } = useConfig()
+  const { admin, loading } = useSocialsAccess(resolveSocialsEndpointBase(config))
+  if (loading || !admin) {
+    return null
+  }
+  return <SocialsDashboardWidgetInner {...props} />
+}
+
+const SocialsDashboardWidgetInner: React.FC<Props> = ({ enabledPlatforms }) => {
   const { config } = useConfig()
 
   // Fix 1: read from config.admin?.custom (serialized to browser) instead of
@@ -43,12 +62,12 @@ export const SocialsDashboardWidget: React.FC<Props> = ({ enabledPlatforms }) =>
     try {
       const response = await fetch(`${endpointBase}/connections`)
       const body = (await response.json()) as { connections?: ConnectionMap; error?: string }
-      if (!response.ok) {
-        throw new Error(body.error ?? `Request failed (${response.status})`)
+      // Fail silently: this is a passive data fetch, not a user action. An
+      // unauthorized response (e.g. publisher-but-not-admin) must never raise a
+      // toast — the widget simply shows no connections.
+      if (response.ok) {
+        setConnections(body.connections ?? {})
       }
-      setConnections(body.connections ?? {})
-    } catch (caught) {
-      toast.error(caught instanceof Error ? caught.message : String(caught))
     } finally {
       setLoading(false)
     }

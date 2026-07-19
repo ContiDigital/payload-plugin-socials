@@ -2,6 +2,7 @@ import type { Config, Endpoint } from 'payload'
 
 import type { NormalizedPluginOptions } from '../types/index.js'
 
+import { createAccessEndpoint } from '../server/endpoints/createAccessEndpoint.js'
 import { createComposeEndpoints } from '../server/endpoints/createComposeEndpoints.js'
 import { createConnectionsEndpoint } from '../server/endpoints/createConnectionsEndpoint.js'
 import { createGbpLocationsEndpoints } from '../server/endpoints/createGbpLocationsEndpoints.js'
@@ -27,6 +28,7 @@ export const applyEndpointEnhancements = (
 
   const endpoints: Endpoint[] = [
     createHealthEndpoint(options),
+    createAccessEndpoint(options),
     createConnectionsEndpoint(options),
     ...createPinterestOauthEndpoints(options),
     ...createPinterestBoardsEndpoints(options),

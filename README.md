@@ -152,7 +152,7 @@ After installation:
 1. **Generate types**: `pnpm payload generate:types`. The plugin adds two collection slugs (`social-posts` and `social-templates`) and one global (`socials-connections`).
 2. **Run migrations**: generate a migration with `pnpm payload migrate:create` for the new schema, commit it, then apply with `pnpm payload migrate`. The plugin never auto-creates migrations. That is always your call.
 3. **Connect a platform**: navigate to `/admin/socials`, click "Connect Pinterest" (or another platform), and complete the OAuth flow. The plugin stores the encrypted refresh token on `socials-connections`.
-4. **Publish a post**: open any record in the host collection where you injected the Socials tab, fill in a platform's fields, and click publish.
+4. **Publish a post**: open any record in the host collection where you injected the Socials tab, fill in a platform's fields, and click publish. Media you add by URL or from the Media library is shared across every platform tab; the selection is per platform. For multi-asset formats (Instagram carousels, Facebook multi-photo), each selected tile shows its order number and you set the published sequence by dragging tiles or using the left/right arrows on each tile.
 5. **Schedule a post (optional)**: choose a date and time in the composer. The plugin upserts a `queued` `social-posts` row and queues the publish task with `waitUntil`.
 
 Some platforms connect through a system-user or service-account token supplied in your server configuration rather than through OAuth. Those connections show up in the Connections tab as connected with a "Managed by server configuration" badge and offer no Connect or Disconnect button. You change them by editing the server environment and redeploying, not from the admin UI. The `socials-connections` global itself is hidden from the admin nav and document view. It is internal AES-256-GCM token storage, and hand-editing the encrypted envelopes corrupts the tokens, so manage every connection from the Connections tab instead.
@@ -834,6 +834,8 @@ And a server component (from `payload-plugin-socials/rsc`):
 
 - `<SocialsAdminView>`: the `/admin/socials` route shell.
 
+Your `authorize` function gates both the REST API and the visibility of every admin surface. A user it rejects for the `publisher` scope sees nothing: no sidebar link, no `/admin/socials` route (they are redirected to the admin home), no dashboard widget, and an empty Socials tab with no composer forms and no error toasts. Each surface probes the read-only `GET {basePath}/access` endpoint (which reports `{ admin, publisher }` for the current user and never throws) and renders only when allowed, so authorization is enforced once in your `authorize` function rather than duplicated across components.
+
 Post templates are authored directly in the `social-templates` collection, which Payload renders with its built-in collection editor.
 
 The composer itself is a dedicated social UI, not a rich-text field. It exposes only semantics the target APIs preserve: channel copy, title where supported, destination, format, ordered image/video assets, accessibility text, topic-specific fields, CTA data, and scheduling. Host rich text and custom blocks are normalized once in `SourceContextResolver`, keeping the plugin independent of Payload's editor implementation.
@@ -913,6 +915,14 @@ GET /api/socials/health
 ```
 
 Returns the enabled platforms, the registered source kinds, and the test-mode flag.
+
+### Access probe
+
+```
+GET /api/socials/access
+```
+
+Returns `{ admin, publisher }` for the current user by running your `authorize` for each scope. It never throws: an unauthenticated request, or an `authorize` that throws, reports both as `false`. The admin UI uses this to decide what to render; it is a capability probe, not a gate.
 
 ### OAuth (per platform)
 

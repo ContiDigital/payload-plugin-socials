@@ -369,6 +369,187 @@ export const supportsMultipleMedia = (platform: PlatformId, format: string): boo
   (platform === 'facebook' && format === 'PHOTO_MULTI')
 
 // ---------------------------------------------------------------------------
+// Bug 1: media-library upload URL normalization
+// ---------------------------------------------------------------------------
+
+/** The subset of a Payload upload REST document the composer reads. */
+export type UploadDocLike = {
+  alt?: unknown
+  filename?: unknown
+  height?: unknown
+  mimeType?: unknown
+  sizes?: unknown
+  url?: unknown
+  width?: unknown
+}
+
+export type UploadUrlContext = {
+  apiRoute: string
+  collectionSlug: string
+  origin: string
+}
+
+const asString = (value: unknown): string => (typeof value === 'string' ? value.trim() : '')
+
+/**
+ * Resolve a fetchable, absolute file URL from a Payload upload document.
+ *
+ * Empirically (Payload 3.86 local-storage upload) the doc carries a RELATIVE
+ * `url` like `/api/media/file/clip.mp4`; some storage adapters omit `url`
+ * entirely and only surface `filename`. Both cases previously produced an
+ * empty/relative `<video src>` and rendered blank. Resolution order:
+ *   1. `url` present  -> pass through (absolute) or prefix `origin` (relative).
+ *   2. else `filename` -> construct `{origin}{apiRoute}/{collection}/file/{name}`.
+ *   3. else            -> '' (caller surfaces "could not load media").
+ */
+export const resolveUploadFileUrl = (doc: UploadDocLike, ctx: UploadUrlContext): string => {
+  const absolutize = (value: string): string =>
+    value.startsWith('/') ? `${ctx.origin}${value}` : value
+  const rawUrl = asString(doc.url)
+  if (rawUrl) {
+    return absolutize(rawUrl)
+  }
+  const filename = asString(doc.filename)
+  if (filename) {
+    const base = ctx.apiRoute.replace(/\/$/, '')
+    return `${ctx.origin}${base}/${ctx.collectionSlug}/file/${encodeURIComponent(filename)}`
+  }
+  return ''
+}
+
+/** Media type from mimeType (video/* -> video), defaulting to image. */
+export const mediaTypeFromMime = (mimeType: string | undefined): MediaType =>
+  mimeType && mimeType.startsWith('video/') ? 'video' : 'image'
+
+/** Short format token from a mimeType, e.g. `video/mp4;codecs=..` -> `mp4`. */
+export const formatFromMime = (mimeType: string | undefined): string | undefined => {
+  if (!mimeType) {
+    return undefined
+  }
+  const sub = mimeType.split('/')[1]
+  return sub ? sub.split(';')[0] : undefined
+}
+
+/**
+ * For webp/avif image docs, prefer the largest already-generated jpeg size so
+ * the picked URL is broadly compatible. Returns the original url when no better
+ * jpeg size exists. Pure over the doc's `sizes` map — no network requests.
+ */
+const pickBestJpegSizeUrl = (doc: UploadDocLike, fallbackUrl: string): string => {
+  if (!doc.sizes || typeof doc.sizes !== 'object') {
+    return fallbackUrl
+  }
+  const sizes = doc.sizes as Record<string, Record<string, unknown>>
+  let bestWidth = 0
+  let bestUrl = fallbackUrl
+  for (const sizeData of Object.values(sizes)) {
+    const sizeUrl = sizeData?.url
+    const sizeMime = sizeData?.mimeType
+    const sizeWidth = typeof sizeData?.width === 'number' ? sizeData.width : 0
+    if (
+      typeof sizeUrl === 'string' &&
+      typeof sizeMime === 'string' &&
+      sizeMime.includes('jpeg') &&
+      sizeWidth > bestWidth
+    ) {
+      bestWidth = sizeWidth
+      bestUrl = sizeUrl
+    }
+  }
+  return bestUrl
+}
+
+/**
+ * Normalize a selected Payload upload document into a SocialDraftMedia asset:
+ * absolute playable URL (Bug 1), inferred type/format, and image dimensions.
+ * Returns undefined when no usable URL can be resolved.
+ */
+export const normalizeSelectedUploadMedia = (
+  doc: UploadDocLike,
+  ctx: UploadUrlContext,
+): SocialDraftMedia | undefined => {
+  const mimeType = asString(doc.mimeType) || undefined
+  const type = mediaTypeFromMime(mimeType)
+  const format = formatFromMime(mimeType)
+  let url = resolveUploadFileUrl(doc, ctx)
+  if (!url) {
+    return undefined
+  }
+  if (type === 'image' && format && (format === 'avif' || format === 'webp')) {
+    const best = pickBestJpegSizeUrl(doc, url)
+    url = best.startsWith('/') ? `${ctx.origin}${best}` : best
+  }
+  return {
+    type,
+    altText: asString(doc.alt) || undefined,
+    format,
+    height: typeof doc.height === 'number' ? doc.height : undefined,
+    url,
+    width: typeof doc.width === 'number' ? doc.width : undefined,
+  }
+}
+
+/**
+ * Video tile/preview `src` that forces the browser to paint the first frame.
+ * `preload="metadata"` fetches duration/dimensions but does NOT decode a frame,
+ * so a bare `<video>` shows an empty box. Appending a `#t=0.1` media fragment
+ * makes the browser seek to and render that frame — no codec/HLS logic, purely
+ * a URL hint. Left untouched when the url already carries a fragment.
+ */
+export const videoPosterFrameSrc = (url: string): string =>
+  url.includes('#') ? url : `${url}#t=0.1`
+
+// ---------------------------------------------------------------------------
+// Bug 3: shared media pool across platform tabs
+// ---------------------------------------------------------------------------
+
+/**
+ * Effective media pool for a platform tab: resolver-provided media first, then
+ * user-added `extraMedia` in insertion order, deduped by url. The selection
+ * (`selectedMedia`) stays per-platform, but the POOL is shared so an asset
+ * added on one tab is selectable on every tab.
+ */
+export const mergeDraftMedia = (
+  resolverMedia: SocialDraftMedia[],
+  extraMedia: SocialDraftMedia[],
+): SocialDraftMedia[] => {
+  const seen = new Set<string>()
+  const merged: SocialDraftMedia[] = []
+  for (const asset of [...resolverMedia, ...extraMedia]) {
+    if (seen.has(asset.url)) {
+      continue
+    }
+    seen.add(asset.url)
+    merged.push(asset)
+  }
+  return merged
+}
+
+// ---------------------------------------------------------------------------
+// Bug 2: reorder selected media (drag + arrow affordances)
+// ---------------------------------------------------------------------------
+
+/**
+ * Move the entry at `from` to index `to`, clamping `to` into range. Returns the
+ * same reference on a no-op (identity move or out-of-range `from`) so callers
+ * can skip redundant state updates. Order of `selectedMedia` is the carousel /
+ * multi-photo child order, so this drives the published sequence.
+ */
+export const reorderSelectedMedia = (selected: string[], from: number, to: number): string[] => {
+  if (from < 0 || from >= selected.length) {
+    return selected
+  }
+  const clampedTo = Math.max(0, Math.min(selected.length - 1, to))
+  if (clampedTo === from) {
+    return selected
+  }
+  const next = [...selected]
+  const [moved] = next.splice(from, 1)
+  next.splice(clampedTo, 0, moved)
+  return next
+}
+
+// ---------------------------------------------------------------------------
 // Standalone composer model
 // ---------------------------------------------------------------------------
 
