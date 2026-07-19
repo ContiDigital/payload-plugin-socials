@@ -21,6 +21,7 @@ import {
   compileComposerInput,
   compileStandalonePublishBody,
   type ComposerState,
+  formatLocalDateTimeMin,
   getSelectedAssets,
   type MediaType,
   parseComposeResponse,
@@ -36,10 +37,13 @@ type Props = {
   sourceKind?: string
 }
 type Destination = { id: string; label: string }
+// Fix 3: scheduledAt is now included in history rows so queued posts
+// can display their scheduled time in the history list.
 type HistoryRow = {
   externalUrl?: string
   id: number | string
   publishedAt?: string
+  scheduledAt?: null | string
   status?: string
 }
 type ResolvedTemplate = {
@@ -155,7 +159,7 @@ const SourceComposer: React.FC<{ sourceKind: string }> = ({ sourceKind }) => {
   const [validation, setValidation] = useState<ValidationResult>()
   const [publishedRef, setPublishedRef] = useState<PublishedRef>()
   const [loading, setLoading] = useState(false)
-  // Two-step delete/mark-deleted confirm: stores the post id that is armed.
+  // Two-step delete/cancel/mark-deleted confirm: stores the post id that is armed.
   const [confirmingDeleteId, setConfirmingDeleteId] = useState<number | string>()
   const [deletingId, setDeletingId] = useState<number | string>()
 
@@ -616,6 +620,30 @@ const SourceComposer: React.FC<{ sourceKind: string }> = ({ sourceKind }) => {
   }
 
   /**
+   * Fix 4: Cancel a queued post. Calls DELETE on the same route; the server
+   * detects status='queued' and cancels without an upstream API call.
+   */
+  const cancelPost = async (postId: number | string): Promise<void> => {
+    setDeletingId(postId)
+    setConfirmingDeleteId(undefined)
+    try {
+      const response = await fetch(`${endpointBase}/posts/${encodeURIComponent(String(postId))}`, {
+        method: 'DELETE',
+      })
+      const result = (await response.json()) as { error?: string; ok?: boolean; status?: string }
+      if (!response.ok) {
+        throw new Error(result.error ?? `Cancel failed (${response.status})`)
+      }
+      toast.success('Scheduled post cancelled.')
+      await loadHistory()
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : String(caught))
+    } finally {
+      setDeletingId(undefined)
+    }
+  }
+
+  /**
    * Instagram reconcile path: skips the upstream API entirely and marks the row
    * deleted locally (deletedLocalOnly: true). Use this after manually deleting
    * the post in the Instagram app so the local ledger stays in sync.
@@ -668,6 +696,11 @@ const SourceComposer: React.FC<{ sourceKind: string }> = ({ sourceKind }) => {
   // Whether the active platform uses the localOnly reconcile path instead of a
   // live upstream delete. Instagram posts cannot be removed via the API.
   const isInstagram = platform === 'instagram'
+
+  // Fix 1: compute the local-time minimum for the schedule picker so that
+  // UTC-offset machines see the correct boundary. formatLocalDateTimeMin reads
+  // local Date getters, not the UTC wall-clock that toISOString() returns.
+  const scheduleMin = formatLocalDateTimeMin(new Date())
 
   return (
     <section className="socials-composer">
@@ -1039,11 +1072,13 @@ const SourceComposer: React.FC<{ sourceKind: string }> = ({ sourceKind }) => {
             </fieldset>
           )}
 
+          {/* Fix 1: min uses the local-time formatter so UTC-offset browsers
+              see the correct earliest-selectable time. */}
           <label>
             Schedule (optional){' '}
             <input
               aria-label="Schedule post"
-              min={new Date().toISOString().slice(0, 16)}
+              min={scheduleMin}
               onChange={(event) => setScheduledAt(event.target.value)}
               type="datetime-local"
               value={scheduledAt}
@@ -1119,12 +1154,23 @@ const SourceComposer: React.FC<{ sourceKind: string }> = ({ sourceKind }) => {
                           ? 'var(--theme-success-500)'
                           : row.status === 'deleted'
                             ? 'var(--theme-elevation-400)'
-                            : undefined,
+                            : row.status === 'queued'
+                              ? 'var(--theme-warning-500)'
+                              : row.status === 'cancelled'
+                                ? 'var(--theme-elevation-400)'
+                                : undefined,
                     }}
                   >
                     {row.status ?? 'unknown'}
                   </span>
-                  {row.publishedAt ? ` · ${new Date(row.publishedAt).toLocaleString()}` : ''}
+                  {/* Fix 3: show publishedAt for published rows or scheduledAt
+                      for queued rows so the operator can see when the post is
+                      due to go out. */}
+                  {row.status === 'queued' && row.scheduledAt
+                    ? ` · scheduled for ${new Date(row.scheduledAt).toLocaleString()}`
+                    : row.publishedAt
+                      ? ` · ${new Date(row.publishedAt).toLocaleString()}`
+                      : ''}
                   {row.externalUrl && (
                     <>
                       {' '}
@@ -1135,6 +1181,7 @@ const SourceComposer: React.FC<{ sourceKind: string }> = ({ sourceKind }) => {
                     </>
                   )}
                 </span>
+                {/* Published rows: delete / mark-deleted action */}
                 {row.status === 'published' && (
                   <span style={{ display: 'flex', gap: '0.25rem' }}>
                     {confirmingDeleteId === row.id ? (
@@ -1169,6 +1216,40 @@ const SourceComposer: React.FC<{ sourceKind: string }> = ({ sourceKind }) => {
                         type="button"
                       >
                         {isInstagram ? 'Mark deleted (removed in app)' : 'Delete'}
+                      </button>
+                    )}
+                  </span>
+                )}
+                {/* Fix 4: queued rows get a two-step Cancel action. No upstream
+                    API call is needed since the post has not been published yet. */}
+                {row.status === 'queued' && (
+                  <span style={{ display: 'flex', gap: '0.25rem' }}>
+                    {confirmingDeleteId === row.id ? (
+                      <>
+                        <button
+                          disabled={deletingId === row.id}
+                          onClick={() => void cancelPost(row.id)}
+                          style={{ color: 'var(--theme-error-500)', fontSize: '0.8rem' }}
+                          type="button"
+                        >
+                          Confirm cancel
+                        </button>
+                        <button
+                          onClick={() => setConfirmingDeleteId(undefined)}
+                          style={{ fontSize: '0.8rem' }}
+                          type="button"
+                        >
+                          Keep
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        disabled={deletingId === row.id}
+                        onClick={() => setConfirmingDeleteId(row.id)}
+                        style={{ color: 'var(--theme-error-400)', fontSize: '0.8rem' }}
+                        type="button"
+                      >
+                        Cancel
                       </button>
                     )}
                   </span>

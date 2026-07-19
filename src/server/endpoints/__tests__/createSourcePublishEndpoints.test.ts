@@ -182,6 +182,74 @@ describe('createPublishEndpoint', () => {
     const scheduleArg = vi.mocked(scheduleSocialPostPublish).mock.calls[0][0]
     expect(scheduleArg.queuedInput).not.toHaveProperty('scheduledAt')
   })
+
+  // ── Fix 2: past / near-future scheduledAt must be rejected ────────────────
+
+  it('returns 400 ValidationError when scheduledAt is in the past', async () => {
+    const past = new Date(Date.now() - 60_000).toISOString() // 1 minute ago
+    const res = await run(
+      createPublishEndpoint(options),
+      makeReq({ data: { boardId: 'b1', scheduledAt: past } }),
+    )
+    expect(res.status).toBe(400)
+    const body = await res.json()
+    expect(body.error).toMatch(/past or too close/)
+    // Nothing should have been published or queued.
+    expect(adapter.publish).not.toHaveBeenCalled()
+    expect(scheduleSocialPostPublish).not.toHaveBeenCalled()
+  })
+
+  it('returns 400 ValidationError when scheduledAt is within the 60s grace window', async () => {
+    const near = new Date(Date.now() + 30_000).toISOString() // 30 seconds ahead
+    const res = await run(
+      createPublishEndpoint(options),
+      makeReq({ data: { boardId: 'b1', scheduledAt: near } }),
+    )
+    expect(res.status).toBe(400)
+    const body = await res.json()
+    expect(body.error).toMatch(/past or too close/)
+    expect(adapter.publish).not.toHaveBeenCalled()
+    expect(scheduleSocialPostPublish).not.toHaveBeenCalled()
+  })
+
+  it('returns 400 ValidationError when scheduledAt is not a valid ISO string', async () => {
+    const res = await run(
+      createPublishEndpoint(options),
+      makeReq({ data: { boardId: 'b1', scheduledAt: 'not-a-date' } }),
+    )
+    expect(res.status).toBe(400)
+    const body = await res.json()
+    expect(body.error).toMatch(/valid ISO-8601/)
+    expect(adapter.publish).not.toHaveBeenCalled()
+    expect(scheduleSocialPostPublish).not.toHaveBeenCalled()
+  })
+
+  it('publishes immediately when scheduledAt is omitted entirely', async () => {
+    // Regression: omitting scheduledAt must NOT trigger the past-guard.
+    const res = await run(createPublishEndpoint(options), makeReq({ data: { boardId: 'b1' } }))
+    expect(res.status).toBe(200)
+    expect(adapter.publish).toHaveBeenCalledTimes(1)
+  })
+
+  it('publishes immediately when scheduledAt is an empty string', async () => {
+    // UI may send scheduledAt: '' when the field is cleared.
+    const res = await run(
+      createPublishEndpoint(options),
+      makeReq({ data: { boardId: 'b1', scheduledAt: '' } }),
+    )
+    expect(res.status).toBe(200)
+    expect(adapter.publish).toHaveBeenCalledTimes(1)
+  })
+
+  it('error message advises operator to pick a future time or omit scheduledAt', async () => {
+    const past = new Date(Date.now() - 1000).toISOString()
+    const res = await run(
+      createPublishEndpoint(options),
+      makeReq({ data: { boardId: 'b1', scheduledAt: past } }),
+    )
+    const body = await res.json()
+    expect(body.error).toMatch(/future time or omit/)
+  })
 })
 
 describe('createHistoryEndpoint', () => {
@@ -202,5 +270,52 @@ describe('createHistoryEndpoint', () => {
   it('returns 401 when unauthenticated', async () => {
     const res = await run(createHistoryEndpoint(options), makeReq({ user: null }))
     expect(res.status).toBe(401)
+  })
+
+  // ── Fix 3: history payload includes scheduledAt ───────────────────────────
+
+  it('includes scheduledAt in each history row', async () => {
+    const req = makeReq()
+    vi.mocked(req.payload.find).mockResolvedValue({
+      docs: [
+        {
+          id: 'row_q',
+          platform: 'pinterest',
+          scheduledAt: '2027-06-01T10:00:00.000Z',
+          status: 'queued',
+        },
+        {
+          id: 'row_p',
+          platform: 'pinterest',
+          publishedAt: '2027-05-01T10:00:00.000Z',
+          status: 'published',
+        },
+      ],
+      totalDocs: 2,
+    } as never)
+    const res = await run(createHistoryEndpoint(options), req)
+    const body = await res.json()
+    expect(body.posts).toHaveLength(2)
+
+    const queued = body.posts.find((p: { id: string }) => p.id === 'row_q')
+    expect(queued).toBeDefined()
+    expect(queued.scheduledAt).toBe('2027-06-01T10:00:00.000Z')
+    expect(queued.status).toBe('queued')
+
+    const published = body.posts.find((p: { id: string }) => p.id === 'row_p')
+    expect(published).toBeDefined()
+    // scheduledAt is null for rows that were not scheduled
+    expect(published.scheduledAt).toBeNull()
+  })
+
+  it('returns scheduledAt: null for rows with no scheduledAt field', async () => {
+    const req = makeReq()
+    vi.mocked(req.payload.find).mockResolvedValue({
+      docs: [{ id: 'row_1', status: 'published' }],
+      totalDocs: 1,
+    } as never)
+    const res = await run(createHistoryEndpoint(options), req)
+    const body = await res.json()
+    expect(body.posts[0].scheduledAt).toBeNull()
   })
 })
