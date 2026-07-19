@@ -21,14 +21,16 @@ const asRecord = (value: unknown): Record<string, unknown> | undefined =>
 
 /**
  * Visibility gate: the widget disappears entirely for a user the host
- * `authorize` rejects for the `publisher` scope. It probes `{basePath}/access`
- * once and renders nothing until the answer arrives, so an unauthorized user
- * never sees the panel — and never sees a toast.
+ * `authorize` rejects for the `admin` scope. Its data endpoint
+ * (`{basePath}/connections`) requires admin, so gating on `publisher` left a
+ * publisher-but-not-admin user staring at a permanently empty widget. It probes
+ * `{basePath}/access` once and renders nothing until the answer arrives, so an
+ * unauthorized user never sees the panel, and never sees a toast.
  */
 export const SocialsDashboardWidget: React.FC<Props> = (props) => {
   const { config } = useConfig()
-  const { loading, publisher } = useSocialsAccess(resolveSocialsEndpointBase(config))
-  if (loading || !publisher) {
+  const { admin, loading } = useSocialsAccess(resolveSocialsEndpointBase(config))
+  if (loading || !admin) {
     return null
   }
   return <SocialsDashboardWidgetInner {...props} />

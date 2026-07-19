@@ -9,13 +9,20 @@ import {
   buildStandaloneInitialState,
   compileComposerInput,
   compileStandalonePublishBody,
+  formatFromMime,
   formatLocalDateTimeMin,
   getSelectedAssets,
+  mediaTypeFromMime,
+  mergeDraftMedia,
+  normalizeSelectedUploadMedia,
   parseComposeResponse,
   pruneSelectedMedia,
+  reorderSelectedMedia,
+  resolveUploadFileUrl,
   shouldFetchEnvelope,
   stripLeadingTitle,
   supportsMultipleMedia,
+  videoPosterFrameSrc,
 } from '../socialComposerModel.js'
 
 const draft: SocialDraft = {
@@ -684,5 +691,232 @@ describe('title prepend deduplication', () => {
       draft,
     )
     expect(input.message).toBe('Product 1\n\nThe body.')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Bug 1: media-library upload URL normalization
+// ---------------------------------------------------------------------------
+
+const uploadCtx = { apiRoute: '/api', collectionSlug: 'media', origin: 'https://host.test' }
+
+describe('mediaTypeFromMime', () => {
+  it('maps video/* to video and everything else to image', () => {
+    expect(mediaTypeFromMime('video/mp4')).toBe('video')
+    expect(mediaTypeFromMime('video/webm')).toBe('video')
+    expect(mediaTypeFromMime('image/jpeg')).toBe('image')
+    expect(mediaTypeFromMime(undefined)).toBe('image')
+  })
+})
+
+describe('formatFromMime', () => {
+  it('extracts the subtype token, dropping codec params', () => {
+    expect(formatFromMime('video/mp4')).toBe('mp4')
+    expect(formatFromMime('video/webm;codecs=vp9')).toBe('webm')
+    expect(formatFromMime('image/png')).toBe('png')
+    expect(formatFromMime(undefined)).toBeUndefined()
+  })
+})
+
+describe('resolveUploadFileUrl', () => {
+  it('passes an absolute url through unchanged', () => {
+    expect(resolveUploadFileUrl({ url: 'https://cdn.test/clip.mp4' }, uploadCtx)).toBe(
+      'https://cdn.test/clip.mp4',
+    )
+  })
+
+  it('prefixes a relative url with the origin', () => {
+    expect(resolveUploadFileUrl({ url: '/api/media/file/clip.mp4' }, uploadCtx)).toBe(
+      'https://host.test/api/media/file/clip.mp4',
+    )
+  })
+
+  it('falls back to the file endpoint when only filename is present', () => {
+    expect(resolveUploadFileUrl({ filename: 'clip.mp4' }, uploadCtx)).toBe(
+      'https://host.test/api/media/file/clip.mp4',
+    )
+  })
+
+  it('encodes filename characters in the fallback path', () => {
+    expect(resolveUploadFileUrl({ filename: 'my clip.mp4' }, uploadCtx)).toBe(
+      'https://host.test/api/media/file/my%20clip.mp4',
+    )
+  })
+
+  it('returns empty string when neither url nor filename is usable', () => {
+    expect(resolveUploadFileUrl({}, uploadCtx)).toBe('')
+    expect(resolveUploadFileUrl({ url: '   ' }, uploadCtx)).toBe('')
+  })
+})
+
+describe('normalizeSelectedUploadMedia', () => {
+  it('normalizes a relative video upload doc into a playable video asset', () => {
+    // Empirical Payload 3.86 shape: relative url, video/mp4 mime, null dimensions.
+    expect(
+      normalizeSelectedUploadMedia(
+        { height: null, mimeType: 'video/mp4', url: '/api/media/file/clip.mp4', width: null },
+        uploadCtx,
+      ),
+    ).toEqual({
+      type: 'video',
+      altText: undefined,
+      format: 'mp4',
+      height: undefined,
+      url: 'https://host.test/api/media/file/clip.mp4',
+      width: undefined,
+    })
+  })
+
+  it('types an image doc as image and carries alt/dimensions', () => {
+    expect(
+      normalizeSelectedUploadMedia(
+        {
+          alt: 'A statue',
+          height: 1500,
+          mimeType: 'image/jpeg',
+          url: 'https://cdn.test/statue.jpg',
+          width: 1000,
+        },
+        uploadCtx,
+      ),
+    ).toEqual({
+      type: 'image',
+      altText: 'A statue',
+      format: 'jpeg',
+      height: 1500,
+      url: 'https://cdn.test/statue.jpg',
+      width: 1000,
+    })
+  })
+
+  it('uses the filename fallback when the doc has no url', () => {
+    const asset = normalizeSelectedUploadMedia(
+      { filename: 'clip.mp4', mimeType: 'video/mp4' },
+      uploadCtx,
+    )
+    expect(asset?.url).toBe('https://host.test/api/media/file/clip.mp4')
+    expect(asset?.type).toBe('video')
+  })
+
+  it('prefers the largest jpeg size for webp/avif images', () => {
+    const asset = normalizeSelectedUploadMedia(
+      {
+        mimeType: 'image/webp',
+        sizes: {
+          large: { mimeType: 'image/jpeg', url: '/api/media/file/pic-1200.jpg', width: 1200 },
+          small: { mimeType: 'image/jpeg', url: '/api/media/file/pic-400.jpg', width: 400 },
+          webp: { mimeType: 'image/webp', url: '/api/media/file/pic-1600.webp', width: 1600 },
+        },
+        url: '/api/media/file/pic.webp',
+      },
+      uploadCtx,
+    )
+    expect(asset?.url).toBe('https://host.test/api/media/file/pic-1200.jpg')
+  })
+
+  it('returns undefined when no usable url can be resolved', () => {
+    expect(normalizeSelectedUploadMedia({ mimeType: 'video/mp4' }, uploadCtx)).toBeUndefined()
+  })
+})
+
+describe('videoPosterFrameSrc', () => {
+  it('appends a #t=0.1 fragment so the browser paints the first frame', () => {
+    expect(videoPosterFrameSrc('https://cdn.test/clip.mp4')).toBe('https://cdn.test/clip.mp4#t=0.1')
+  })
+
+  it('preserves a query string before the fragment', () => {
+    expect(videoPosterFrameSrc('https://cdn.test/clip.mp4?v=2')).toBe(
+      'https://cdn.test/clip.mp4?v=2#t=0.1',
+    )
+  })
+
+  it('leaves a url that already carries a fragment untouched', () => {
+    expect(videoPosterFrameSrc('https://cdn.test/clip.mp4#t=5')).toBe(
+      'https://cdn.test/clip.mp4#t=5',
+    )
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Bug 3: shared media pool across platform tabs
+// ---------------------------------------------------------------------------
+
+describe('mergeDraftMedia', () => {
+  const img = (url: string): SocialDraftMedia => ({ type: 'image', url })
+
+  it('lists resolver media first, then extras in insertion order', () => {
+    expect(mergeDraftMedia([img('a'), img('b')], [img('c'), img('d')])).toEqual([
+      img('a'),
+      img('b'),
+      img('c'),
+      img('d'),
+    ])
+  })
+
+  it('dedupes by url, keeping the first occurrence', () => {
+    expect(mergeDraftMedia([img('a')], [img('a'), img('b')])).toEqual([img('a'), img('b')])
+  })
+
+  it('makes an asset added on one tab present in another tab pool', () => {
+    // Simulates: extraMedia collected while on the facebook tab, then the
+    // instagram tab merges its own resolver media with the same shared pool.
+    const facebookAdded = img('https://cdn.test/added.jpg')
+    const instagramResolver = [img('https://cdn.test/ig.jpg')]
+    const instagramPool = mergeDraftMedia(instagramResolver, [facebookAdded])
+    expect(instagramPool.map((m) => m.url)).toContain('https://cdn.test/added.jpg')
+  })
+
+  it('returns an empty array when both inputs are empty', () => {
+    expect(mergeDraftMedia([], [])).toEqual([])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Bug 2: reorder selected media
+// ---------------------------------------------------------------------------
+
+describe('reorderSelectedMedia', () => {
+  const list = ['a', 'b', 'c', 'd']
+
+  it('moves an item forward', () => {
+    expect(reorderSelectedMedia(list, 0, 2)).toEqual(['b', 'c', 'a', 'd'])
+  })
+
+  it('moves an item backward', () => {
+    expect(reorderSelectedMedia(list, 3, 1)).toEqual(['a', 'd', 'b', 'c'])
+  })
+
+  it('clamps a target past the end to the last position', () => {
+    expect(reorderSelectedMedia(list, 0, 99)).toEqual(['b', 'c', 'd', 'a'])
+  })
+
+  it('clamps a negative target to the first position', () => {
+    expect(reorderSelectedMedia(list, 2, -5)).toEqual(['c', 'a', 'b', 'd'])
+  })
+
+  it('returns the same reference on an identity move', () => {
+    expect(reorderSelectedMedia(list, 1, 1)).toBe(list)
+  })
+
+  it('returns the same reference when from is out of range', () => {
+    expect(reorderSelectedMedia(list, 9, 0)).toBe(list)
+    expect(reorderSelectedMedia(list, -1, 0)).toBe(list)
+  })
+
+  it('drives carousel child order through compileComposerInput', () => {
+    const reordered = reorderSelectedMedia(
+      ['https://cdn.test/front.jpg', 'https://cdn.test/detail.jpg'],
+      0,
+      1,
+    )
+    const input = compileComposerInput(
+      'instagram',
+      state({ format: 'CAROUSEL', selectedMedia: reordered }),
+      draft,
+    )
+    expect(input.carouselChildren).toEqual([
+      { format: undefined, imageUrl: 'https://cdn.test/detail.jpg' },
+      { format: undefined, imageUrl: 'https://cdn.test/front.jpg' },
+    ])
   })
 })

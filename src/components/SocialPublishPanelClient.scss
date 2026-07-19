@@ -174,13 +174,76 @@
   object-fit: cover;
   width: 100%;
 }
-.socials-composer__asset span {
+.socials-composer__asset--draggable {
+  cursor: grab;
+}
+/* Bug 1: "Video" kind label moved to top-right so it never collides with the
+   order badge (top-left) or the arrow overlay (bottom). */
+.socials-composer__asset-kind {
   background: #000b;
-  bottom: 0;
+  border-radius: 3px;
   color: #fff;
-  inset-inline: 0;
-  padding: 0.25rem;
+  font-size: 0.65rem;
+  inset-block-start: 0.25rem;
+  inset-inline-end: 0.25rem;
+  padding: 0.1rem 0.3rem;
+  pointer-events: none;
   position: absolute;
+}
+/* Bug 2: full-tile transparent toggle so the wrapping div can host the order
+   badge and arrow buttons without nesting interactive elements. */
+.socials-composer__asset-toggle {
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  inset: 0;
+  padding: 0;
+  position: absolute;
+}
+.socials-composer__asset-toggle:disabled {
+  cursor: not-allowed;
+}
+.socials-composer__asset-order {
+  align-items: center;
+  background: var(--theme-success-500);
+  border-radius: 50%;
+  color: var(--theme-base-0, #fff);
+  display: flex;
+  font-size: 0.7rem;
+  font-weight: 700;
+  height: 1.35rem;
+  inset-block-start: 0.25rem;
+  inset-inline-start: 0.25rem;
+  justify-content: center;
+  pointer-events: none;
+  position: absolute;
+  width: 1.35rem;
+}
+.socials-composer__asset-arrows {
+  bottom: 0;
+  display: flex;
+  inset-inline: 0;
+  justify-content: space-between;
+  opacity: 0;
+  position: absolute;
+  transition: opacity 0.12s ease-in-out;
+}
+.socials-composer__asset:hover .socials-composer__asset-arrows,
+.socials-composer__asset:focus-within .socials-composer__asset-arrows {
+  opacity: 1;
+}
+.socials-composer__asset-arrows button {
+  background: #000b;
+  border: 0;
+  color: #fff;
+  cursor: pointer;
+  font-size: 1rem;
+  line-height: 1;
+  padding: 0.2rem 0.45rem;
+}
+.socials-composer__asset-arrows button:disabled {
+  cursor: not-allowed;
+  opacity: 0.35;
 }
 
 /* Add media row */

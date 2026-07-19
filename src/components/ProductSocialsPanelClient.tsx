@@ -24,12 +24,15 @@ import {
   type ComposerState,
   formatLocalDateTimeMin,
   getEffectiveAssets,
-  type MediaType,
+  mergeDraftMedia,
+  normalizeSelectedUploadMedia,
   parseComposeResponse,
   pruneSelectedMedia,
+  reorderSelectedMedia,
   shouldFetchEnvelope,
   type StandaloneComposerState,
   supportsMultipleMedia,
+  videoPosterFrameSrc,
 } from './socialComposerModel.js'
 import { useSocialsAccess } from './useSocialsAccess.js'
 import './SocialPublishPanelClient.scss'
@@ -105,21 +108,6 @@ const destinationPath: Record<PlatformId, string> = {
   pinterest: '/pinterest/boards',
 }
 
-/** Infer media type from URL extension or mime type. */
-const inferMediaType = (url: string, mimeType?: string): MediaType => {
-  if (mimeType) {
-    if (mimeType.startsWith('video/')) {
-      return 'video'
-    }
-    return 'image'
-  }
-  const ext = url.split('.').pop()?.split('?')[0]?.toLowerCase() ?? ''
-  if (['avi', 'm4v', 'mkv', 'mov', 'mp4', 'webm'].includes(ext)) {
-    return 'video'
-  }
-  return 'image'
-}
-
 /** Extract format string from mimeType or URL extension. */
 const inferFormat = (url: string, mimeType?: string): string | undefined => {
   if (mimeType) {
@@ -164,6 +152,11 @@ const SourceComposerAuthorized: React.FC<{ sourceKind: string }> = ({ sourceKind
   // Two-step delete/cancel/mark-deleted confirm: stores the post id that is armed.
   const [confirmingDeleteId, setConfirmingDeleteId] = useState<number | string>()
   const [deletingId, setDeletingId] = useState<number | string>()
+  // Bug 3: user-added media (Add URL / Media library) lives at the composer
+  // level, NOT inside a per-platform envelope, so the POOL is shared across
+  // every platform tab. Only `selectedMedia` (in each ComposerState) is
+  // per-platform.
+  const [extraMedia, setExtraMedia] = useState<SocialDraftMedia[]>([])
 
   // Fix 5 (source): destructure closeDrawer from the tuple.
   const [ListDrawer, , { closeDrawer, openDrawer }] = useListDrawer({
@@ -174,6 +167,8 @@ const SourceComposerAuthorized: React.FC<{ sourceKind: string }> = ({ sourceKind
   // URL input state
   const [urlInput, setUrlInput] = useState('')
   const [urlTypeOverride, setUrlTypeOverride] = useState<'image' | 'video'>('image')
+  // Bug 2: index (within selectedMedia) of the tile currently being dragged.
+  const [dragFrom, setDragFrom] = useState<null | number>(null)
 
   const apiRoute = typeof config.routes?.api === 'string' ? config.routes.api : '/api'
   const basePath = typeof socials?.apiBasePath === 'string' ? socials.apiBasePath : '/socials'
@@ -185,9 +180,19 @@ const SourceComposerAuthorized: React.FC<{ sourceKind: string }> = ({ sourceKind
   )
   const envelope = envelopes[platform]
   const state = states[platform]
+  // Bug 3: the effective media pool for the active tab = resolver media concat
+  // the shared user-added media, deduped by url. Everything downstream
+  // (selection, pruning, reorder, compile, preview) operates on this draft.
+  const mergedDraft = useMemo(
+    () =>
+      envelope
+        ? { ...envelope.draft, media: mergeDraftMedia(envelope.draft.media, extraMedia) }
+        : undefined,
+    [envelope, extraMedia],
+  )
   const input = useMemo(
-    () => (state && envelope ? compileComposerInput(platform, state, envelope.draft) : undefined),
-    [envelope, platform, state],
+    () => (state && mergedDraft ? compileComposerInput(platform, state, mergedDraft) : undefined),
+    [mergedDraft, platform, state],
   )
 
   const updateState = useCallback(
@@ -214,7 +219,7 @@ const SourceComposerAuthorized: React.FC<{ sourceKind: string }> = ({ sourceKind
         }
         const { pruned, removed } = pruneSelectedMedia(
           existing.selectedMedia,
-          draft.media,
+          mergeDraftMedia(draft.media, extraMedia),
           platform,
           newFormat,
         )
@@ -229,7 +234,7 @@ const SourceComposerAuthorized: React.FC<{ sourceKind: string }> = ({ sourceKind
         }
       })
     },
-    [envelopes, platform],
+    [envelopes, extraMedia, platform],
   )
 
   const loadHistory = useCallback(
@@ -445,6 +450,9 @@ const SourceComposerAuthorized: React.FC<{ sourceKind: string }> = ({ sourceKind
 
   // Fix 5 (source): call closeDrawer before processing selection so the
   // drawer closes immediately. Payload's ListDrawer does not auto-close.
+  // Bug 1: URL normalization is delegated to normalizeSelectedUploadMedia so a
+  // relative or url-less upload doc still yields an absolute, playable src.
+  // Bug 3: the asset lands in the shared extraMedia pool, not the envelope.
   const handleLibrarySelect = useCallback(
     async (doc: { collectionSlug: string; docID: string }) => {
       closeDrawer()
@@ -455,73 +463,22 @@ const SourceComposerAuthorized: React.FC<{ sourceKind: string }> = ({ sourceKind
           return
         }
         const mediaDoc = (await response.json()) as Record<string, unknown>
-        const mimeType = typeof mediaDoc.mimeType === 'string' ? mediaDoc.mimeType : undefined
-        const type = inferMediaType('', mimeType)
-        const format = inferFormat('', mimeType)
-
-        // Determine the best URL: prefer the largest jpeg size for webp/avif images
-        let url = typeof mediaDoc.url === 'string' ? mediaDoc.url : ''
-        if (
-          type === 'image' &&
-          format &&
-          ['avif', 'webp'].includes(format) &&
-          mediaDoc.sizes &&
-          typeof mediaDoc.sizes === 'object'
-        ) {
-          const sizes = mediaDoc.sizes as Record<string, Record<string, unknown>>
-          let bestWidth = 0
-          for (const [, sizeData] of Object.entries(sizes)) {
-            const sizeUrl = sizeData?.url
-            const sizeMime = sizeData?.mimeType
-            const sizeWidth = typeof sizeData?.width === 'number' ? sizeData.width : 0
-            if (
-              typeof sizeUrl === 'string' &&
-              typeof sizeMime === 'string' &&
-              sizeMime.includes('jpeg') &&
-              sizeWidth > bestWidth
-            ) {
-              bestWidth = sizeWidth
-              url = sizeUrl
-            }
-          }
-        }
-
-        // Make URL absolute
-        if (url.startsWith('/')) {
-          url = `${window.location.origin}${url}`
-        }
-
-        const newAsset: SocialDraftMedia = {
-          type,
-          altText: typeof mediaDoc.alt === 'string' ? mediaDoc.alt : undefined,
-          format,
-          height: typeof mediaDoc.height === 'number' ? mediaDoc.height : undefined,
-          url,
-          width: typeof mediaDoc.width === 'number' ? mediaDoc.width : undefined,
-        }
-
-        setEnvelopes((current) => {
-          const env = current[platform]
-          if (!env) {
-            return current
-          }
-          return {
-            ...current,
-            [platform]: {
-              ...env,
-              draft: {
-                ...env.draft,
-                media: [...env.draft.media, newAsset],
-              },
-            },
-          }
+        const newAsset = normalizeSelectedUploadMedia(mediaDoc, {
+          apiRoute,
+          collectionSlug: doc.collectionSlug,
+          origin: window.location.origin,
         })
+        if (!newAsset) {
+          toast.error('Selected media has no usable file URL')
+          return
+        }
+        setExtraMedia((current) => mergeDraftMedia(current, [newAsset]))
         toast.success('Media added from library')
       } catch {
         toast.error('Failed to load media from library')
       }
     },
-    [apiRoute, closeDrawer, platform],
+    [apiRoute, closeDrawer],
   )
 
   const handleAddByUrl = useCallback(() => {
@@ -529,33 +486,15 @@ const SourceComposerAuthorized: React.FC<{ sourceKind: string }> = ({ sourceKind
       return
     }
     const url = urlInput.trim()
-    const type = urlTypeOverride
-    const format = inferFormat(url)
     const newAsset: SocialDraftMedia = {
-      type,
-      format,
+      type: urlTypeOverride,
+      format: inferFormat(url),
       url: url.startsWith('/') ? `${window.location.origin}${url}` : url,
     }
-
-    setEnvelopes((current) => {
-      const env = current[platform]
-      if (!env) {
-        return current
-      }
-      return {
-        ...current,
-        [platform]: {
-          ...env,
-          draft: {
-            ...env.draft,
-            media: [...env.draft.media, newAsset],
-          },
-        },
-      }
-    })
+    setExtraMedia((current) => mergeDraftMedia(current, [newAsset]))
     setUrlInput('')
     toast.success('Media added by URL')
-  }, [platform, urlInput, urlTypeOverride])
+  }, [urlInput, urlTypeOverride])
 
   const publish = async (): Promise<void> => {
     if (!input) {
@@ -678,7 +617,7 @@ const SourceComposerAuthorized: React.FC<{ sourceKind: string }> = ({ sourceKind
       </section>
     )
   }
-  if (!state || !envelope) {
+  if (!state || !envelope || !mergedDraft) {
     return (
       <section aria-busy="true" className="socials-composer">
         Loading social composer…
@@ -689,8 +628,25 @@ const SourceComposerAuthorized: React.FC<{ sourceKind: string }> = ({ sourceKind
   const filteredTemplates = templates.filter(
     (template) => template.appliesTo.length === 0 || template.appliesTo.includes(platform),
   )
-  const assets = envelope.draft.media
+  const assets = mergedDraft.media
   const accepted = acceptedMediaTypes(platform, state.format)
+  // Bug 2: multi-asset formats surface order badges + drag/arrow reordering.
+  const isMultiMedia = supportsMultipleMedia(platform, state.format)
+  const moveSelected = (from: number, to: number): void => {
+    updateState({ selectedMedia: reorderSelectedMedia(state.selectedMedia, from, to) })
+  }
+  // In multi mode the grid lists selected assets first (in publish order) so the
+  // 1-based badges read contiguously and drag/arrow moves feel natural.
+  const orderedAssets = isMultiMedia
+    ? [
+        ...state.selectedMedia.flatMap((url) => {
+          const found = assets.find((asset) => asset.url === url)
+          return found ? [found] : []
+        }),
+        ...assets.filter((asset) => !state.selectedMedia.includes(asset.url)),
+      ]
+    : assets
+  const previewAsset = getEffectiveAssets(platform, state, mergedDraft)[0]
   const mediaRequired =
     state.format !== 'LINK' && state.format !== 'STANDARD' && state.format !== 'ALERT'
   const copyLimit = envelope.capabilities.limits.captionMaxChars
@@ -998,27 +954,47 @@ const SourceComposerAuthorized: React.FC<{ sourceKind: string }> = ({ sourceKind
               </legend>
               {assets.length === 0 && <p>No source media is available.</p>}
               <div className="socials-composer__media-grid">
-                {assets.map((asset) => {
-                  const selected = state.selectedMedia.includes(asset.url)
+                {orderedAssets.map((asset) => {
+                  const orderIndex = state.selectedMedia.indexOf(asset.url)
+                  const selected = orderIndex >= 0
                   const isAccepted = accepted.includes(asset.type)
+                  const reorderable = isMultiMedia && selected
                   return (
-                    <button
-                      aria-label={
-                        isAccepted ? `Select ${asset.type} asset` : 'Not available for this format'
-                      }
-                      aria-pressed={selected}
+                    // Drag reorder is a progressive enhancement; the per-tile
+                    // arrow buttons provide the keyboard/touch-accessible path.
+                    // eslint-disable-next-line jsx-a11y/no-static-element-interactions
+                    <div
                       className={[
                         'socials-composer__asset',
                         selected && 'socials-composer__asset--selected',
                         !isAccepted && 'socials-composer__asset--disabled',
+                        reorderable && 'socials-composer__asset--draggable',
                       ]
                         .filter(Boolean)
                         .join(' ')}
-                      disabled={!isAccepted}
+                      draggable={reorderable}
                       key={asset.url}
-                      onClick={() => isAccepted && toggleMedia(asset.url)}
-                      title={isAccepted ? undefined : 'Not available for this format'}
-                      type="button"
+                      onDragEnd={() => setDragFrom(null)}
+                      onDragOver={reorderable ? (event) => event.preventDefault() : undefined}
+                      onDragStart={
+                        reorderable
+                          ? (event) => {
+                              setDragFrom(orderIndex)
+                              event.dataTransfer.effectAllowed = 'move'
+                            }
+                          : undefined
+                      }
+                      onDrop={
+                        reorderable
+                          ? (event) => {
+                              event.preventDefault()
+                              if (dragFrom !== null) {
+                                moveSelected(dragFrom, orderIndex)
+                              }
+                              setDragFrom(null)
+                            }
+                          : undefined
+                      }
                     >
                       {asset.type === 'image' ? (
                         <img alt={asset.altText ?? ''} src={asset.url} />
@@ -1027,13 +1003,50 @@ const SourceComposerAuthorized: React.FC<{ sourceKind: string }> = ({ sourceKind
                           <video
                             aria-label="Video asset"
                             muted
+                            playsInline
                             preload="metadata"
-                            src={asset.url}
+                            src={videoPosterFrameSrc(asset.url)}
                           />
-                          <span>Video</span>
+                          <span className="socials-composer__asset-kind">Video</span>
                         </>
                       )}
-                    </button>
+                      <button
+                        aria-label={
+                          isAccepted
+                            ? `${selected ? 'Deselect' : 'Select'} ${asset.type} asset`
+                            : 'Not available for this format'
+                        }
+                        aria-pressed={selected}
+                        className="socials-composer__asset-toggle"
+                        disabled={!isAccepted}
+                        onClick={() => isAccepted && toggleMedia(asset.url)}
+                        title={isAccepted ? undefined : 'Not available for this format'}
+                        type="button"
+                      />
+                      {reorderable && (
+                        <span className="socials-composer__asset-order">{orderIndex + 1}</span>
+                      )}
+                      {reorderable && (
+                        <div className="socials-composer__asset-arrows">
+                          <button
+                            aria-label="Move media earlier"
+                            disabled={orderIndex <= 0}
+                            onClick={() => moveSelected(orderIndex, orderIndex - 1)}
+                            type="button"
+                          >
+                            ‹
+                          </button>
+                          <button
+                            aria-label="Move media later"
+                            disabled={orderIndex >= state.selectedMedia.length - 1}
+                            onClick={() => moveSelected(orderIndex, orderIndex + 1)}
+                            type="button"
+                          >
+                            ›
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   )
                 })}
               </div>
@@ -1128,20 +1141,15 @@ const SourceComposerAuthorized: React.FC<{ sourceKind: string }> = ({ sourceKind
           className={`socials-composer__preview socials-composer__preview--${platform}`}
         >
           <span className="socials-composer__preview-platform">{PLATFORM_LABELS[platform]}</span>
-          {getEffectiveAssets(platform, state, envelope.draft)[0]?.type === 'image' && (
-            <img
-              alt={state.altText}
-              src={getEffectiveAssets(platform, state, envelope.draft)[0].url}
-            />
-          )}
-          {getEffectiveAssets(platform, state, envelope.draft)[0]?.type === 'video' && (
+          {previewAsset?.type === 'image' && <img alt={state.altText} src={previewAsset.url} />}
+          {previewAsset?.type === 'video' && (
             <video
               aria-label={state.altText || 'Selected video preview'}
               controls
               muted
               playsInline
               preload="metadata"
-              src={getEffectiveAssets(platform, state, envelope.draft)[0].url}
+              src={videoPosterFrameSrc(previewAsset.url)}
             />
           )}
           <strong>{state.title || envelope.draft.content.title}</strong>
@@ -1345,6 +1353,8 @@ const StandaloneComposerAuthorized: React.FC = () => {
   // URL input state
   const [urlInput, setUrlInput] = useState('')
   const [urlTypeOverride, setUrlTypeOverride] = useState<'image' | 'video'>('image')
+  // Bug 2: index of the media tile currently being dragged (publish order).
+  const [dragFrom, setDragFrom] = useState<null | number>(null)
 
   // Load destinations for selected channels
   useEffect(() => {
@@ -1412,6 +1422,7 @@ const StandaloneComposerAuthorized: React.FC = () => {
   }
 
   // Fix 5 (standalone): call closeDrawer before processing selection.
+  // Bug 1: normalizeSelectedUploadMedia builds an absolute, playable URL.
   const handleLibrarySelect = useCallback(
     async (doc: { collectionSlug: string; docID: string }) => {
       closeDrawer()
@@ -1422,50 +1433,16 @@ const StandaloneComposerAuthorized: React.FC = () => {
           return
         }
         const mediaDoc = (await response.json()) as Record<string, unknown>
-        const mimeType = typeof mediaDoc.mimeType === 'string' ? mediaDoc.mimeType : undefined
-        const type = inferMediaType('', mimeType)
-        const format = inferFormat('', mimeType)
-
-        let url = typeof mediaDoc.url === 'string' ? mediaDoc.url : ''
-        if (
-          type === 'image' &&
-          format &&
-          ['avif', 'webp'].includes(format) &&
-          mediaDoc.sizes &&
-          typeof mediaDoc.sizes === 'object'
-        ) {
-          const sizes = mediaDoc.sizes as Record<string, Record<string, unknown>>
-          let bestWidth = 0
-          for (const [, sizeData] of Object.entries(sizes)) {
-            const sizeUrl = sizeData?.url
-            const sizeMime = sizeData?.mimeType
-            const sizeWidth = typeof sizeData?.width === 'number' ? sizeData.width : 0
-            if (
-              typeof sizeUrl === 'string' &&
-              typeof sizeMime === 'string' &&
-              sizeMime.includes('jpeg') &&
-              sizeWidth > bestWidth
-            ) {
-              bestWidth = sizeWidth
-              url = sizeUrl
-            }
-          }
+        const newAsset = normalizeSelectedUploadMedia(mediaDoc, {
+          apiRoute,
+          collectionSlug: doc.collectionSlug,
+          origin: window.location.origin,
+        })
+        if (!newAsset) {
+          toast.error('Selected media has no usable file URL')
+          return
         }
-
-        if (url.startsWith('/')) {
-          url = `${window.location.origin}${url}`
-        }
-
-        const newAsset: SocialDraftMedia = {
-          type,
-          altText: typeof mediaDoc.alt === 'string' ? mediaDoc.alt : undefined,
-          format,
-          height: typeof mediaDoc.height === 'number' ? mediaDoc.height : undefined,
-          url,
-          width: typeof mediaDoc.width === 'number' ? mediaDoc.width : undefined,
-        }
-
-        setState((current) => ({ ...current, media: [...current.media, newAsset] }))
+        setState((current) => ({ ...current, media: mergeDraftMedia(current.media, [newAsset]) }))
         toast.success('Media added from library')
       } catch {
         toast.error('Failed to load media from library')
@@ -1484,7 +1461,7 @@ const StandaloneComposerAuthorized: React.FC = () => {
       format: inferFormat(url),
       url: url.startsWith('/') ? `${window.location.origin}${url}` : url,
     }
-    setState((current) => ({ ...current, media: [...current.media, newAsset] }))
+    setState((current) => ({ ...current, media: mergeDraftMedia(current.media, [newAsset]) }))
     setUrlInput('')
     toast.success('Media added by URL')
   }, [urlInput, urlTypeOverride])
@@ -1525,6 +1502,29 @@ const StandaloneComposerAuthorized: React.FC = () => {
     } finally {
       setLoading(false)
     }
+  }
+
+  // Bug 2: media order is the publish order for carousel / multi-photo targets,
+  // so expose reordering whenever a selected channel uses a multi-asset format.
+  const mediaReorderable = state.channels.some((platform) =>
+    supportsMultipleMedia(platform, perChannelFormat[platform] ?? ''),
+  )
+  const moveMedia = (from: number, to: number): void => {
+    setState((current) => {
+      const urls = current.media.map((asset) => asset.url)
+      const reordered = reorderSelectedMedia(urls, from, to)
+      if (reordered === urls) {
+        return current
+      }
+      const byUrl = new Map(current.media.map((asset) => [asset.url, asset]))
+      return {
+        ...current,
+        media: reordered.flatMap((url) => {
+          const asset = byUrl.get(url)
+          return asset ? [asset] : []
+        }),
+      }
+    })
   }
 
   return (
@@ -1568,21 +1568,81 @@ const StandaloneComposerAuthorized: React.FC = () => {
         </label>
 
         <fieldset className="socials-composer__media">
-          <legend>Media</legend>
+          <legend>Media {mediaReorderable ? '(drag to order 2-10)' : ''}</legend>
           {state.media.length > 0 && (
             <div className="socials-composer__media-grid">
               {state.media.map((asset, index) => (
+                // Drag reorder is a progressive enhancement; the per-tile arrow
+                // buttons provide the keyboard/touch-accessible path.
+                // eslint-disable-next-line jsx-a11y/no-static-element-interactions
                 <div
-                  className="socials-composer__asset socials-composer__asset--selected"
-                  key={index}
+                  className={[
+                    'socials-composer__asset',
+                    'socials-composer__asset--selected',
+                    mediaReorderable && 'socials-composer__asset--draggable',
+                  ]
+                    .filter(Boolean)
+                    .join(' ')}
+                  draggable={mediaReorderable}
+                  key={asset.url}
+                  onDragEnd={() => setDragFrom(null)}
+                  onDragOver={mediaReorderable ? (event) => event.preventDefault() : undefined}
+                  onDragStart={
+                    mediaReorderable
+                      ? (event) => {
+                          setDragFrom(index)
+                          event.dataTransfer.effectAllowed = 'move'
+                        }
+                      : undefined
+                  }
+                  onDrop={
+                    mediaReorderable
+                      ? (event) => {
+                          event.preventDefault()
+                          if (dragFrom !== null) {
+                            moveMedia(dragFrom, index)
+                          }
+                          setDragFrom(null)
+                        }
+                      : undefined
+                  }
                 >
                   {asset.type === 'image' ? (
                     <img alt={asset.altText ?? ''} src={asset.url} />
                   ) : (
                     <>
-                      <video aria-label="Video asset" muted preload="metadata" src={asset.url} />
-                      <span>Video</span>
+                      <video
+                        aria-label="Video asset"
+                        muted
+                        playsInline
+                        preload="metadata"
+                        src={videoPosterFrameSrc(asset.url)}
+                      />
+                      <span className="socials-composer__asset-kind">Video</span>
                     </>
+                  )}
+                  {mediaReorderable && (
+                    <span className="socials-composer__asset-order">{index + 1}</span>
+                  )}
+                  {mediaReorderable && (
+                    <div className="socials-composer__asset-arrows">
+                      <button
+                        aria-label="Move media earlier"
+                        disabled={index <= 0}
+                        onClick={() => moveMedia(index, index - 1)}
+                        type="button"
+                      >
+                        ‹
+                      </button>
+                      <button
+                        aria-label="Move media later"
+                        disabled={index >= state.media.length - 1}
+                        onClick={() => moveMedia(index, index + 1)}
+                        type="button"
+                      >
+                        ›
+                      </button>
+                    </div>
                   )}
                 </div>
               ))}
