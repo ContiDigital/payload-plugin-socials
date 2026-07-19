@@ -834,6 +834,8 @@ And a server component (from `payload-plugin-socials/rsc`):
 
 - `<SocialsAdminView>`: the `/admin/socials` route shell.
 
+Your `authorize` function gates both the REST API and the visibility of every admin surface. A user it rejects for the `publisher` scope sees nothing: no sidebar link, no `/admin/socials` route (they are redirected to the admin home), no dashboard widget, and an empty Socials tab with no composer forms and no error toasts. Each surface probes the read-only `GET {basePath}/access` endpoint (which reports `{ admin, publisher }` for the current user and never throws) and renders only when allowed, so authorization is enforced once in your `authorize` function rather than duplicated across components.
+
 Post templates are authored directly in the `social-templates` collection, which Payload renders with its built-in collection editor.
 
 The composer itself is a dedicated social UI, not a rich-text field. It exposes only semantics the target APIs preserve: channel copy, title where supported, destination, format, ordered image/video assets, accessibility text, topic-specific fields, CTA data, and scheduling. Host rich text and custom blocks are normalized once in `SourceContextResolver`, keeping the plugin independent of Payload's editor implementation.
@@ -913,6 +915,14 @@ GET /api/socials/health
 ```
 
 Returns the enabled platforms, the registered source kinds, and the test-mode flag.
+
+### Access probe
+
+```
+GET /api/socials/access
+```
+
+Returns `{ admin, publisher }` for the current user by running your `authorize` for each scope. It never throws: an unauthenticated request, or an `authorize` that throws, reports both as `false`. The admin UI uses this to decide what to render; it is a capability probe, not a gate.
 
 ### OAuth (per platform)
 

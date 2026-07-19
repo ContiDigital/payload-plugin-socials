@@ -14,6 +14,7 @@ import type {
 } from '../types/index.js'
 
 import { PLATFORM_IDS, PLATFORM_LABELS } from '../constants.js'
+import { resolveSocialsEndpointBase } from './accessModel.js'
 import {
   acceptedMediaTypes,
   buildInitialComposerState,
@@ -30,6 +31,7 @@ import {
   type StandaloneComposerState,
   supportsMultipleMedia,
 } from './socialComposerModel.js'
+import { useSocialsAccess } from './useSocialsAccess.js'
 import './SocialPublishPanelClient.scss'
 
 type Props = {
@@ -134,7 +136,7 @@ const inferFormat = (url: string, mimeType?: string): string | undefined => {
 // Source-mode composer (existing behavior, overhauled)
 // ===========================================================================
 
-const SourceComposer: React.FC<{ sourceKind: string }> = ({ sourceKind }) => {
+const SourceComposerAuthorized: React.FC<{ sourceKind: string }> = ({ sourceKind }) => {
   const { id } = useDocumentInfo()
   const { config } = useConfig()
 
@@ -1278,11 +1280,27 @@ const SourceComposer: React.FC<{ sourceKind: string }> = ({ sourceKind }) => {
   )
 }
 
+/**
+ * Visibility gate for the source-mode composer. Probes `{basePath}/access` once
+ * and mounts the composer only for a `publisher`. Everyone else gets an empty
+ * panel body (the injected Socials tab shows nothing) with no fetches and no
+ * toasts. Mounting the authorized composer only when allowed also means its
+ * preview/history/destination fetches never fire for an unauthorized user.
+ */
+const SourceComposer: React.FC<{ sourceKind: string }> = ({ sourceKind }) => {
+  const { config } = useConfig()
+  const { loading, publisher } = useSocialsAccess(resolveSocialsEndpointBase(config))
+  if (loading || !publisher) {
+    return null
+  }
+  return <SourceComposerAuthorized sourceKind={sourceKind} />
+}
+
 // ===========================================================================
 // Standalone composer
 // ===========================================================================
 
-const StandaloneComposer: React.FC = () => {
+const StandaloneComposerAuthorized: React.FC = () => {
   const { config } = useConfig()
 
   // Fix 1: read from config.admin?.custom (serialized to browser).
@@ -1713,6 +1731,20 @@ const StandaloneComposer: React.FC = () => {
       <ListDrawer onSelect={handleLibrarySelect as never} />
     </section>
   )
+}
+
+/**
+ * Visibility gate for the standalone composer. Same contract as the source-mode
+ * gate: probe once, render nothing until allowed, mount the composer only for a
+ * `publisher`.
+ */
+const StandaloneComposer: React.FC = () => {
+  const { config } = useConfig()
+  const { loading, publisher } = useSocialsAccess(resolveSocialsEndpointBase(config))
+  if (loading || !publisher) {
+    return null
+  }
+  return <StandaloneComposerAuthorized />
 }
 
 // ===========================================================================

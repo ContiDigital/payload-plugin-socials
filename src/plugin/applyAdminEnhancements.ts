@@ -96,11 +96,18 @@ export const applyAdminEnhancements = (
     })),
   }
 
-  // Server-side path (kept for SocialsAdminView and server hooks).
+  // Server-side path (kept for SocialsAdminView and server hooks). Includes
+  // the host `authorize` function so the RSC view can gate itself before
+  // rendering. This is server-only — config.custom is NOT serialized to the
+  // browser (Payload strips it via serverOnlyConfigProperties), so the function
+  // reference never leaks client-side.
   if (!config.custom) {
     config.custom = {}
   }
-  ;(config.custom as Record<string, unknown>).socials = socialsCustom
+  ;(config.custom as Record<string, unknown>).socials = {
+    ...socialsCustom,
+    authorize: options.authorize,
+  }
 
   // Client-side path: config.admin.custom IS serialized to the browser.
   // Spread any existing keys so we do not clobber other plugins' entries.
