@@ -166,8 +166,7 @@ export const createOauthDisconnectEndpoint = (
           revoked = result || undefined
           upstreamRevoked = true
         } catch (revokeError) {
-          const message =
-            revokeError instanceof Error ? revokeError.message : String(revokeError)
+          const message = revokeError instanceof Error ? revokeError.message : String(revokeError)
           log.warn('Upstream revocation failed; proceeding with local disconnect', {
             error: message,
             platform: cfg.platform,

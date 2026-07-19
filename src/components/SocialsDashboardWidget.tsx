@@ -20,14 +20,22 @@ export const SocialsDashboardWidget: React.FC<Props> = ({ enabledPlatforms }) =>
   const { config } = useConfig()
   const socials = asRecord(asRecord(config.custom)?.socials)
   const configuredPlatforms = Array.isArray(socials?.enabledPlatforms)
-    ? socials.enabledPlatforms.filter((value): value is string => typeof value === 'string')
+    ? socials.enabledPlatforms.filter(
+        (value): value is PlatformId =>
+          typeof value === 'string' && PLATFORM_IDS.includes(value as PlatformId),
+      )
     : []
-  const enabled = new Set(enabledPlatforms ?? configuredPlatforms)
+  const initialEnabledPlatforms = (enabledPlatforms ?? configuredPlatforms).filter(
+    (value): value is PlatformId =>
+      typeof value === 'string' && PLATFORM_IDS.includes(value as PlatformId),
+  )
   const apiRoute = typeof config.routes?.api === 'string' ? config.routes.api : '/api'
   const basePath = typeof socials?.apiBasePath === 'string' ? socials.apiBasePath : '/socials'
   const endpointBase = `${apiRoute.replace(/\/$/, '')}${basePath}`
 
   const [connections, setConnections] = useState<ConnectionMap>({})
+  const [liveEnabledPlatforms, setLiveEnabledPlatforms] =
+    useState<PlatformId[]>(initialEnabledPlatforms)
   const [error, setError] = useState<string>()
   const [loading, setLoading] = useState(true)
   const [pending, setPending] = useState<PlatformId>()
@@ -41,7 +49,11 @@ export const SocialsDashboardWidget: React.FC<Props> = ({ enabledPlatforms }) =>
       if (!response.ok) {
         throw new Error(body.error ?? `Request failed (${response.status})`)
       }
-      setConnections(body.connections ?? {})
+      const nextConnections = body.connections ?? {}
+      setConnections(nextConnections)
+      setLiveEnabledPlatforms(
+        PLATFORM_IDS.filter((platform) => nextConnections[platform] !== undefined),
+      )
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught))
     } finally {
@@ -52,6 +64,8 @@ export const SocialsDashboardWidget: React.FC<Props> = ({ enabledPlatforms }) =>
   useEffect(() => {
     void loadConnections()
   }, [loadConnections])
+
+  const enabled = new Set(liveEnabledPlatforms)
 
   const connect = async (platform: PlatformId): Promise<void> => {
     setPending(platform)

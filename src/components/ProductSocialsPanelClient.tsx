@@ -22,7 +22,10 @@ import {
 } from './socialComposerModel.js'
 import './SocialPublishPanelClient.scss'
 
-type Props = { sourceKind?: string }
+type Props = {
+  enabledPlatforms?: PlatformId[]
+  sourceKind?: string
+}
 type Destination = { id: string; label: string }
 type HistoryRow = {
   externalUrl?: string
@@ -87,17 +90,22 @@ const destinationPath: Record<PlatformId, string> = {
   pinterest: '/pinterest/boards',
 }
 
-export const SocialPublishPanelClient: React.FC<Props> = ({ sourceKind = 'product' }) => {
+export const SocialPublishPanelClient: React.FC<Props> = ({
+  enabledPlatforms: enabledPlatformsProp,
+  sourceKind = 'product',
+}) => {
   const { id } = useDocumentInfo()
   const { config } = useConfig()
   const socials = asRecord(asRecord(config.custom)?.socials)
-  const enabledPlatforms = Array.isArray(socials?.enabledPlatforms)
-    ? socials.enabledPlatforms.filter(
+  const configuredPlatforms = enabledPlatformsProp ?? socials?.enabledPlatforms
+  const initialEnabledPlatforms = Array.isArray(configuredPlatforms)
+    ? configuredPlatforms.filter(
         (value): value is PlatformId =>
           typeof value === 'string' && PLATFORM_IDS.includes(value as PlatformId),
       )
     : []
-  const [platform, setPlatform] = useState<PlatformId>(enabledPlatforms[0] ?? 'pinterest')
+  const [enabledPlatforms, setEnabledPlatforms] = useState<PlatformId[]>(initialEnabledPlatforms)
+  const [platform, setPlatform] = useState<PlatformId>(initialEnabledPlatforms[0] ?? 'pinterest')
   const [envelopes, setEnvelopes] = useState<Partial<Record<PlatformId, PreviewEnvelope>>>({})
   const [states, setStates] = useState<Partial<Record<PlatformId, ComposerState>>>({})
   const [destinations, setDestinations] = useState<Destination[]>([])
@@ -131,6 +139,27 @@ export const SocialPublishPanelClient: React.FC<Props> = ({ sourceKind = 'produc
       return existing ? { ...current, [platform]: { ...existing, ...patch } } : current
     })
   }
+
+  useEffect(() => {
+    const controller = new AbortController()
+    void fetch(`${endpointBase}/health`, { signal: controller.signal })
+      .then(async (response) => {
+        const body = (await response.json()) as { enabledPlatforms?: unknown }
+        if (!response.ok || !Array.isArray(body.enabledPlatforms)) {
+          return
+        }
+        const livePlatforms = body.enabledPlatforms.filter(
+          (value): value is PlatformId =>
+            typeof value === 'string' && PLATFORM_IDS.includes(value as PlatformId),
+        )
+        setEnabledPlatforms(livePlatforms)
+        setPlatform((current) =>
+          livePlatforms.includes(current) ? current : (livePlatforms[0] ?? current),
+        )
+      })
+      .catch(() => undefined)
+    return () => controller.abort()
+  }, [endpointBase])
 
   useEffect(() => {
     if (!id) {

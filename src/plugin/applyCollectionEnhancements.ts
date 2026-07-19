@@ -4,7 +4,13 @@ import type { NormalizedPluginOptions } from '../types/index.js'
 
 import { buildSocialPostsCollection } from '../collections/socialPosts.js'
 import { buildSocialTemplatesCollection } from '../collections/socialTemplates.js'
-import { PLUGIN_SLUG, SOCIAL_POSTS_SLUG, SOCIAL_TEMPLATES_SLUG } from '../constants.js'
+import {
+  PLATFORM_IDS,
+  type PlatformId,
+  PLUGIN_SLUG,
+  SOCIAL_POSTS_SLUG,
+  SOCIAL_TEMPLATES_SLUG,
+} from '../constants.js'
 
 /**
  * Inject the plugin-owned `social-posts` collection AND, for every host
@@ -18,13 +24,13 @@ import { PLUGIN_SLUG, SOCIAL_POSTS_SLUG, SOCIAL_TEMPLATES_SLUG } from '../consta
 
 const SOCIALS_PLACEHOLDER_NAME = 'socialsPlaceholder'
 
-const buildSocialsField = (sourceKind: string): Field => ({
+const buildSocialsField = (sourceKind: string, enabledPlatforms?: PlatformId[]): Field => ({
   name: 'socials',
   type: 'ui',
   admin: {
     components: {
       Field: {
-        clientProps: { sourceKind },
+        clientProps: { enabledPlatforms, sourceKind },
         exportName: 'SocialPublishPanelClient',
         path: `${PLUGIN_SLUG}/client`,
       },
@@ -32,8 +38,12 @@ const buildSocialsField = (sourceKind: string): Field => ({
   },
 })
 
-const buildSocialsTab = (label: string, sourceKind: string): TabsField['tabs'][number] => ({
-  fields: [buildSocialsField(sourceKind)],
+const buildSocialsTab = (
+  label: string,
+  sourceKind: string,
+  enabledPlatforms?: PlatformId[],
+): TabsField['tabs'][number] => ({
+  fields: [buildSocialsField(sourceKind, enabledPlatforms)],
   label,
 })
 
@@ -42,12 +52,13 @@ const injectTabIntoCollection = (
   label: string,
   sourceKind: string,
   position: 'append' | 'before-last' | number,
+  enabledPlatforms: PlatformId[],
 ): void => {
   const tabsIndex = collection.fields.findIndex(
     (f): f is TabsField => 'type' in f && f.type === 'tabs',
   )
 
-  const newTab = buildSocialsTab(label, sourceKind)
+  const newTab = buildSocialsTab(label, sourceKind, enabledPlatforms)
 
   if (tabsIndex !== -1) {
     const tabs = collection.fields[tabsIndex] as TabsField
@@ -98,6 +109,8 @@ export const applyCollectionEnhancements = (
     config.collections.push(buildSocialTemplatesCollection(options.authorize))
   }
 
+  const enabledPlatforms = PLATFORM_IDS.filter((id) => options.platforms[id].enabled)
+
   // Inject Socials tab into each host collection.
   for (const target of options.admin.injectInto) {
     const collection = config.collections.find((c) => c.slug === target.collection)
@@ -118,6 +131,7 @@ export const applyCollectionEnhancements = (
       target.label ?? 'Socials',
       target.sourceKind,
       target.tabPosition ?? 'append',
+      enabledPlatforms,
     )
   }
 
@@ -136,8 +150,12 @@ export const SocialsUIPlaceholder: Field = {
 }
 
 /** Returns a ready-to-mount Socials tab for manual placement. */
-export const getSocialsTab = (sourceKind: string, label = 'Socials') =>
-  buildSocialsTab(label, sourceKind)
+export const getSocialsTab = (
+  sourceKind: string,
+  label = 'Socials',
+  enabledPlatforms?: PlatformId[],
+) => buildSocialsTab(label, sourceKind, enabledPlatforms)
 
 /** Returns a ready-to-mount Socials UI field for manual placement. */
-export const getSocialsField = (sourceKind: string): Field => buildSocialsField(sourceKind)
+export const getSocialsField = (sourceKind: string, enabledPlatforms?: PlatformId[]): Field =>
+  buildSocialsField(sourceKind, enabledPlatforms)

@@ -62,6 +62,10 @@ describe('buildConfig sanitization', () => {
     expect(config.globals.find((g) => g.slug === 'socials-connections')).toBeDefined()
   })
 
+  it('keeps encrypted connection storage out of the admin navigation', () => {
+    expect(config.globals.find((g) => g.slug === 'socials-connections')?.admin.hidden).toBe(true)
+  })
+
   it('registers every plugin-owned job task', () => {
     const slugs = (config.jobs?.tasks ?? []).map((t) => (t as { slug: string }).slug)
     for (const slug of [

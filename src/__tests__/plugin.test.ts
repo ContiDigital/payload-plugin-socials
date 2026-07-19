@@ -74,6 +74,47 @@ describe('payloadPluginSocials curried factory', () => {
     expect(slugsOf(config.jobs?.tasks ?? []).length).toBe(tasksAfterFirst)
     expect((config.endpoints ?? []).length).toBe(endpointsAfterFirst)
   })
+
+  it('passes the authoritative enabled platforms to the injected composer', () => {
+    const config = baseConfig()
+    config.collections = [{ slug: 'products', fields: [{ name: 'title', type: 'text' }] }]
+    const result = payloadPluginSocials(
+      validOptions({
+        admin: { injectInto: [{ collection: 'products', sourceKind: 'product' }] },
+        platforms: {
+          facebook: {
+            appId: 'app-id',
+            appSecret: 'app-secret',
+            enabled: true,
+            redirectUri: 'https://example.test/facebook/callback',
+            systemUserAccessToken: 'system-user-token',
+          },
+          instagram: {
+            appId: 'app-id',
+            appSecret: 'app-secret',
+            enabled: true,
+            redirectUri: 'https://example.test/instagram/callback',
+            systemUserAccessToken: 'system-user-token',
+          },
+          pinterest: { enabled: false },
+        },
+      }),
+    )(config)
+    const product = result.collections?.find((collection) => collection.slug === 'products')
+    const tabs = product?.fields.find((field) => field.type === 'tabs')
+    const socialsTab =
+      tabs && 'tabs' in tabs ? tabs.tabs.find((tab) => tab.label === 'Socials') : null
+    const field = socialsTab && 'fields' in socialsTab ? socialsTab.fields[0] : null
+    const component =
+      field && 'admin' in field && field.admin?.components?.Field
+        ? field.admin.components.Field
+        : null
+
+    expect(component).toMatchObject({
+      clientProps: { enabledPlatforms: ['instagram', 'facebook'], sourceKind: 'product' },
+      exportName: 'SocialPublishPanelClient',
+    })
+  })
 })
 
 describe('payloadPluginSocials validation', () => {
