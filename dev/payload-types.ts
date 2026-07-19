@@ -6,40 +6,118 @@
  * and re-run `payload generate:types` to regenerate this file.
  */
 
+/**
+ * Supported timezones in IANA format.
+ *
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "supportedTimezones".
+ */
+export type SupportedTimezones =
+  | 'Pacific/Midway'
+  | 'Pacific/Niue'
+  | 'Pacific/Honolulu'
+  | 'Pacific/Rarotonga'
+  | 'America/Anchorage'
+  | 'Pacific/Gambier'
+  | 'America/Los_Angeles'
+  | 'America/Tijuana'
+  | 'America/Denver'
+  | 'America/Phoenix'
+  | 'America/Chicago'
+  | 'America/Guatemala'
+  | 'America/New_York'
+  | 'America/Bogota'
+  | 'America/Caracas'
+  | 'America/Santiago'
+  | 'America/Buenos_Aires'
+  | 'America/Sao_Paulo'
+  | 'Atlantic/South_Georgia'
+  | 'Atlantic/Azores'
+  | 'Atlantic/Cape_Verde'
+  | 'Europe/London'
+  | 'Europe/Berlin'
+  | 'Africa/Lagos'
+  | 'Europe/Athens'
+  | 'Africa/Cairo'
+  | 'Europe/Moscow'
+  | 'Asia/Riyadh'
+  | 'Asia/Dubai'
+  | 'Asia/Baku'
+  | 'Asia/Karachi'
+  | 'Asia/Tashkent'
+  | 'Asia/Calcutta'
+  | 'Asia/Dhaka'
+  | 'Asia/Almaty'
+  | 'Asia/Jakarta'
+  | 'Asia/Bangkok'
+  | 'Asia/Shanghai'
+  | 'Asia/Singapore'
+  | 'Asia/Tokyo'
+  | 'Asia/Seoul'
+  | 'Australia/Brisbane'
+  | 'Australia/Sydney'
+  | 'Pacific/Guam'
+  | 'Pacific/Noumea'
+  | 'Pacific/Auckland'
+  | 'Pacific/Fiji';
+
 export interface Config {
   auth: {
     users: UserAuthOperations;
   };
+  blocks: {};
   collections: {
-    posts: Post;
+    products: Product;
     media: Media;
-    'plugin-collection': PluginCollection;
+    'social-posts': SocialPost;
+    'social-templates': SocialTemplate;
+    'payload-kv': PayloadKv;
     users: User;
+    'payload-jobs': PayloadJob;
     'payload-locked-documents': PayloadLockedDocument;
     'payload-preferences': PayloadPreference;
     'payload-migrations': PayloadMigration;
   };
   collectionsJoins: {};
   collectionsSelect: {
-    posts: PostsSelect<false> | PostsSelect<true>;
+    products: ProductsSelect<false> | ProductsSelect<true>;
     media: MediaSelect<false> | MediaSelect<true>;
-    'plugin-collection': PluginCollectionSelect<false> | PluginCollectionSelect<true>;
+    'social-posts': SocialPostsSelect<false> | SocialPostsSelect<true>;
+    'social-templates': SocialTemplatesSelect<false> | SocialTemplatesSelect<true>;
+    'payload-kv': PayloadKvSelect<false> | PayloadKvSelect<true>;
     users: UsersSelect<false> | UsersSelect<true>;
+    'payload-jobs': PayloadJobsSelect<false> | PayloadJobsSelect<true>;
     'payload-locked-documents': PayloadLockedDocumentsSelect<false> | PayloadLockedDocumentsSelect<true>;
     'payload-preferences': PayloadPreferencesSelect<false> | PayloadPreferencesSelect<true>;
     'payload-migrations': PayloadMigrationsSelect<false> | PayloadMigrationsSelect<true>;
   };
   db: {
-    defaultIDType: string;
+    defaultIDType: number;
   };
-  globals: {};
-  globalsSelect: {};
+  fallbackLocale: null;
+  globals: {
+    'socials-connections': SocialsConnection;
+  };
+  globalsSelect: {
+    'socials-connections': SocialsConnectionsSelect<false> | SocialsConnectionsSelect<true>;
+  };
   locale: null;
-  user: User & {
-    collection: 'users';
+  widgets: {
+    collections: CollectionsWidget;
   };
+  user: User;
   jobs: {
-    tasks: unknown;
+    tasks: {
+      socialPostPublish: SocialsPublishTaskInput;
+      socialPostRetry: SocialsRetryTaskInput;
+      socialInsightsRefresh: SocialsInsightsRefreshTaskInput;
+      socialConnectionRefresh: SocialsConnectionRefreshTaskInput;
+      socialPostSweep: SocialsSweepTaskInput;
+      inline: {
+        input: unknown;
+        output: unknown;
+      };
+    };
     workflows: unknown;
   };
 }
@@ -63,11 +141,12 @@ export interface UserAuthOperations {
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema
- * via the `definition` "posts".
+ * via the `definition` "products".
  */
-export interface Post {
-  id: string;
-  addedByPlugin?: string | null;
+export interface Product {
+  id: number;
+  title?: string | null;
+  description?: string | null;
   updatedAt: string;
   createdAt: string;
 }
@@ -76,7 +155,7 @@ export interface Post {
  * via the `definition` "media".
  */
 export interface Media {
-  id: string;
+  id: number;
   updatedAt: string;
   createdAt: string;
   url?: string | null;
@@ -91,10 +170,100 @@ export interface Media {
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema
- * via the `definition` "plugin-collection".
+ * via the `definition` "social-posts".
  */
-export interface PluginCollection {
-  id: string;
+export interface SocialPost {
+  id: number;
+  /**
+   * Stable idempotency hash. Format depends on platform but is always a hash of (platform, sourceKind, sourceId, destination, primary asset url).
+   */
+  idempotencyKey: string;
+  /**
+   * Content fingerprint of the outbound payload at publish time.
+   */
+  sourceHash: string;
+  platform: 'pinterest' | 'instagram' | 'facebook' | 'gbp';
+  sourceKind: string;
+  sourceId: string;
+  /**
+   * Snapshotted title at publish time.
+   */
+  title?: string | null;
+  /**
+   * Snapshotted body text at publish time.
+   */
+  body?: string | null;
+  altText?: string | null;
+  imageUrl?: string | null;
+  /**
+   * Outbound URL embedded in the post.
+   */
+  link?: string | null;
+  /**
+   * Channel-specific destination (board id, location id, page id, etc.).
+   */
+  destination?: {
+    id?: string | null;
+    label?: string | null;
+    meta?:
+      | {
+          [k: string]: unknown;
+        }
+      | unknown[]
+      | string
+      | number
+      | boolean
+      | null;
+  };
+  status: 'draft' | 'queued' | 'publishing' | 'published' | 'failed' | 'cancelled';
+  platformPublicationStatus?: ('pending' | 'publishing' | 'published' | 'failed' | 'skipped') | null;
+  /**
+   * Platform-side id (pin id, fb post id, ig media id, gbp localPost name).
+   */
+  externalId?: string | null;
+  externalUrl?: string | null;
+  publishedAt?: string | null;
+  lastAttemptedAt?: string | null;
+  attempts?: number | null;
+  lastError?: string | null;
+  /**
+   * When the post should publish. Null for immediate publishes.
+   */
+  scheduledAt?: string | null;
+  /**
+   * Payload Jobs job id (when queued).
+   */
+  queuedJobId?: string | null;
+  /**
+   * Next attempt time for failed posts.
+   */
+  nextRetryAt?: string | null;
+  publishedBy?: (number | null) | User;
+  /**
+   * Free-form platform-specific metadata.
+   */
+  meta?:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
+  /**
+   * Last fetched per-post analytics snapshot.
+   */
+  insightsSnapshot?:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
+  insightsFetchedAt?: string | null;
   updatedAt: string;
   createdAt: string;
 }
@@ -103,7 +272,7 @@ export interface PluginCollection {
  * via the `definition` "users".
  */
 export interface User {
-  id: string;
+  id: number;
   updatedAt: string;
   createdAt: string;
   email: string;
@@ -113,35 +282,222 @@ export interface User {
   hash?: string | null;
   loginAttempts?: number | null;
   lockUntil?: string | null;
+  sessions?:
+    | {
+        id: string;
+        createdAt?: string | null;
+        expiresAt: string;
+      }[]
+    | null;
   password?: string | null;
+  collection: 'users';
+}
+/**
+ * Reusable post templates. Placeholders are filled per source record at compose time.
+ *
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "social-templates".
+ */
+export interface SocialTemplate {
+  id: number;
+  name: string;
+  /**
+   * Internal note describing when to use this template.
+   */
+  description?: string | null;
+  enabled?: boolean | null;
+  /**
+   * Platforms this template is intended for (informational).
+   */
+  appliesTo?: ('pinterest' | 'instagram' | 'facebook' | 'gbp')[] | null;
+  templates?: {
+    /**
+     * Use {{ variable }} placeholders. Available: {{title}}, {{description}}, {{material}}, {{color}}, {{category}}, {{dimensions}}, {{link}}, {{modelLabel}}, and {{metadata.<field>}}. Filters: | upper, | lower, | trim, | truncate:N, | default:text.
+     */
+    pinterestTitle?: string | null;
+    /**
+     * Use {{ variable }} placeholders. Available: {{title}}, {{description}}, {{material}}, {{color}}, {{category}}, {{dimensions}}, {{link}}, {{modelLabel}}, and {{metadata.<field>}}. Filters: | upper, | lower, | trim, | truncate:N, | default:text.
+     */
+    pinterestDescription?: string | null;
+    /**
+     * Use {{ variable }} placeholders. Available: {{title}}, {{description}}, {{material}}, {{color}}, {{category}}, {{dimensions}}, {{link}}, {{modelLabel}}, and {{metadata.<field>}}. Filters: | upper, | lower, | trim, | truncate:N, | default:text.
+     */
+    pinterestAltText?: string | null;
+    /**
+     * Space or comma separated tags; a leading # is added automatically. Use {{ variable }} placeholders. Available: {{title}}, {{description}}, {{material}}, {{color}}, {{category}}, {{dimensions}}, {{link}}, {{modelLabel}}, and {{metadata.<field>}}. Filters: | upper, | lower, | trim, | truncate:N, | default:text.
+     */
+    pinterestHashtags?: string | null;
+    /**
+     * Use {{ variable }} placeholders. Available: {{title}}, {{description}}, {{material}}, {{color}}, {{category}}, {{dimensions}}, {{link}}, {{modelLabel}}, and {{metadata.<field>}}. Filters: | upper, | lower, | trim, | truncate:N, | default:text.
+     */
+    instagramCaption?: string | null;
+    /**
+     * Use {{ variable }} placeholders. Available: {{title}}, {{description}}, {{material}}, {{color}}, {{category}}, {{dimensions}}, {{link}}, {{modelLabel}}, and {{metadata.<field>}}. Filters: | upper, | lower, | trim, | truncate:N, | default:text.
+     */
+    facebookMessage?: string | null;
+    /**
+     * Use {{ variable }} placeholders. Available: {{title}}, {{description}}, {{material}}, {{color}}, {{category}}, {{dimensions}}, {{link}}, {{modelLabel}}, and {{metadata.<field>}}. Filters: | upper, | lower, | trim, | truncate:N, | default:text.
+     */
+    gbpSummary?: string | null;
+  };
+  updatedAt: string;
+  createdAt: string;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "payload-kv".
+ */
+export interface PayloadKv {
+  id: number;
+  key: string;
+  data:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "payload-jobs".
+ */
+export interface PayloadJob {
+  id: number;
+  /**
+   * Input data provided to the job
+   */
+  input?:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
+  taskStatus?:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
+  completedAt?: string | null;
+  totalTried?: number | null;
+  /**
+   * If hasError is true this job will not be retried
+   */
+  hasError?: boolean | null;
+  /**
+   * If hasError is true, this is the error that caused it
+   */
+  error?:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
+  /**
+   * Task execution log
+   */
+  log?:
+    | {
+        executedAt: string;
+        completedAt: string;
+        taskSlug:
+          | 'inline'
+          | 'socialPostPublish'
+          | 'socialPostRetry'
+          | 'socialInsightsRefresh'
+          | 'socialConnectionRefresh'
+          | 'socialPostSweep';
+        taskID: string;
+        input?:
+          | {
+              [k: string]: unknown;
+            }
+          | unknown[]
+          | string
+          | number
+          | boolean
+          | null;
+        output?:
+          | {
+              [k: string]: unknown;
+            }
+          | unknown[]
+          | string
+          | number
+          | boolean
+          | null;
+        state: 'failed' | 'succeeded';
+        error?:
+          | {
+              [k: string]: unknown;
+            }
+          | unknown[]
+          | string
+          | number
+          | boolean
+          | null;
+        id?: string | null;
+      }[]
+    | null;
+  taskSlug?:
+    | (
+        | 'inline'
+        | 'socialPostPublish'
+        | 'socialPostRetry'
+        | 'socialInsightsRefresh'
+        | 'socialConnectionRefresh'
+        | 'socialPostSweep'
+      )
+    | null;
+  queue?: string | null;
+  waitUntil?: string | null;
+  processing?: boolean | null;
+  updatedAt: string;
+  createdAt: string;
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema
  * via the `definition` "payload-locked-documents".
  */
 export interface PayloadLockedDocument {
-  id: string;
+  id: number;
   document?:
     | ({
-        relationTo: 'posts';
-        value: string | Post;
+        relationTo: 'products';
+        value: number | Product;
       } | null)
     | ({
         relationTo: 'media';
-        value: string | Media;
+        value: number | Media;
       } | null)
     | ({
-        relationTo: 'plugin-collection';
-        value: string | PluginCollection;
+        relationTo: 'social-posts';
+        value: number | SocialPost;
+      } | null)
+    | ({
+        relationTo: 'social-templates';
+        value: number | SocialTemplate;
       } | null)
     | ({
         relationTo: 'users';
-        value: string | User;
+        value: number | User;
       } | null);
   globalSlug?: string | null;
   user: {
     relationTo: 'users';
-    value: string | User;
+    value: number | User;
   };
   updatedAt: string;
   createdAt: string;
@@ -151,10 +507,10 @@ export interface PayloadLockedDocument {
  * via the `definition` "payload-preferences".
  */
 export interface PayloadPreference {
-  id: string;
+  id: number;
   user: {
     relationTo: 'users';
-    value: string | User;
+    value: number | User;
   };
   key?: string | null;
   value?:
@@ -174,7 +530,7 @@ export interface PayloadPreference {
  * via the `definition` "payload-migrations".
  */
 export interface PayloadMigration {
-  id: string;
+  id: number;
   name?: string | null;
   batch?: number | null;
   updatedAt: string;
@@ -182,10 +538,11 @@ export interface PayloadMigration {
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema
- * via the `definition` "posts_select".
+ * via the `definition` "products_select".
  */
-export interface PostsSelect<T extends boolean = true> {
-  addedByPlugin?: T;
+export interface ProductsSelect<T extends boolean = true> {
+  title?: T;
+  description?: T;
   updatedAt?: T;
   createdAt?: T;
 }
@@ -208,12 +565,74 @@ export interface MediaSelect<T extends boolean = true> {
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema
- * via the `definition` "plugin-collection_select".
+ * via the `definition` "social-posts_select".
  */
-export interface PluginCollectionSelect<T extends boolean = true> {
-  id?: T;
+export interface SocialPostsSelect<T extends boolean = true> {
+  idempotencyKey?: T;
+  sourceHash?: T;
+  platform?: T;
+  sourceKind?: T;
+  sourceId?: T;
+  title?: T;
+  body?: T;
+  altText?: T;
+  imageUrl?: T;
+  link?: T;
+  destination?:
+    | T
+    | {
+        id?: T;
+        label?: T;
+        meta?: T;
+      };
+  status?: T;
+  platformPublicationStatus?: T;
+  externalId?: T;
+  externalUrl?: T;
+  publishedAt?: T;
+  lastAttemptedAt?: T;
+  attempts?: T;
+  lastError?: T;
+  scheduledAt?: T;
+  queuedJobId?: T;
+  nextRetryAt?: T;
+  publishedBy?: T;
+  meta?: T;
+  insightsSnapshot?: T;
+  insightsFetchedAt?: T;
   updatedAt?: T;
   createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "social-templates_select".
+ */
+export interface SocialTemplatesSelect<T extends boolean = true> {
+  name?: T;
+  description?: T;
+  enabled?: T;
+  appliesTo?: T;
+  templates?:
+    | T
+    | {
+        pinterestTitle?: T;
+        pinterestDescription?: T;
+        pinterestAltText?: T;
+        pinterestHashtags?: T;
+        instagramCaption?: T;
+        facebookMessage?: T;
+        gbpSummary?: T;
+      };
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "payload-kv_select".
+ */
+export interface PayloadKvSelect<T extends boolean = true> {
+  key?: T;
+  data?: T;
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema
@@ -229,6 +648,44 @@ export interface UsersSelect<T extends boolean = true> {
   hash?: T;
   loginAttempts?: T;
   lockUntil?: T;
+  sessions?:
+    | T
+    | {
+        id?: T;
+        createdAt?: T;
+        expiresAt?: T;
+      };
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "payload-jobs_select".
+ */
+export interface PayloadJobsSelect<T extends boolean = true> {
+  input?: T;
+  taskStatus?: T;
+  completedAt?: T;
+  totalTried?: T;
+  hasError?: T;
+  error?: T;
+  log?:
+    | T
+    | {
+        executedAt?: T;
+        completedAt?: T;
+        taskSlug?: T;
+        taskID?: T;
+        input?: T;
+        output?: T;
+        state?: T;
+        error?: T;
+        id?: T;
+      };
+  taskSlug?: T;
+  queue?: T;
+  waitUntil?: T;
+  processing?: T;
+  updatedAt?: T;
+  createdAt?: T;
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema
@@ -261,6 +718,416 @@ export interface PayloadMigrationsSelect<T extends boolean = true> {
   batch?: T;
   updatedAt?: T;
   createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "socials-connections".
+ */
+export interface SocialsConnection {
+  id: number;
+  pinterest?: {
+    state?: {
+      connected?: boolean | null;
+      accountId?: string | null;
+      accountLabel?: string | null;
+      accessTokenExpiresAt?: string | null;
+      refreshTokenExpiresAt?: string | null;
+      scopes?:
+        | {
+            value: string;
+            id?: string | null;
+          }[]
+        | null;
+      lastError?: string | null;
+      lastRefreshedAt?: string | null;
+    };
+    /**
+     * Encrypted at rest with AES-256-GCM. Never displayed in plaintext.
+     */
+    accessToken?: {
+      version?: number | null;
+      iv?: string | null;
+      ciphertext?: string | null;
+      authTag?: string | null;
+    };
+    /**
+     * Encrypted at rest with AES-256-GCM. Never displayed in plaintext.
+     */
+    refreshToken?: {
+      version?: number | null;
+      iv?: string | null;
+      ciphertext?: string | null;
+      authTag?: string | null;
+    };
+    /**
+     * Plugin-managed per-platform metadata (account id, page id, etc.).
+     */
+    extra?:
+      | {
+          [k: string]: unknown;
+        }
+      | unknown[]
+      | string
+      | number
+      | boolean
+      | null;
+  };
+  instagram?: {
+    state?: {
+      connected?: boolean | null;
+      accountId?: string | null;
+      accountLabel?: string | null;
+      accessTokenExpiresAt?: string | null;
+      refreshTokenExpiresAt?: string | null;
+      scopes?:
+        | {
+            value: string;
+            id?: string | null;
+          }[]
+        | null;
+      lastError?: string | null;
+      lastRefreshedAt?: string | null;
+    };
+    /**
+     * Encrypted at rest with AES-256-GCM. Never displayed in plaintext.
+     */
+    accessToken?: {
+      version?: number | null;
+      iv?: string | null;
+      ciphertext?: string | null;
+      authTag?: string | null;
+    };
+    /**
+     * Encrypted at rest with AES-256-GCM. Never displayed in plaintext.
+     */
+    refreshToken?: {
+      version?: number | null;
+      iv?: string | null;
+      ciphertext?: string | null;
+      authTag?: string | null;
+    };
+    /**
+     * Plugin-managed per-platform metadata (account id, page id, etc.).
+     */
+    extra?:
+      | {
+          [k: string]: unknown;
+        }
+      | unknown[]
+      | string
+      | number
+      | boolean
+      | null;
+  };
+  facebook?: {
+    state?: {
+      connected?: boolean | null;
+      accountId?: string | null;
+      accountLabel?: string | null;
+      accessTokenExpiresAt?: string | null;
+      refreshTokenExpiresAt?: string | null;
+      scopes?:
+        | {
+            value: string;
+            id?: string | null;
+          }[]
+        | null;
+      lastError?: string | null;
+      lastRefreshedAt?: string | null;
+    };
+    /**
+     * Encrypted at rest with AES-256-GCM. Never displayed in plaintext.
+     */
+    accessToken?: {
+      version?: number | null;
+      iv?: string | null;
+      ciphertext?: string | null;
+      authTag?: string | null;
+    };
+    /**
+     * Encrypted at rest with AES-256-GCM. Never displayed in plaintext.
+     */
+    refreshToken?: {
+      version?: number | null;
+      iv?: string | null;
+      ciphertext?: string | null;
+      authTag?: string | null;
+    };
+    /**
+     * Plugin-managed per-platform metadata (account id, page id, etc.).
+     */
+    extra?:
+      | {
+          [k: string]: unknown;
+        }
+      | unknown[]
+      | string
+      | number
+      | boolean
+      | null;
+  };
+  gbp?: {
+    state?: {
+      connected?: boolean | null;
+      accountId?: string | null;
+      accountLabel?: string | null;
+      accessTokenExpiresAt?: string | null;
+      refreshTokenExpiresAt?: string | null;
+      scopes?:
+        | {
+            value: string;
+            id?: string | null;
+          }[]
+        | null;
+      lastError?: string | null;
+      lastRefreshedAt?: string | null;
+    };
+    /**
+     * Encrypted at rest with AES-256-GCM. Never displayed in plaintext.
+     */
+    accessToken?: {
+      version?: number | null;
+      iv?: string | null;
+      ciphertext?: string | null;
+      authTag?: string | null;
+    };
+    /**
+     * Encrypted at rest with AES-256-GCM. Never displayed in plaintext.
+     */
+    refreshToken?: {
+      version?: number | null;
+      iv?: string | null;
+      ciphertext?: string | null;
+      authTag?: string | null;
+    };
+    /**
+     * Plugin-managed per-platform metadata (account id, page id, etc.).
+     */
+    extra?:
+      | {
+          [k: string]: unknown;
+        }
+      | unknown[]
+      | string
+      | number
+      | boolean
+      | null;
+  };
+  lastBoardsRefreshAt?: string | null;
+  updatedAt?: string | null;
+  createdAt?: string | null;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "socials-connections_select".
+ */
+export interface SocialsConnectionsSelect<T extends boolean = true> {
+  pinterest?:
+    | T
+    | {
+        state?:
+          | T
+          | {
+              connected?: T;
+              accountId?: T;
+              accountLabel?: T;
+              accessTokenExpiresAt?: T;
+              refreshTokenExpiresAt?: T;
+              scopes?:
+                | T
+                | {
+                    value?: T;
+                    id?: T;
+                  };
+              lastError?: T;
+              lastRefreshedAt?: T;
+            };
+        accessToken?:
+          | T
+          | {
+              version?: T;
+              iv?: T;
+              ciphertext?: T;
+              authTag?: T;
+            };
+        refreshToken?:
+          | T
+          | {
+              version?: T;
+              iv?: T;
+              ciphertext?: T;
+              authTag?: T;
+            };
+        extra?: T;
+      };
+  instagram?:
+    | T
+    | {
+        state?:
+          | T
+          | {
+              connected?: T;
+              accountId?: T;
+              accountLabel?: T;
+              accessTokenExpiresAt?: T;
+              refreshTokenExpiresAt?: T;
+              scopes?:
+                | T
+                | {
+                    value?: T;
+                    id?: T;
+                  };
+              lastError?: T;
+              lastRefreshedAt?: T;
+            };
+        accessToken?:
+          | T
+          | {
+              version?: T;
+              iv?: T;
+              ciphertext?: T;
+              authTag?: T;
+            };
+        refreshToken?:
+          | T
+          | {
+              version?: T;
+              iv?: T;
+              ciphertext?: T;
+              authTag?: T;
+            };
+        extra?: T;
+      };
+  facebook?:
+    | T
+    | {
+        state?:
+          | T
+          | {
+              connected?: T;
+              accountId?: T;
+              accountLabel?: T;
+              accessTokenExpiresAt?: T;
+              refreshTokenExpiresAt?: T;
+              scopes?:
+                | T
+                | {
+                    value?: T;
+                    id?: T;
+                  };
+              lastError?: T;
+              lastRefreshedAt?: T;
+            };
+        accessToken?:
+          | T
+          | {
+              version?: T;
+              iv?: T;
+              ciphertext?: T;
+              authTag?: T;
+            };
+        refreshToken?:
+          | T
+          | {
+              version?: T;
+              iv?: T;
+              ciphertext?: T;
+              authTag?: T;
+            };
+        extra?: T;
+      };
+  gbp?:
+    | T
+    | {
+        state?:
+          | T
+          | {
+              connected?: T;
+              accountId?: T;
+              accountLabel?: T;
+              accessTokenExpiresAt?: T;
+              refreshTokenExpiresAt?: T;
+              scopes?:
+                | T
+                | {
+                    value?: T;
+                    id?: T;
+                  };
+              lastError?: T;
+              lastRefreshedAt?: T;
+            };
+        accessToken?:
+          | T
+          | {
+              version?: T;
+              iv?: T;
+              ciphertext?: T;
+              authTag?: T;
+            };
+        refreshToken?:
+          | T
+          | {
+              version?: T;
+              iv?: T;
+              ciphertext?: T;
+              authTag?: T;
+            };
+        extra?: T;
+      };
+  lastBoardsRefreshAt?: T;
+  updatedAt?: T;
+  createdAt?: T;
+  globalType?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "collections_widget".
+ */
+export interface CollectionsWidget {
+  data?: {
+    [k: string]: unknown;
+  };
+  width: 'full';
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "SocialsPublishTaskInput".
+ */
+export interface SocialsPublishTaskInput {
+  input?: unknown;
+  output?: unknown;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "SocialsRetryTaskInput".
+ */
+export interface SocialsRetryTaskInput {
+  input?: unknown;
+  output?: unknown;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "SocialsInsightsRefreshTaskInput".
+ */
+export interface SocialsInsightsRefreshTaskInput {
+  input?: unknown;
+  output?: unknown;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "SocialsConnectionRefreshTaskInput".
+ */
+export interface SocialsConnectionRefreshTaskInput {
+  input?: unknown;
+  output?: unknown;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "SocialsSweepTaskInput".
+ */
+export interface SocialsSweepTaskInput {
+  input?: unknown;
+  output?: unknown;
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema

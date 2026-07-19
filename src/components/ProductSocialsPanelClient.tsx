@@ -21,7 +21,7 @@ import {
   compileComposerInput,
   compileStandalonePublishBody,
   type ComposerState,
-  getSelectedAssets,
+  getEffectiveAssets,
   type MediaType,
   parseComposeResponse,
   pruneSelectedMedia,
@@ -1091,10 +1091,23 @@ const SourceComposer: React.FC<{ sourceKind: string }> = ({ sourceKind }) => {
           className={`socials-composer__preview socials-composer__preview--${platform}`}
         >
           <span className="socials-composer__preview-platform">{PLATFORM_LABELS[platform]}</span>
-          {getSelectedAssets(state, envelope.draft)[0]?.type === 'image' && (
-            <img alt={state.altText} src={getSelectedAssets(state, envelope.draft)[0].url} />
+          {getEffectiveAssets(platform, state, envelope.draft)[0]?.type === 'image' && (
+            <img
+              alt={state.altText}
+              src={getEffectiveAssets(platform, state, envelope.draft)[0].url}
+            />
           )}
-          <strong>{platform === 'pinterest' ? state.title : envelope.draft.content.title}</strong>
+          {getEffectiveAssets(platform, state, envelope.draft)[0]?.type === 'video' && (
+            <video
+              aria-label={state.altText || 'Selected video preview'}
+              controls
+              muted
+              playsInline
+              preload="metadata"
+              src={getEffectiveAssets(platform, state, envelope.draft)[0].url}
+            />
+          )}
+          <strong>{state.title || envelope.draft.content.title}</strong>
           <p>{state.copy}</p>
           {state.link && (platform === 'pinterest' || state.format === 'LINK') && (
             <small>{state.link}</small>

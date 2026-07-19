@@ -67,6 +67,10 @@ export default buildConfig({
   },
   plugins: [
     payloadPluginSocials({
+      assets: {
+        autoConvert: true,
+        renditionCollection: 'media',
+      },
       authorize: () => Promise.resolve(true),
       encryptionKey:
         process.env.SOCIALS_ENCRYPTION_KEY ||

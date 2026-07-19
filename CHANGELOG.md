@@ -10,6 +10,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ### Fixed
 
+- **Template builder fields now render and look native.** The dev harness's committed import map predated `SocialTemplateFieldBuilder`, so the seven template fields rendered as an empty group; the import map is regenerated and committed, and the README consumer note applies to hosts (`payload generate:importmap` after install/upgrade). Each field also gains a visible label (for example "Pinterest title", "Instagram caption") and full styling on Payload theme variables; the builder previously referenced style classes that existed in no stylesheet.
+- **Instagram and Facebook no longer duplicate the title into the message.** The default copy builders put the source title on the first line of the body while the composer's "Title (first line)" field prepends it again at compile time. The composer now strips the leading title from the initialized message (`stripLeadingTitle`) and the compile step skips the prepend when the message already starts with the title.
+- **The preview pane now renders video and always mirrors the publish.** Selected video assets render as a playable video element, and the preview derives its media from the same `getEffectiveAssets` rule the compiler uses (explicit selection, else the single accepted asset), so an auto-selected asset shows in the preview instead of an empty pane.
+
+### Changed
+
+- **Dev harness enables image auto-conversion.** `dev/payload.config.ts` now sets `assets: { autoConvert: true, renditionCollection: 'media' }` so local testing exercises the WebP/PNG to JPEG conversion path that production hosts (whose media is not JPEG) must enable.
+
+### Fixed
+
 - **Plugin config no longer invisible to client components on Payload 3.86.** `applyAdminEnhancements` now writes the socials object to both `config.custom.socials` (server-side readers) and `config.admin.custom.socials` (the path that survives `buildClientConfig`), so `useConfig()` in the browser receives `enabledPlatforms`, `apiBasePath`, `sourceKinds`, and `adminRoute`. Platform tabs in the source composer, the Channels list in the standalone composer, and the template builder record-picker all populate correctly instead of rendering empty.
 - **OAuth callback no longer 404s after a successful connection.** The post-authorization redirect in `oauthEndpointFactory` previously linked to the bare plugin route (e.g. `/socials?connected=...`), which 404s because the view is mounted under the Payload admin base. The factory now reads `options.admin.adminBase` (populated by `applyAdminEnhancements` from `config.routes.admin`) and redirects to the correct full path (e.g. `/admin/socials?connected=...`). The `SocialsAdminViewClient` reads the `connected` query param on mount, switches to the Connections tab, fires a success toast naming the platform, and strips the param from the URL.
 - **Standalone composer no longer white-screens on server errors.** The `publish()` handler in `StandaloneComposer` previously cast the response body to `ComposeResult` unconditionally; a 403, validation error, or 5xx response with `{ error }` caused `results.results.map` to throw. The body is now validated via the new pure `parseComposeResponse` helper before `setResults` is called; error responses toast the message and leave the UI intact.
