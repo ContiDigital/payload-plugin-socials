@@ -94,6 +94,24 @@ export const pruneSelectedMedia = (
   return { pruned, removed }
 }
 
+/**
+ * Remove a leading title line from copy so the separate "Title (first line)"
+ * field and the message body stay complementary. The server's default copy
+ * builders already put the source title on the first line of the body; without
+ * this strip, the compile-time title prepend would duplicate it.
+ */
+export const stripLeadingTitle = (copy: string, title: string): string => {
+  const trimmedTitle = title.trim()
+  if (!trimmedTitle) {
+    return copy
+  }
+  const trimmedCopy = copy.trimStart()
+  if (!trimmedCopy.startsWith(trimmedTitle)) {
+    return copy
+  }
+  return trimmedCopy.slice(trimmedTitle.length).replace(/^\s+/, '')
+}
+
 export const buildInitialComposerState = (
   platform: PlatformId,
   envelope: DraftEnvelope,
@@ -101,12 +119,21 @@ export const buildInitialComposerState = (
   const image = envelope.draft.media.find((asset) => asset.type === 'image')
   const video = envelope.draft.media.find((asset) => asset.type === 'video')
   const format = platform === 'pinterest' && !image && video ? 'VIDEO' : formatDefaults[platform]
+  const initialTitle = envelope.preview.title ?? envelope.draft.content.title
+  const initialBody = envelope.preview.body ?? envelope.draft.content.body
+  // Instagram/Facebook compose the final caption as title + body, so the body
+  // field must not itself begin with the title (the default builders put it
+  // there). Pinterest keeps its own dedicated title field and full description.
+  const copy =
+    platform === 'instagram' || platform === 'facebook'
+      ? stripLeadingTitle(initialBody, initialTitle)
+      : initialBody
   return {
     alertType: '',
     altText: envelope.preview.altText ?? image?.altText ?? '',
     callToAction: '',
     callToActionUrl: envelope.preview.link ?? envelope.draft.content.link,
-    copy: envelope.preview.body ?? envelope.draft.content.body,
+    copy,
     destinationId: '',
     eventEnd: '',
     eventStart: '',
@@ -120,7 +147,7 @@ export const buildInitialComposerState = (
       Boolean(url),
     ),
     shareToFeed: true,
-    title: envelope.preview.title ?? envelope.draft.content.title,
+    title: initialTitle,
     videoTitle: envelope.draft.content.title,
   }
 }
@@ -177,26 +204,46 @@ export const formatLocalDateTimeMin = (date: Date): string => {
  * Title prepend: when `state.title` is set and the platform is instagram or
  * facebook, it becomes the first line of the caption/message.
  */
+/**
+ * The assets a publish would actually use: the explicit selection filtered to
+ * the format's accepted types, falling back to the draft's single accepted
+ * asset when nothing is selected. The preview pane renders from this same
+ * derivation so what is shown always matches what would be published.
+ */
+export const getEffectiveAssets = (
+  platform: PlatformId,
+  state: ComposerState,
+  draft: SocialDraft,
+): SocialDraftMedia[] => {
+  const accepted = acceptedMediaTypes(platform, state.format)
+  const selectedAssets = getSelectedAssets(state, draft).filter((a) => accepted.includes(a.type))
+  const draftAccepted = draft.media.filter((a) => accepted.includes(a.type))
+  return selectedAssets.length > 0
+    ? selectedAssets
+    : draftAccepted.length === 1
+      ? draftAccepted
+      : []
+}
+
 export const compileComposerInput = (
   platform: PlatformId,
   state: ComposerState,
   draft: SocialDraft,
 ): Record<string, unknown> => {
-  const accepted = acceptedMediaTypes(platform, state.format)
-  const selectedAssets = getSelectedAssets(state, draft).filter((a) => accepted.includes(a.type))
-
-  // Auto-select: when nothing explicitly selected, use the single accepted asset if one exists
-  const draftAccepted = draft.media.filter((a) => accepted.includes(a.type))
-  const effectiveAssets =
-    selectedAssets.length > 0 ? selectedAssets : draftAccepted.length === 1 ? draftAccepted : []
+  const effectiveAssets = getEffectiveAssets(platform, state, draft)
 
   const firstImage = effectiveAssets.find((a) => a.type === 'image')
   const firstVideo = effectiveAssets.find((a) => a.type === 'video')
 
-  // Title prepend for instagram and facebook (not pinterest, which has its own title field)
+  // Title prepend for instagram and facebook (not pinterest, which has its own
+  // title field). Skipped when the message already begins with the title, so a
+  // hand-edited body that repeats it is never doubled.
   const buildCopy = (): string => {
     if ((platform === 'instagram' || platform === 'facebook') && state.title) {
-      return `${state.title}\n\n${state.copy}`
+      if (state.copy.trimStart().startsWith(state.title.trim()) && state.title.trim() !== '') {
+        return state.copy
+      }
+      return state.copy ? `${state.title}\n\n${state.copy}` : state.title
     }
     return state.copy
   }

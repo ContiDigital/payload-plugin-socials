@@ -14,6 +14,7 @@ import {
   parseComposeResponse,
   pruneSelectedMedia,
   shouldFetchEnvelope,
+  stripLeadingTitle,
   supportsMultipleMedia,
 } from '../socialComposerModel.js'
 
@@ -620,5 +621,68 @@ describe('shouldFetchEnvelope', () => {
   it('returns false even when the stored value is undefined (key present)', () => {
     // The key being present means we've visited this tab before.
     expect(shouldFetchEnvelope({ pinterest: undefined }, 'pinterest')).toBe(false)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Title / message deduplication (Instagram + Facebook)
+// ---------------------------------------------------------------------------
+
+describe('stripLeadingTitle', () => {
+  it('removes the title and separating blank line from the body', () => {
+    expect(stripLeadingTitle('Product 1\n\nA marble lion.', 'Product 1')).toBe('A marble lion.')
+  })
+
+  it('leaves a body that does not start with the title untouched', () => {
+    expect(stripLeadingTitle('A marble lion.', 'Product 1')).toBe('A marble lion.')
+  })
+
+  it('is a no-op for an empty title', () => {
+    expect(stripLeadingTitle('Product 1\n\nBody', '')).toBe('Product 1\n\nBody')
+  })
+})
+
+describe('title prepend deduplication', () => {
+  it('initializes instagram copy without the leading title', () => {
+    const initialized = buildInitialComposerState('instagram', {
+      draft,
+      preview: {
+        body: 'Preview title\n\nThe body.',
+        link: 'https://l.test',
+        title: 'Preview title',
+      },
+    })
+    expect(initialized.title).toBe('Preview title')
+    expect(initialized.copy).toBe('The body.')
+  })
+
+  it('keeps pinterest copy intact (dedicated title field)', () => {
+    const initialized = buildInitialComposerState('pinterest', {
+      draft,
+      preview: {
+        body: 'Preview title\n\nThe body.',
+        link: 'https://l.test',
+        title: 'Preview title',
+      },
+    })
+    expect(initialized.copy).toBe('Preview title\n\nThe body.')
+  })
+
+  it('compiles facebook message as title + body exactly once', () => {
+    const input = compileComposerInput(
+      'facebook',
+      state({ copy: 'The body.', format: 'PHOTO', title: 'Product 1' }),
+      draft,
+    )
+    expect(input.message).toBe('Product 1\n\nThe body.')
+  })
+
+  it('does not double the title when the message already starts with it', () => {
+    const input = compileComposerInput(
+      'facebook',
+      state({ copy: 'Product 1\n\nThe body.', format: 'PHOTO', title: 'Product 1' }),
+      draft,
+    )
+    expect(input.message).toBe('Product 1\n\nThe body.')
   })
 })
