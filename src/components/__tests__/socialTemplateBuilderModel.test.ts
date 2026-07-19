@@ -9,7 +9,9 @@ import {
   INSERTABLE_STATIC_TOKENS,
   insertToken,
   isMetadataToken,
+  sampleListUrl,
   TEMPLATE_SCOPE_TOKENS,
+  tokensFromScopeKeys,
 } from '../socialTemplateBuilderModel.js'
 
 // ---------------------------------------------------------------------------
@@ -176,5 +178,73 @@ describe('isMetadataToken', () => {
     expect(isMetadataToken('title')).toBe(false)
     expect(isMetadataToken('description')).toBe(false)
     expect(isMetadataToken('metadata')).toBe(false)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// tokensFromScopeKeys
+// ---------------------------------------------------------------------------
+
+describe('tokensFromScopeKeys', () => {
+  it('splits a preview scopeKeys response into static and metadata groups', () => {
+    const result = tokensFromScopeKeys([
+      'title',
+      'description',
+      'sourceId',
+      'metadata.googleMaterial',
+      'metadata.categoryLabel',
+    ])
+    expect(result.static).toEqual(['title', 'description', 'sourceId'])
+    expect(result.metadata).toEqual(['metadata.googleMaterial', 'metadata.categoryLabel'])
+  })
+
+  it('drops the bare "metadata" object key and empty entries', () => {
+    const result = tokensFromScopeKeys(['title', 'metadata', '', 'metadata.color'])
+    expect(result.static).toEqual(['title'])
+    expect(result.metadata).toEqual(['metadata.color'])
+  })
+
+  it('dedupes while preserving first-seen order', () => {
+    const result = tokensFromScopeKeys(['title', 'title', 'metadata.a', 'metadata.a', 'link'])
+    expect(result.static).toEqual(['title', 'link'])
+    expect(result.metadata).toEqual(['metadata.a'])
+  })
+
+  it('returns empty groups for an empty scopeKeys list', () => {
+    expect(tokensFromScopeKeys([])).toEqual({ metadata: [], static: [] })
+  })
+
+  it('reflects a different collection’s fields (category, not product)', () => {
+    // A category record exposes different metadata leaves than a product record.
+    const result = tokensFromScopeKeys([
+      'title',
+      'description',
+      'metadata.parentCategory',
+      'metadata.productCount',
+    ])
+    expect(result.metadata).toEqual(['metadata.parentCategory', 'metadata.productCount'])
+    expect(result.static).not.toContain('metadata')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// sampleListUrl
+// ---------------------------------------------------------------------------
+
+describe('sampleListUrl', () => {
+  it('builds the single-most-recent-record list URL', () => {
+    expect(sampleListUrl('/api', 'products')).toBe('/api/products?limit=1&depth=0&sort=-createdAt')
+  })
+
+  it('trims a trailing slash on the api route', () => {
+    expect(sampleListUrl('/api/', 'categories')).toBe(
+      '/api/categories?limit=1&depth=0&sort=-createdAt',
+    )
+  })
+
+  it('encodes an unusual collection slug', () => {
+    expect(sampleListUrl('/api', 'blog posts')).toBe(
+      '/api/blog%20posts?limit=1&depth=0&sort=-createdAt',
+    )
   })
 })

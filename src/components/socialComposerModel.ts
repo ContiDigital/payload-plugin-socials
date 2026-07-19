@@ -378,6 +378,10 @@ export type UploadDocLike = {
   filename?: unknown
   height?: unknown
   mimeType?: unknown
+  /** Generic nested poster shape (`{ url }`) some hosts attach to video docs. */
+  poster?: unknown
+  /** Generic flat poster/thumbnail URL some hosts attach to video docs. */
+  posterUrl?: unknown
   sizes?: unknown
   url?: unknown
   width?: unknown
@@ -460,9 +464,31 @@ const pickBestJpegSizeUrl = (doc: UploadDocLike, fallbackUrl: string): string =>
 }
 
 /**
+ * Resolve an optional video poster URL from an upload doc using ONLY generic
+ * shapes: a flat `posterUrl` string or a nested `poster.url` string. No
+ * host-specific field names are invented. A relative value is made absolute
+ * against `ctx.origin`; an absolute value passes through. Returns undefined when
+ * neither shape is present.
+ */
+export const resolveDocPosterUrl = (
+  doc: UploadDocLike,
+  ctx: UploadUrlContext,
+): string | undefined => {
+  const flat = asString(doc.posterUrl)
+  const nested = asString((doc.poster as { url?: unknown } | undefined)?.url)
+  const raw = flat || nested
+  if (!raw) {
+    return undefined
+  }
+  return raw.startsWith('/') ? `${ctx.origin}${raw}` : raw
+}
+
+/**
  * Normalize a selected Payload upload document into a SocialDraftMedia asset:
  * absolute playable URL (Bug 1), inferred type/format, and image dimensions.
- * Returns undefined when no usable URL can be resolved.
+ * Video docs additionally carry an optional `posterUrl` when the doc exposes a
+ * generic poster field, so the composer can show a thumbnail with no extra
+ * fetch. Returns undefined when no usable URL can be resolved.
  */
 export const normalizeSelectedUploadMedia = (
   doc: UploadDocLike,
@@ -484,6 +510,7 @@ export const normalizeSelectedUploadMedia = (
     altText: asString(doc.alt) || undefined,
     format,
     height: typeof doc.height === 'number' ? doc.height : undefined,
+    posterUrl: type === 'video' ? resolveDocPosterUrl(doc, ctx) : undefined,
     url,
     width: typeof doc.width === 'number' ? doc.width : undefined,
   }
@@ -498,6 +525,30 @@ export const normalizeSelectedUploadMedia = (
  */
 export const videoPosterFrameSrc = (url: string): string =>
   url.includes('#') ? url : `${url}#t=0.1`
+
+/**
+ * Human-readable filename derived from a media URL's last path segment, with
+ * query string and fragment stripped and percent-encoding decoded. Used to
+ * label a video placeholder tile without any network request. Falls back to the
+ * raw url when there is no usable segment or decoding fails.
+ */
+export const filenameFromUrl = (url: string): string => {
+  const withoutHash = url.split('#')[0]
+  const withoutQuery = withoutHash.split('?')[0]
+  const segment = withoutQuery.split('/').filter(Boolean).pop() ?? ''
+  if (!segment) {
+    return url
+  }
+  try {
+    return decodeURIComponent(segment)
+  } catch {
+    return segment
+  }
+}
+
+/** Whether a media asset is a video (drives the placeholder-vs-image render). */
+export const isVideoAsset = (asset: Pick<SocialDraftMedia, 'type'>): boolean =>
+  asset.type === 'video'
 
 // ---------------------------------------------------------------------------
 // Bug 3: shared media pool across platform tabs
