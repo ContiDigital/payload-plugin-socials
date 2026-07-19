@@ -13,6 +13,7 @@ import {
   isMetadataToken,
   TEMPLATE_FILTERS,
 } from './socialTemplateBuilderModel.js'
+import './SocialPublishPanelClient.scss'
 
 // ---------------------------------------------------------------------------
 // Platform character limits used for the per-field length warning
@@ -25,6 +26,16 @@ const FIELD_LIMITS: Partial<Record<SocialCopyFieldKey, number>> = {
   pinterestDescription: 500,
   pinterestTitle: 100,
   // facebookMessage and pinterestHashtags have no hard platform cap in the plugin
+}
+
+const COPY_FIELD_LABELS: Record<SocialCopyFieldKey, string> = {
+  facebookMessage: 'Facebook message',
+  gbpSummary: 'Google Business Profile summary',
+  instagramCaption: 'Instagram caption',
+  pinterestAltText: 'Pinterest alt text',
+  pinterestDescription: 'Pinterest description',
+  pinterestHashtags: 'Pinterest hashtags',
+  pinterestTitle: 'Pinterest title',
 }
 
 // ---------------------------------------------------------------------------
@@ -300,8 +311,9 @@ export const SocialTemplateFieldBuilder: React.FC<SocialTemplateFieldBuilderProp
 
   return (
     <div className="stfb">
-      {/* Raw-mode toggle */}
+      {/* Field label + raw-mode toggle */}
       <div className="stfb__toolbar">
+        <span className="stfb__field-label">{COPY_FIELD_LABELS[copyField]}</span>
         <button
           aria-pressed={rawMode}
           className={`stfb__raw-toggle${rawMode ? ' stfb__raw-toggle--active' : ''}`}
