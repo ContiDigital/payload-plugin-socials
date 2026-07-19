@@ -386,6 +386,7 @@ For `pinterestHashtags`, a string value is split on whitespace and commas and ea
 This is the quick version. Each platform also has a dedicated guide that covers
 app creation, scopes, and the approval or review process:
 
+- [Installation and host integration guide](docs/installation.md)
 - [Pinterest setup guide](docs/pinterest.md)
 - [Instagram Business setup guide](docs/instagram.md)
 - [Facebook Pages setup guide](docs/facebook.md)
