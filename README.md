@@ -318,15 +318,15 @@ const copy = resolveTemplateCopy(templateDoc.templates, ctx, { boardName: 'Statu
 
 ### Template builder
 
-Each copy field in the `social-templates` collection mounts a `SocialTemplateFieldBuilder` component instead of a plain textarea. The builder reads the row's **Source kind** and locks the sample-record picker, token discovery, and live preview to that collection. Until you pick a source kind it shows a short hint and disables preview. It provides:
+Each copy field in the `social-templates` collection mounts a `SocialTemplateFieldBuilder` component instead of a plain textarea. The builder reads the row's **Source kind** and locks token discovery, the sample-record picker, and live preview to that collection. Until you pick a source kind it shows a short hint and disables preview. It provides:
 
-- **Token picker.** Buttons for every statically-known scope token (`title`, `description`, `material`, `color`, `category`, `dimensions`, `link`, `modelLabel`, `sourceId`, `sourceKind`, `baseTitle`, `baseDescription`). After you select a sample record, any `metadata.*` keys that record exposes are added to the picker dynamically.
+- **Token picker.** The moment you pick a source kind, the builder auto-resolves a recent record of that collection and offers the tokens that actually resolve for it: the static aliases (`title`, `description`, `material`, `color`, `category`, `dimensions`, `link`, `modelLabel`, `sourceId`, `sourceKind`, `baseTitle`, `baseDescription`) plus that record's own `metadata.*` fields, grouped under "Insert (fields available for <kind>)". So a category template shows category fields, not product fields. If the collection has no records yet, the picker falls back to the full static list with a note, and with no source kind bound it shows only `title` and `description`.
 - **Filter menu.** After clicking a token, apply `truncate:N`, `default:...`, `upper`, `lower`, or `trim` in one click. The filter is written into the template string directly.
-- **Live preview.** Enter a record ID in the preview panel and the builder POSTs to `POST {basePath}/templates/preview` every 350ms, showing the rendered output for that field against a real record of the bound collection.
+- **Live preview.** A recent record of the bound collection is auto-selected; the builder POSTs to `POST {basePath}/templates/preview` every 350ms and shows the rendered output for that field. Change the record ID in the preview panel to preview against a different record.
 - **Character count.** A per-field count with a warning when the rendered value would exceed the platform limit (100 chars for Pinterest title, 500 for description and alt text, 1500 for GBP summary, 2200 for Instagram caption).
 - **Raw-string toggle.** Switch to a plain input or textarea to hand-write template syntax for advanced cases.
 
-**Important:** the token picker only offers tokens that `buildTemplateScope` maps into the render scope. Collection fields that are not surfaced by the host's `SourceContextResolver` do not appear in the picker and would produce silent empty output if typed manually. To use a field, expose it through the resolver's `metadata` map and it will be discovered automatically in the live preview.
+**Important:** the token picker only offers tokens that `buildTemplateScope` maps into the render scope for the auto-selected sample record. Collection fields that are not surfaced by the host's `SourceContextResolver` do not appear in the picker and would produce silent empty output if typed manually. To use a field, expose it through the resolver's `metadata` map and it will be discovered automatically from the sample record.
 
 ---
 

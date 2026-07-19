@@ -10,8 +10,9 @@ import {
   compilePreviewRequestBody,
   FILTER_TAKES_ARG,
   INSERTABLE_STATIC_TOKENS,
-  isMetadataToken,
+  sampleListUrl,
   TEMPLATE_FILTERS,
+  tokensFromScopeKeys,
 } from './socialTemplateBuilderModel.js'
 import './SocialPublishPanelClient.scss'
 
@@ -57,17 +58,33 @@ const asRecord: AsRecord = (v) =>
 // ---------------------------------------------------------------------------
 
 type TokenPickerProps = {
-  discoveredMetaKeys: string[]
+  kindLabel?: string
+  metaTokens: string[]
   onInsert: (token: string) => void
+  staticTokens: string[]
+  /**
+   * `discovered` — tokens came from the bound kind's sample record (its real
+   * fields). `fallback` — no sample record, so the full static list is shown.
+   * `none` — no source kind is bound yet.
+   */
+  variant: 'discovered' | 'fallback' | 'none'
 }
 
-const TokenPicker: React.FC<TokenPickerProps> = ({ discoveredMetaKeys, onInsert }) => {
-  const staticTokens = [...INSERTABLE_STATIC_TOKENS]
-  const metaTokens = discoveredMetaKeys.filter(isMetadataToken)
+const TokenPicker: React.FC<TokenPickerProps> = ({
+  kindLabel,
+  metaTokens,
+  onInsert,
+  staticTokens,
+  variant,
+}) => {
+  const label =
+    variant === 'none'
+      ? 'Insert:'
+      : `Insert${kindLabel ? ` (fields available for ${kindLabel})` : ''}:`
 
   return (
     <div aria-label="Insert token" className="stfb__token-picker" role="group">
-      <span className="stfb__token-picker-label">Insert:</span>
+      <span className="stfb__token-picker-label">{label}</span>
       {staticTokens.map((token) => (
         <button
           aria-label={`Insert ${token} token`}
@@ -97,9 +114,15 @@ const TokenPicker: React.FC<TokenPickerProps> = ({ discoveredMetaKeys, onInsert 
           ))}
         </>
       )}
-      {discoveredMetaKeys.length === 0 && (
+      {variant === 'none' && (
         <span className="stfb__token-hint">
-          metadata.* tokens appear after selecting a record below.
+          Choose the collection this template is for (the “Source kind” field) to see its fields.
+        </span>
+      )}
+      {variant === 'fallback' && (
+        <span className="stfb__token-hint">
+          Showing all template fields; this collection has no sample record to discover its fields
+          from yet.
         </span>
       )}
     </div>
@@ -221,7 +244,9 @@ export const SocialTemplateFieldBuilder: React.FC<SocialTemplateFieldBuilderProp
   const [selectedId, setSelectedId] = useState('')
   const [previewText, setPreviewText] = useState<string>()
   const [previewError, setPreviewError] = useState<string>()
-  const [discoveredMetaKeys, setDiscoveredMetaKeys] = useState<string[]>([])
+  // The bound kind's real, populated tokens as reported by the preview endpoint
+  // for the auto-resolved sample record (static aliases + discovered metadata.*).
+  const [discoveredScopeKeys, setDiscoveredScopeKeys] = useState<string[]>([])
   const [activeToken, setActiveToken] = useState('')
   const textRef = useRef<HTMLInputElement | HTMLTextAreaElement>(null)
 
@@ -273,8 +298,7 @@ export const SocialTemplateFieldBuilder: React.FC<SocialTemplateFieldBuilderProp
             }
             setPreviewError(undefined)
             setPreviewText(body.resolved?.[copyField] ?? '')
-            const newMeta = (body.scopeKeys ?? []).filter(isMetadataToken)
-            setDiscoveredMetaKeys(newMeta)
+            setDiscoveredScopeKeys(body.scopeKeys ?? [])
           })
           .catch((err: unknown) => {
             if (err instanceof Error && err.name === 'AbortError') {
@@ -290,6 +314,45 @@ export const SocialTemplateFieldBuilder: React.FC<SocialTemplateFieldBuilderProp
   useEffect(() => {
     runPreview(selectedKind, selectedId, { [copyField]: currentValue })
   }, [copyField, currentValue, runPreview, selectedId, selectedKind])
+
+  // ---------- Auto-resolve a sample record for the bound kind -----------------
+  //
+  // On mount (when a kind is already set) and whenever the bound kind changes,
+  // fetch the most recent record of that kind's collection and pre-select it, so
+  // the token picker and live preview show that collection's real fields without
+  // the operator hand-picking a record first. Manual record-ID edits are
+  // preserved (this effect does not depend on selectedId).
+  const boundCollection = boundKind?.collection
+  const sampleAbortRef = useRef<AbortController | null>(null)
+  useEffect(() => {
+    if (!boundCollection) {
+      return
+    }
+    sampleAbortRef.current?.abort()
+    const ctrl = new AbortController()
+    sampleAbortRef.current = ctrl
+    // Clear stale tokens from a previous kind until the new sample resolves.
+    setDiscoveredScopeKeys([])
+    void fetch(sampleListUrl(apiRoute, boundCollection), { signal: ctrl.signal })
+      .then(async (res) => {
+        const body = (await res.json()) as { docs?: Array<{ id?: number | string }> }
+        if (!res.ok) {
+          return
+        }
+        const firstId = Array.isArray(body.docs) ? body.docs[0]?.id : undefined
+        if (typeof firstId === 'string' || typeof firstId === 'number') {
+          setSelectedId(String(firstId))
+        }
+      })
+      .catch((err: unknown) => {
+        if (err instanceof Error && err.name === 'AbortError') {
+          return
+        }
+        // A failed sample fetch is non-fatal; the picker falls back to the full
+        // static token list so the builder is never empty.
+      })
+    return () => ctrl.abort()
+  }, [apiRoute, boundCollection])
 
   // ---------- Handlers -------------------------------------------------------
 
@@ -311,6 +374,28 @@ export const SocialTemplateFieldBuilder: React.FC<SocialTemplateFieldBuilderProp
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     setValue(e.target.value)
   }
+
+  // ---------- Token picker source --------------------------------------------
+  //
+  // Drive the picker from the bound kind's discovered scope keys (its real
+  // fields) when available. With a kind but no discovered keys yet (no records,
+  // or the sample/preview fetch failed), fall back to the full static list so
+  // the builder is never empty. With no kind bound, show only the minimal
+  // always-present aliases plus a hint.
+  const { metadata: discoveredMeta, static: discoveredStatic } =
+    tokensFromScopeKeys(discoveredScopeKeys)
+  const hasDiscovered = discoveredScopeKeys.length > 0
+  const tokenVariant: 'discovered' | 'fallback' | 'none' = !selectedKind
+    ? 'none'
+    : hasDiscovered
+      ? 'discovered'
+      : 'fallback'
+  const pickerStatic = !selectedKind
+    ? ['title', 'description']
+    : hasDiscovered
+      ? discoveredStatic
+      : [...INSERTABLE_STATIC_TOKENS]
+  const pickerMeta = tokenVariant === 'discovered' ? discoveredMeta : []
 
   // ---------- Render ---------------------------------------------------------
 
@@ -383,7 +468,13 @@ export const SocialTemplateFieldBuilder: React.FC<SocialTemplateFieldBuilderProp
             />
           )}
 
-          <TokenPicker discoveredMetaKeys={discoveredMetaKeys} onInsert={handleInsertToken} />
+          <TokenPicker
+            kindLabel={boundKind?.label ?? selectedKind}
+            metaTokens={pickerMeta}
+            onInsert={handleInsertToken}
+            staticTokens={pickerStatic}
+            variant={tokenVariant}
+          />
 
           <FilterMenu onApply={handleApplyFilter} token={activeToken} />
 
@@ -413,7 +504,8 @@ export const SocialTemplateFieldBuilder: React.FC<SocialTemplateFieldBuilderProp
             <>
               <div className="stfb__preview-controls">
                 <span className="stfb__preview-label-text">
-                  Previewing a <strong>{boundKind?.label ?? selectedKind}</strong> record.
+                  Previewing a <strong>{boundKind?.label ?? selectedKind}</strong> record. A recent
+                  one is auto-selected; change the ID to preview a different record.
                 </span>
                 <label className="stfb__preview-label">
                   Record ID
@@ -421,7 +513,7 @@ export const SocialTemplateFieldBuilder: React.FC<SocialTemplateFieldBuilderProp
                     aria-label="Preview record ID"
                     className="stfb__preview-id"
                     onChange={(e) => setSelectedId(e.target.value)}
-                    placeholder="Enter a record ID to preview"
+                    placeholder="Auto-filled from a recent record"
                     type="text"
                     value={selectedId}
                   />

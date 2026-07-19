@@ -159,3 +159,48 @@ export const compilePreviewRequestBody = (
  * from the preview endpoint's `scopeKeys` rather than statically known).
  */
 export const isMetadataToken = (token: string): boolean => token.startsWith('metadata.')
+
+// ---------------------------------------------------------------------------
+// Kind-driven token discovery (from the preview endpoint's scopeKeys)
+// ---------------------------------------------------------------------------
+
+/**
+ * Split the preview endpoint's `scopeKeys` response into the two groups the
+ * token picker renders: `static` (friendly alias tokens like `title`,
+ * `material`) and `metadata` (discovered `metadata.*` leaf paths). The bare
+ * `metadata` object key and any empty/non-string entries are dropped, and each
+ * group is deduped while preserving first-seen order.
+ *
+ * Driving the picker from this — rather than the fixed static list — means the
+ * operator sees exactly the fields that resolve for the bound collection's
+ * record, so a category template shows category fields, not product fields.
+ */
+export const tokensFromScopeKeys = (
+  scopeKeys: readonly string[],
+): { metadata: string[]; static: string[] } => {
+  const staticTokens: string[] = []
+  const metadata: string[] = []
+  const seen = new Set<string>()
+  for (const key of scopeKeys) {
+    if (typeof key !== 'string' || key.length === 0 || key === 'metadata' || seen.has(key)) {
+      continue
+    }
+    seen.add(key)
+    if (isMetadataToken(key)) {
+      metadata.push(key)
+    } else {
+      staticTokens.push(key)
+    }
+  }
+  return { metadata, static: staticTokens }
+}
+
+/**
+ * Host REST URL that fetches the most recent single record of a collection, so
+ * the builder can auto-pick a sample record to drive token discovery and the
+ * live preview: `{apiRoute}/{collection}?limit=1&depth=0&sort=-createdAt`.
+ */
+export const sampleListUrl = (apiRoute: string, collection: string): string => {
+  const base = apiRoute.replace(/\/$/, '')
+  return `${base}/${encodeURIComponent(collection)}?limit=1&depth=0&sort=-createdAt`
+}
