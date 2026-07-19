@@ -37,6 +37,15 @@ const publishedRow = {
   status: 'published',
 }
 
+/** Queued row — pinterest, no externalId yet. */
+const queuedRow = {
+  id: 'queued_1',
+  meta: { queuedInput: { boardId: 'board_q' } },
+  platform: 'pinterest',
+  scheduledAt: '2027-08-01T10:00:00.000Z',
+  status: 'queued',
+}
+
 /** Instagram row variant. */
 const igRow = {
   id: 'ig_post_1',
@@ -58,11 +67,12 @@ const fbRow = {
 }
 
 type AnyRow = {
-  externalId: string
-  externalUrl: string
+  externalId?: string
+  externalUrl?: string
   id: string
   meta: Record<string, unknown>
   platform: string
+  scheduledAt?: string
   status: string
 }
 
@@ -119,7 +129,7 @@ const makeIgReq = (
 }
 
 const makeLocalOnlyReq = (
-  row: AnyRow = publishedRow,
+  row: AnyRow = publishedRow as AnyRow,
   userId: number | string = 42,
 ): ReqWithMocks => {
   const findByID = vi.fn().mockResolvedValue(row)
@@ -283,6 +293,98 @@ describe('createPostDeleteEndpoints — Instagram plain delete (unsupported)', (
 })
 
 // ---------------------------------------------------------------------------
+// Fix 4: Cancel path — queued rows
+// ---------------------------------------------------------------------------
+
+describe('createPostDeleteEndpoints — cancel queued post (Fix 4)', () => {
+  it('cancels a queued post without calling the adapter', async () => {
+    const findByID = vi.fn().mockResolvedValue(queuedRow)
+    const update = vi.fn().mockResolvedValue({ id: 'queued_1' })
+    const req = makeReq({ findByID, update }, { routeParams: { postId: 'queued_1' } })
+
+    const res = await run(getEndpoint(), req)
+
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body).toEqual({ ok: true, postId: 'queued_1', status: 'cancelled' })
+
+    // Adapter must NOT be called — nothing was published.
+    expect(adapterDelete).not.toHaveBeenCalled()
+
+    // Row must be transitioned to 'cancelled' with metadata.
+    expect(update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'queued_1',
+        data: expect.objectContaining({
+          meta: expect.objectContaining({
+            cancelledAt: expect.any(String),
+            cancelledBy: 42,
+          }),
+          status: 'cancelled',
+        }),
+      }),
+    )
+  })
+
+  it('records cancelledBy as the authenticated user id', async () => {
+    const findByID = vi.fn().mockResolvedValue(queuedRow)
+    const update = vi.fn().mockResolvedValue({ id: 'queued_1' })
+    const req = makeReq(
+      { findByID, update },
+      {
+        routeParams: { postId: 'queued_1' },
+        user: { id: 77 },
+      },
+    )
+    await run(getEndpoint(), req)
+    expect(update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          meta: expect.objectContaining({ cancelledBy: 77 }),
+        }),
+      }),
+    )
+  })
+
+  it('does not set deletedAt or deletedBy on a cancelled row', async () => {
+    const findByID = vi.fn().mockResolvedValue(queuedRow)
+    const update = vi.fn().mockResolvedValue({ id: 'queued_1' })
+    const req = makeReq({ findByID, update }, { routeParams: { postId: 'queued_1' } })
+    await run(getEndpoint(), req)
+    const updateArg = update.mock.calls[0][0] as { data: { meta: Record<string, unknown> } }
+    expect(updateArg.data.meta.deletedAt).toBeUndefined()
+    expect(updateArg.data.meta.deletedBy).toBeUndefined()
+  })
+
+  it('preserves existing meta fields when cancelling', async () => {
+    const rowWithMeta = {
+      ...queuedRow,
+      meta: { queuedInput: { boardId: 'b1' }, someExisting: true },
+    }
+    const findByID = vi.fn().mockResolvedValue(rowWithMeta)
+    const update = vi.fn().mockResolvedValue({ id: 'queued_1' })
+    const req = makeReq({ findByID, update }, { routeParams: { postId: 'queued_1' } })
+    await run(getEndpoint(), req)
+    const updateArg = update.mock.calls[0][0] as { data: { meta: Record<string, unknown> } }
+    expect(updateArg.data.meta.someExisting).toBe(true)
+    expect(updateArg.data.meta.cancelledAt).toBeDefined()
+  })
+
+  it('cancelled status makes the row re-claimable for republish', async () => {
+    // After cancellation, status is 'cancelled'. publicationReservation already
+    // includes 'cancelled' in RECLAIMABLE_STATUSES, so this row can be
+    // republished in-place. This test verifies the endpoint writes the right
+    // status so that invariant holds.
+    const findByID = vi.fn().mockResolvedValue(queuedRow)
+    const update = vi.fn().mockResolvedValue({ id: 'queued_1' })
+    const req = makeReq({ findByID, update }, { routeParams: { postId: 'queued_1' } })
+    await run(getEndpoint(), req)
+    const updateArg = update.mock.calls[0][0] as { data: { status: string } }
+    expect(updateArg.data.status).toBe('cancelled')
+  })
+})
+
+// ---------------------------------------------------------------------------
 // localOnly mode — any platform, adapter NOT called
 // ---------------------------------------------------------------------------
 
@@ -400,7 +502,7 @@ describe('createPostDeleteEndpoints — error cases', () => {
     expect(res.status).toBe(404)
   })
 
-  it('returns 400 when the row is not published', async () => {
+  it('returns 400 when the row is not published or queued', async () => {
     const findByID = vi.fn().mockResolvedValue({ ...publishedRow, status: 'failed' })
     const update = vi.fn()
     const req = makeReq({ findByID, update })

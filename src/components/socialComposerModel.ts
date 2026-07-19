@@ -171,6 +171,27 @@ const dateTimeParts = (value: string) => {
 }
 
 /**
+ * Format a Date into the `YYYY-MM-DDTHH:MM` string that
+ * `<input type="datetime-local">` expects as its `min` attribute.
+ *
+ * `new Date().toISOString().slice(0, 16)` returns UTC wall-clock time.
+ * A `datetime-local` input interprets the `min` value in the browser's LOCAL
+ * timezone, so UTC-offset machines see the wrong boundary. This helper reads
+ * the local date-time components from the Date object directly to produce a
+ * string that matches the browser's interpretation of `min`.
+ *
+ * Passing a fixed Date in tests makes the output fully deterministic.
+ */
+export const formatLocalDateTimeMin = (date: Date): string => {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  const hours = String(date.getHours()).padStart(2, '0')
+  const minutes = String(date.getMinutes()).padStart(2, '0')
+  return `${year}-${month}-${day}T${hours}:${minutes}`
+}
+
+/**
  * Compile the composer state into a platform-specific publish input.
  *
  * Media selection rules (strict, no silent fallback):

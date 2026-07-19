@@ -12,9 +12,19 @@ import { errorResponse, getRouteParam, jsonResponse } from '../utilities/http.js
 /**
  * DELETE {basePath}/posts/:postId
  *
- * Soft-deletes a published social-posts row. Two modes:
+ * Two operation modes depending on row status:
  *
- * **Normal mode (default)**
+ * **Cancel mode (status = 'queued')**
+ *   Cancels a queued post without calling any platform adapter (nothing has
+ *   been published yet). Sets status to 'cancelled' and records
+ *   meta.cancelledAt / meta.cancelledBy. Returns { ok, postId, status: 'cancelled' }.
+ *   The cancelled row remains re-claimable for republish-in-place via
+ *   reservePublication (which already includes 'cancelled' in RECLAIMABLE_STATUSES).
+ *
+ * **Soft-delete mode (status = 'published')**
+ *   Two sub-modes:
+ *
+ *   Normal mode (default):
  *   1. Validates the row exists and is in `published` state with an externalId.
  *   2. For Instagram rows: returns HTTP 422 immediately with an actionable
  *      message — Meta's Graph API does not expose a delete endpoint for
@@ -25,7 +35,7 @@ import { errorResponse, getRouteParam, jsonResponse } from '../utilities/http.js
  *   4. Updates the row to status `deleted` and records `meta.deletedAt` and
  *      `meta.deletedBy`. Never hard-deletes the row.
  *
- * **localOnly mode (?localOnly=true)**
+ *   localOnly mode (?localOnly=true):
  *   Skips all upstream platform calls entirely and soft-deletes the local row
  *   only. Sets `meta.deletedLocalOnly: true` to flag that the upstream post
  *   was not removed via the API (e.g. it was already deleted in the platform
@@ -70,10 +80,42 @@ export const createPostDeleteEndpoints = (options: NormalizedPluginOptions): End
           throw new NotFoundError(`social-posts/${postId} not found`)
         }
 
-        // Only published rows with an externalId can be deleted via this endpoint.
+        const userId =
+          req.user && typeof (req.user as { id?: number | string }).id !== 'undefined'
+            ? (req.user as { id: number | string }).id
+            : undefined
+
+        const existingMeta =
+          row.meta && typeof row.meta === 'object' ? (row.meta as Record<string, unknown>) : {}
+
+        // ── Fix 4: Cancel path for queued rows ──────────────────────────────
+        // A queued post has not yet been published. Cancelling it requires no
+        // upstream API call — we simply transition the row to 'cancelled' and
+        // stamp the cancellation metadata. The cancelled row stays re-claimable
+        // for republish-in-place via reservePublication.
+        if (row.status === 'queued') {
+          const cancelledMeta: Record<string, unknown> = {
+            ...existingMeta,
+            cancelledAt: new Date().toISOString(),
+            ...(userId !== undefined ? { cancelledBy: userId } : {}),
+          }
+          await req.payload.update({
+            id: row.id as never,
+            collection: SOCIAL_POSTS_SLUG as never,
+            data: {
+              meta: cancelledMeta,
+              status: 'cancelled',
+            } as never,
+            overrideAccess: true,
+          })
+          return jsonResponse({ ok: true, postId: row.id, status: 'cancelled' })
+        }
+
+        // Only published rows (or queued, handled above) can be acted on via
+        // this endpoint.
         if (row.status !== 'published') {
           throw new ValidationError(
-            `Cannot delete a post with status "${String(row.status)}"; only published posts may be deleted`,
+            `Cannot delete a post with status "${String(row.status)}"; only published or queued posts may be deleted or cancelled`,
           )
         }
         if (!row.externalId) {
@@ -88,8 +130,6 @@ export const createPostDeleteEndpoints = (options: NormalizedPluginOptions): End
         }
 
         // Build the publishedRef from the row fields.
-        const existingMeta =
-          row.meta && typeof row.meta === 'object' ? (row.meta as Record<string, unknown>) : {}
         const publishedRef: PublishedRef = {
           externalId: row.externalId as string,
           externalUrl: typeof row.externalUrl === 'string' ? row.externalUrl : undefined,
@@ -124,15 +164,10 @@ export const createPostDeleteEndpoints = (options: NormalizedPluginOptions): End
 
         // Soft-delete: update the row to status 'deleted'. Record deletion
         // metadata in the existing meta json field.
-        const deletedByUserId =
-          req.user && typeof (req.user as { id?: number | string }).id !== 'undefined'
-            ? (req.user as { id: number | string }).id
-            : undefined
-
         const updatedMeta: Record<string, unknown> = {
           ...existingMeta,
           deletedAt: new Date().toISOString(),
-          ...(deletedByUserId !== undefined ? { deletedBy: deletedByUserId } : {}),
+          ...(userId !== undefined ? { deletedBy: userId } : {}),
           ...(localOnly ? { deletedLocalOnly: true } : {}),
         }
 

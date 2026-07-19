@@ -30,6 +30,19 @@ const isFutureIso = (value: unknown): value is string => {
 }
 
 /**
+ * Return true when `value` is a non-empty ISO string that parses to a
+ * timestamp. Used to detect a scheduledAt that was supplied but is NOT in the
+ * future (past or within the 60 s buffer).
+ */
+const isParsableIso = (value: unknown): value is string => {
+  if (typeof value !== 'string' || value.trim().length === 0) {
+    return false
+  }
+  const ms = Date.parse(value)
+  return !Number.isNaN(ms)
+}
+
+/**
  * Three source-polymorphic endpoints, mounted once per `(platform, sourceKind)`:
  *
  *   GET  {basePath}/:platform/:sourceKind/:sourceId/preview
@@ -127,6 +140,23 @@ export const createPublishEndpoint = (options: NormalizedPluginOptions): Endpoin
       // out before validation/publish so adapters never see it. The
       // remaining fields are the per-adapter publish input.
       const { scheduledAt: rawScheduledAt, ...adapterInput } = body
+
+      // ── Fix 2: explicit past / near-future scheduledAt rejection ─────────
+      // When the caller sends a scheduledAt that is not in the future (or is
+      // within the 60 s grace window), refuse with a 400 ValidationError
+      // instead of silently falling through to an immediate publish. This
+      // prevents a user mistake (e.g. a time already past) from publishing a
+      // live post without the operator's intent.
+      if (rawScheduledAt !== undefined && rawScheduledAt !== null && rawScheduledAt !== '') {
+        if (!isFutureIso(rawScheduledAt)) {
+          const detail = isParsableIso(rawScheduledAt)
+            ? 'The scheduled time is in the past or too close to now (must be at least 60 seconds in the future).'
+            : 'The scheduledAt value is not a valid ISO-8601 date-time string.'
+          throw new ValidationError(
+            `${detail} Pick a future time or omit scheduledAt to publish immediately.`,
+          )
+        }
+      }
 
       const ctx = await resolveSourceContext({
         id: sourceId,
@@ -267,9 +297,22 @@ export const createHistoryEndpoint = (options: NormalizedPluginOptions): Endpoin
         },
       })
 
+      // Fix 3: include scheduledAt in every history row so the UI can show
+      // queued posts with their scheduled time.
+      type RawDoc = Record<string, unknown>
+      const posts = (result.docs as RawDoc[]).map((doc) => ({
+        id: doc.id,
+        externalId: doc.externalId,
+        externalUrl: doc.externalUrl,
+        publishedAt: doc.publishedAt,
+        scheduledAt: doc.scheduledAt ?? null,
+        status: doc.status,
+        title: doc.title,
+      }))
+
       return jsonResponse({
         platform,
-        posts: result.docs,
+        posts,
         source: { id: String(sourceId), kind: sourceKind },
         total: result.totalDocs,
       })

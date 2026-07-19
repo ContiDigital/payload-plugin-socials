@@ -9,6 +9,7 @@ import {
   buildStandaloneInitialState,
   compileComposerInput,
   compileStandalonePublishBody,
+  formatLocalDateTimeMin,
   getSelectedAssets,
   parseComposeResponse,
   pruneSelectedMedia,
@@ -52,6 +53,38 @@ const state = (over: Partial<ComposerState> = {}): ComposerState => ({
   title: 'Pin title',
   videoTitle: 'Video title',
   ...over,
+})
+
+// ---------------------------------------------------------------------------
+// Fix 1: formatLocalDateTimeMin — local-time picker boundary
+// ---------------------------------------------------------------------------
+
+describe('formatLocalDateTimeMin', () => {
+  it('formats a fixed Date using local getters (not UTC)', () => {
+    // Construct a date with known local components.
+    // We use a Date constructed from local-time parts so the test is
+    // timezone-independent: new Date(year, month-1, day, hours, minutes).
+    const local = new Date(2025, 2, 15, 9, 5) // 2025-03-15 09:05 local
+    expect(formatLocalDateTimeMin(local)).toBe('2025-03-15T09:05')
+  })
+
+  it('zero-pads month, day, hours, and minutes', () => {
+    const local = new Date(2024, 0, 3, 8, 4) // 2024-01-03 08:04 local
+    expect(formatLocalDateTimeMin(local)).toBe('2024-01-03T08:04')
+  })
+
+  it('handles December and double-digit components', () => {
+    const local = new Date(2026, 11, 31, 23, 59) // 2026-12-31 23:59 local
+    expect(formatLocalDateTimeMin(local)).toBe('2026-12-31T23:59')
+  })
+
+  it('produces YYYY-MM-DDTHH:MM format matching datetime-local expectations', () => {
+    const local = new Date(2027, 5, 10, 14, 30) // 2027-06-10 14:30 local
+    const result = formatLocalDateTimeMin(local)
+    // Must match the exact pattern a datetime-local input expects for min.
+    expect(result).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/)
+    expect(result).toBe('2027-06-10T14:30')
+  })
 })
 
 // ---------------------------------------------------------------------------
