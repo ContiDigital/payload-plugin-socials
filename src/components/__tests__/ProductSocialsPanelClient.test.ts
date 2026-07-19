@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest'
 
 import type { SocialDraft, SocialDraftMedia } from '../../types/index.js'
-import type { ComposerState, StandaloneComposerState } from '../socialComposerModel.js'
+import type {
+  ComposerState,
+  ComposerTemplateSummary,
+  StandaloneComposerState,
+} from '../socialComposerModel.js'
 
 import {
   acceptedMediaTypes,
@@ -9,6 +13,7 @@ import {
   buildStandaloneInitialState,
   compileComposerInput,
   compileStandalonePublishBody,
+  filterTemplatesForContext,
   formatFromMime,
   formatLocalDateTimeMin,
   getSelectedAssets,
@@ -16,6 +21,7 @@ import {
   mergeDraftMedia,
   normalizeSelectedUploadMedia,
   parseComposeResponse,
+  pickDefaultTemplate,
   pruneSelectedMedia,
   reorderSelectedMedia,
   resolveUploadFileUrl,
@@ -691,6 +697,85 @@ describe('title prepend deduplication', () => {
       draft,
     )
     expect(input.message).toBe('Product 1\n\nThe body.')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Kind-scoped template selection
+// ---------------------------------------------------------------------------
+
+describe('filterTemplatesForContext', () => {
+  const tpl = (
+    over: { id: string } & Partial<ComposerTemplateSummary>,
+  ): ComposerTemplateSummary => ({
+    appliesTo: [],
+    sourceKind: 'product',
+    ...over,
+  })
+
+  it('excludes templates authored for a different source kind', () => {
+    const templates = [
+      tpl({ id: 'p', sourceKind: 'product' }),
+      tpl({ id: 'b', sourceKind: 'blogPost' }),
+    ]
+    expect(filterTemplatesForContext(templates, 'product', 'pinterest').map((t) => t.id)).toEqual([
+      'p',
+    ])
+  })
+
+  it('treats an empty appliesTo as every platform', () => {
+    const templates = [tpl({ id: 'all', appliesTo: [] })]
+    expect(filterTemplatesForContext(templates, 'product', 'instagram').map((t) => t.id)).toEqual([
+      'all',
+    ])
+    expect(filterTemplatesForContext(templates, 'product', 'facebook').map((t) => t.id)).toEqual([
+      'all',
+    ])
+  })
+
+  it('filters by platform when appliesTo is populated', () => {
+    const templates = [
+      tpl({ id: 'pin', appliesTo: ['pinterest'] }),
+      tpl({ id: 'ig', appliesTo: ['instagram'] }),
+    ]
+    expect(filterTemplatesForContext(templates, 'product', 'pinterest').map((t) => t.id)).toEqual([
+      'pin',
+    ])
+  })
+
+  it('combines kind and platform filters', () => {
+    const templates = [
+      tpl({ id: 'a', appliesTo: ['pinterest'], sourceKind: 'product' }),
+      tpl({ id: 'b', appliesTo: ['pinterest'], sourceKind: 'blogPost' }),
+      tpl({ id: 'c', appliesTo: ['instagram'], sourceKind: 'product' }),
+    ]
+    expect(filterTemplatesForContext(templates, 'product', 'pinterest').map((t) => t.id)).toEqual([
+      'a',
+    ])
+  })
+})
+
+describe('pickDefaultTemplate', () => {
+  it('returns the first template flagged isDefault', () => {
+    const templates = [
+      { id: 'a', isDefault: false },
+      { id: 'b', isDefault: true },
+      { id: 'c', isDefault: true },
+    ]
+    expect(pickDefaultTemplate(templates)?.id).toBe('b')
+  })
+
+  it('returns undefined when no template is a default', () => {
+    expect(pickDefaultTemplate([{ id: 'a' }, { id: 'b', isDefault: false }])).toBeUndefined()
+  })
+
+  it('picks the default from a context-filtered list', () => {
+    const templates: ComposerTemplateSummary[] = [
+      { id: 'wrong-kind', appliesTo: [], isDefault: true, sourceKind: 'blogPost' },
+      { id: 'right', appliesTo: ['pinterest'], isDefault: true, sourceKind: 'product' },
+    ]
+    const scoped = filterTemplatesForContext(templates, 'product', 'pinterest')
+    expect(pickDefaultTemplate(scoped)?.id).toBe('right')
   })
 })
 

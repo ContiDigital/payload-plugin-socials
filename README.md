@@ -288,6 +288,8 @@ The composer deliberately does **not** embed Payload's Lexical editor or another
 
 Templates let your team author reusable copy once and fill it per record at compose time. The plugin registers a `social-templates` collection that Payload renders with its built-in admin editor, so template authoring needs no custom UI.
 
+Every template is bound to a collection through its required **Source kind** field. The builder offers that collection's fields, and the composer only shows a template when you are publishing from its collection, so a product template can never appear on a blog post and render empty. The **Default for this collection** checkbox marks one template per source kind that the composer auto-applies when it opens (still respecting the platform filter). Operators can always switch back to "Platform defaults". Only one template per source kind can be the default; saving a new default clears the previous one automatically.
+
 Each template row holds per-channel strings with `{{ variable | filter }}` placeholders:
 
 ```
@@ -316,11 +318,11 @@ const copy = resolveTemplateCopy(templateDoc.templates, ctx, { boardName: 'Statu
 
 ### Template builder
 
-Each copy field in the `social-templates` collection mounts a `SocialTemplateFieldBuilder` component instead of a plain textarea. The builder provides:
+Each copy field in the `social-templates` collection mounts a `SocialTemplateFieldBuilder` component instead of a plain textarea. The builder reads the row's **Source kind** and locks the sample-record picker, token discovery, and live preview to that collection. Until you pick a source kind it shows a short hint and disables preview. It provides:
 
 - **Token picker.** Buttons for every statically-known scope token (`title`, `description`, `material`, `color`, `category`, `dimensions`, `link`, `modelLabel`, `sourceId`, `sourceKind`, `baseTitle`, `baseDescription`). After you select a sample record, any `metadata.*` keys that record exposes are added to the picker dynamically.
 - **Filter menu.** After clicking a token, apply `truncate:N`, `default:...`, `upper`, `lower`, or `trim` in one click. The filter is written into the template string directly.
-- **Live preview.** Enter a record ID in the preview panel and the builder POSTs to `POST {basePath}/templates/preview` every 350ms, showing the rendered output for that field against the real record.
+- **Live preview.** Enter a record ID in the preview panel and the builder POSTs to `POST {basePath}/templates/preview` every 350ms, showing the rendered output for that field against a real record of the bound collection.
 - **Character count.** A per-field count with a warning when the rendered value would exceed the platform limit (100 chars for Pinterest title, 500 for description and alt text, 1500 for GBP summary, 2200 for Instagram caption).
 - **Raw-string toggle.** Switch to a plain input or textarea to hand-write template syntax for advanced cases.
 
@@ -332,12 +334,16 @@ Each copy field in the `social-templates` collection mounts a `SocialTemplateFie
 
 The `transformations` option is the recommended way to customize copy when you need source-kind-aware behaviour. It takes precedence over `copyOverrides` and is resolved at publish and preview time.
 
-Each key is a source kind (for example `'product'`) and each value is a map of field names to transforms. The optional `'*'` key acts as a wildcard and applies to any source kind that has no explicit entry. Precedence from highest to lowest:
+Each key is a source kind (for example `'product'`) and each value is a map of field names to transforms. The optional `'*'` key acts as a wildcard and applies to any source kind that has no explicit entry.
 
-1. `transformations[ctx.sourceKind][field]` — kind-specific
-2. `transformations['*'][field]` — wildcard fallback
-3. `copyOverrides[field]` — legacy function-only overrides (still works)
-4. The built-in default builder
+`transformations` is the code-level per-kind default. Post templates layer on top of it in the composer. Overall precedence from highest to lowest:
+
+1. The template the operator chose in the composer for this source kind
+2. The default template for this source kind (the "Default for this collection" row)
+3. `transformations[ctx.sourceKind][field]` — kind-specific transform
+4. `transformations['*'][field]` — wildcard fallback
+5. `copyOverrides[field]` — legacy function-only overrides (still works)
+6. The built-in default builder
 
 A transform can be either a `{{ variable | filter }}` template string (rendered through the same engine as post templates) or a function that receives the `SocialSourceContext` directly:
 

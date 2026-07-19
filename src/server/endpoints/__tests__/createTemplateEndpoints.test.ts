@@ -65,4 +65,52 @@ describe('createResolvedTemplatesEndpoint', () => {
     })
     expect(find).toHaveBeenCalledWith(expect.objectContaining({ overrideAccess: true }))
   })
+
+  it('exposes sourceKind and isDefault per template and filters the find by kind', async () => {
+    const find = vi.fn().mockResolvedValue({
+      docs: [
+        {
+          id: 'tpl_1',
+          name: 'Launch',
+          appliesTo: ['instagram'],
+          isDefault: true,
+          sourceKind: 'product',
+          templates: { instagramCaption: '{{title}}' },
+        },
+      ],
+    })
+    const req = {
+      payload: { find },
+      routeParams: { sourceId: '7', sourceKind: 'product' },
+      user: { id: 1 },
+    } as unknown as PayloadRequest
+
+    const response = await run(createResolvedTemplatesEndpoint(options), req)
+    const body = (await response.json()) as {
+      templates: Array<{ isDefault?: boolean; sourceKind?: string }>
+    }
+    expect(body.templates[0]).toMatchObject({ isDefault: true, sourceKind: 'product' })
+    expect(find).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { and: [{ enabled: { equals: true } }, { sourceKind: { equals: 'product' } }] },
+      }),
+    )
+  })
+
+  it('defaults isDefault to false and backfills sourceKind for legacy rows', async () => {
+    const find = vi.fn().mockResolvedValue({
+      docs: [{ id: 'tpl_legacy', name: 'Legacy', templates: { instagramCaption: '{{title}}' } }],
+    })
+    const req = {
+      payload: { find },
+      routeParams: { sourceId: '7', sourceKind: 'product' },
+      user: { id: 1 },
+    } as unknown as PayloadRequest
+
+    const response = await run(createResolvedTemplatesEndpoint(options), req)
+    const body = (await response.json()) as {
+      templates: Array<{ isDefault?: boolean; sourceKind?: string }>
+    }
+    expect(body.templates[0]).toMatchObject({ isDefault: false, sourceKind: 'product' })
+  })
 })

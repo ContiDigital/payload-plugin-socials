@@ -1,6 +1,6 @@
-import type { CollectionConfig, PayloadRequest } from 'payload'
+import type { CollectionBeforeChangeHook, CollectionConfig, PayloadRequest, Where } from 'payload'
 
-import type { AuthorizeFn } from '../types/index.js'
+import type { AuthorizeFn, NormalizedPluginOptions } from '../types/index.js'
 
 import { PLATFORM_IDS, PLUGIN_SLUG, SOCIAL_TEMPLATES_SLUG } from '../constants.js'
 
@@ -16,6 +16,72 @@ import { PLATFORM_IDS, PLUGIN_SLUG, SOCIAL_TEMPLATES_SLUG } from '../constants.j
  *
  * Field types are unchanged (text / textarea) so no migration is required.
  */
+
+/**
+ * Context key that short-circuits the single-default enforcement hook so the
+ * cascade update it issues (unsetting `isDefault` on sibling templates) never
+ * re-enters itself.
+ */
+export const SKIP_SINGLE_DEFAULT_CONTEXT_KEY = 'socials:skip-single-default'
+
+/**
+ * Build the `sourceKind` select options from the registered source kinds. The
+ * label prefers the `admin.injectInto` label for that kind (so operators see
+ * "Products" rather than the raw kind slug) and falls back to the kind itself.
+ */
+export const buildSourceKindOptions = (
+  sourceKinds: readonly string[],
+  injectInto: NormalizedPluginOptions['admin']['injectInto'],
+): Array<{ label: string; value: string }> => {
+  const labelByKind = new Map<string, string>()
+  for (const entry of injectInto) {
+    if (entry.label) {
+      labelByKind.set(entry.sourceKind, entry.label)
+    }
+  }
+  return sourceKinds.map((kind) => ({ label: labelByKind.get(kind) ?? kind, value: kind }))
+}
+
+/**
+ * `beforeChange` hook that keeps at most one default template per source kind.
+ * When a row is saved with `isDefault: true`, every other enabled/disabled row
+ * of the same `sourceKind` has its `isDefault` cleared. The cascade update runs
+ * with `overrideAccess` and a context flag so it never triggers this hook again.
+ */
+export const buildSingleDefaultHook = (): CollectionBeforeChangeHook => {
+  return async ({ context, data, originalDoc, req }) => {
+    if (data?.isDefault !== true) {
+      return data
+    }
+    if (context?.[SKIP_SINGLE_DEFAULT_CONTEXT_KEY]) {
+      return data
+    }
+    const sourceKind =
+      typeof data.sourceKind === 'string' && data.sourceKind
+        ? data.sourceKind
+        : (originalDoc?.sourceKind as string | undefined)
+    if (!sourceKind) {
+      return data
+    }
+    const filters: Where[] = [
+      { sourceKind: { equals: sourceKind } },
+      { isDefault: { equals: true } },
+    ]
+    const currentId = originalDoc?.id as number | string | undefined
+    if (currentId !== undefined && currentId !== null) {
+      filters.push({ id: { not_equals: currentId } })
+    }
+    await req.payload.update({
+      collection: SOCIAL_TEMPLATES_SLUG as never,
+      context: { [SKIP_SINGLE_DEFAULT_CONTEXT_KEY]: true },
+      data: { isDefault: false } as never,
+      overrideAccess: true,
+      req,
+      where: { and: filters },
+    })
+    return data
+  }
+}
 
 const buildGate = (authorize: AuthorizeFn | undefined) => {
   return async ({ req }: { req: PayloadRequest }) => {
@@ -52,8 +118,12 @@ const builderField = (
   description: `Template for "${copyField}". Use the builder to pick tokens from the resolved scope and apply filters. Tokens must be mapped by the host's SourceContextResolver to produce output — fields not exposed via the resolver's metadata map will render as empty.`,
 })
 
-export const buildSocialTemplatesCollection = (authorize?: AuthorizeFn): CollectionConfig => {
-  const gate = buildGate(authorize)
+export const buildSocialTemplatesCollection = (
+  options: NormalizedPluginOptions,
+): CollectionConfig => {
+  const gate = buildGate(options.authorize)
+  const sourceKinds = Object.keys(options.sources)
+  const sourceKindOptions = buildSourceKindOptions(sourceKinds, options.admin.injectInto)
   return {
     slug: SOCIAL_TEMPLATES_SLUG,
     access: {
@@ -63,9 +133,9 @@ export const buildSocialTemplatesCollection = (authorize?: AuthorizeFn): Collect
       update: gate,
     },
     admin: {
-      defaultColumns: ['name', 'enabled', 'description'],
+      defaultColumns: ['name', 'sourceKind', 'isDefault', 'enabled'],
       description:
-        'Reusable post templates. Placeholders are filled per source record at compose time.',
+        'Reusable post templates. Each template is bound to a collection (source kind) and its placeholders are filled per source record at compose time.',
       group: 'Socials',
       hidden: ({ user }) => !user,
       useAsTitle: 'name',
@@ -77,6 +147,31 @@ export const buildSocialTemplatesCollection = (authorize?: AuthorizeFn): Collect
         index: true,
         required: true,
         unique: true,
+      },
+      {
+        name: 'sourceKind',
+        type: 'select',
+        admin: {
+          description:
+            'The collection (source kind) this template is built from. The builder offers that collection’s fields, and the composer only shows this template when publishing from that collection.',
+        },
+        dbName: 'tmpl_source_kind',
+        // Required going forward. Existing rows default to the first registered
+        // kind so they validate on next save; review and reassign them.
+        defaultValue: sourceKinds[0],
+        index: true,
+        options: sourceKindOptions,
+        required: true,
+      },
+      {
+        name: 'isDefault',
+        type: 'checkbox',
+        admin: {
+          description:
+            'Default for this collection. When set, the composer auto-applies this template for its source kind (still honoring the platform filter below). Only one template per source kind can be the default.',
+        },
+        defaultValue: false,
+        index: true,
       },
       {
         name: 'description',
@@ -141,6 +236,9 @@ export const buildSocialTemplatesCollection = (authorize?: AuthorizeFn): Collect
         ],
       },
     ],
+    hooks: {
+      beforeChange: [buildSingleDefaultHook()],
+    },
     timestamps: true,
   }
 }
