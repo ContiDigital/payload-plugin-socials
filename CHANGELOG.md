@@ -16,6 +16,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ### Changed
 
+- **`socials-connections` global is now fully hidden from the admin UI.** `admin.hidden` was a function that showed the global to any logged-in user; it is now `true`, so the global never appears in the admin nav or as an editable document view. This global is internal AES-256-GCM token storage, and hand-editing the encrypted envelopes corrupts the tokens. Operators manage connections from the Connections tab in the plugin admin view. API and access behavior are unchanged.
+- **Config-managed connections render as connected with a badge and no action.** The Connections tab now shows platforms whose credentials come from server configuration (system-user or service-account tokens, `managedByConfig: true`) as connected, with their account label and a "Managed by server configuration" badge, and renders no Connect or Disconnect button. Previously these rows showed a disabled "Configured" button. The disconnect endpoint 409s for managed connections, so the UI no longer offers an action that always fails. OAuth-based platforms keep their existing Connect and two-step Disconnect behavior. The row view-model moved into a pure, tested `connectionRowModel.ts` helper.
 - **Dev harness enables image auto-conversion.** `dev/payload.config.ts` now sets `assets: { autoConvert: true, renditionCollection: 'media' }` so local testing exercises the WebP/PNG to JPEG conversion path that production hosts (whose media is not JPEG) must enable.
 
 ### Fixed

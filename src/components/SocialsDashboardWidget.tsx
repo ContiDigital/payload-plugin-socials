@@ -6,6 +6,7 @@ import React, { useCallback, useEffect, useState } from 'react'
 import type { ConnectionState } from '../types/index.js'
 
 import { PLATFORM_IDS, PLATFORM_LABELS, type PlatformId } from '../constants.js'
+import { connectionButtonLabel, describeConnectionRow } from './connectionRowModel.js'
 
 type Props = {
   enabledPlatforms?: string[]
@@ -103,28 +104,15 @@ export const SocialsDashboardWidget: React.FC<Props> = ({ enabledPlatforms }) =>
       ) : (
         <ul style={styles.list}>
           {PLATFORM_IDS.filter((id) => enabled.has(id)).map((id) => {
-            const state = connections[id]
-            const connected = state?.connected === true
-            return (
-              <li key={id} style={styles.row}>
-                <span
-                  aria-hidden="true"
-                  style={{
-                    ...styles.dot,
-                    backgroundColor: connected
-                      ? 'var(--theme-success-500)'
-                      : 'var(--theme-elevation-300)',
-                  }}
-                />
-                <span style={{ flex: 1 }}>
-                  <strong>{PLATFORM_LABELS[id]}</strong>
-                  <small style={{ ...styles.muted, display: 'block' }}>
-                    {connected
-                      ? (state.accountLabel ?? 'Connected')
-                      : (state?.lastError ?? 'Not connected')}
-                  </small>
-                </span>
-                {confirmingDisconnect === id ? (
+            const row = describeConnectionRow(connections[id])
+            const isPending = pending === id
+
+            // Config-managed connections offer no action button; the disconnect
+            // endpoint 409s for them, so we render a badge instead of a control.
+            let affordance: React.ReactNode = null
+            if (row.action !== 'none') {
+              if (confirmingDisconnect === id) {
+                affordance = (
                   <>
                     <button
                       onClick={() => {
@@ -139,11 +127,13 @@ export const SocialsDashboardWidget: React.FC<Props> = ({ enabledPlatforms }) =>
                       Cancel
                     </button>
                   </>
-                ) : (
+                )
+              } else {
+                affordance = (
                   <button
-                    disabled={pending === id || state?.managedByConfig === true}
+                    disabled={isPending}
                     onClick={() => {
-                      if (connected) {
+                      if (row.action === 'disconnect') {
                         setConfirmingDisconnect(id)
                       } else {
                         void connect(id)
@@ -151,15 +141,31 @@ export const SocialsDashboardWidget: React.FC<Props> = ({ enabledPlatforms }) =>
                     }}
                     type="button"
                   >
-                    {pending === id
-                      ? 'Working…'
-                      : state?.managedByConfig
-                        ? 'Configured'
-                        : connected
-                          ? 'Disconnect'
-                          : 'Connect'}
+                    {connectionButtonLabel(row.action, isPending)}
                   </button>
-                )}
+                )
+              }
+            }
+
+            return (
+              <li key={id} style={styles.row}>
+                <span
+                  aria-hidden="true"
+                  style={{
+                    ...styles.dot,
+                    backgroundColor: row.connected
+                      ? 'var(--theme-success-500)'
+                      : 'var(--theme-elevation-300)',
+                  }}
+                />
+                <span style={{ flex: 1 }}>
+                  <strong>{PLATFORM_LABELS[id]}</strong>
+                  <small style={{ ...styles.muted, display: 'block' }}>{row.statusText}</small>
+                </span>
+                {row.showManagedBadge ? (
+                  <span style={styles.badge}>Managed by server configuration</span>
+                ) : null}
+                {affordance}
               </li>
             )
           })}
@@ -170,6 +176,15 @@ export const SocialsDashboardWidget: React.FC<Props> = ({ enabledPlatforms }) =>
 }
 
 const styles: Record<string, React.CSSProperties> = {
+  badge: {
+    backgroundColor: 'var(--theme-elevation-100)',
+    border: '1px solid var(--theme-elevation-150)',
+    borderRadius: 4,
+    color: 'var(--theme-elevation-600)',
+    fontSize: '0.7rem',
+    padding: '0.15rem 0.45rem',
+    whiteSpace: 'nowrap',
+  },
   container: {
     backgroundColor: 'var(--theme-elevation-50)',
     border: '1px solid var(--theme-elevation-150)',
