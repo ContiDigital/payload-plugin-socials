@@ -8,6 +8,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
+### Fixed
+
+- **Pinterest OAuth connection wrongly rejected valid grants.** The token-response scope validation split the granted-scope string on commas only and hard-failed when a required scope appeared absent. Pinterest's authorize request uses comma-separated scopes, but the token response echoes them space-separated (per OAuth 2.0 / RFC 6749), and sometimes omits the field entirely, so every real connection reported all required scopes missing (`user_accounts:read, pins:read, pins:write, boards:read, boards:write`) and refused to save the token. Granted scopes are now parsed on either delimiter, and an absent scope field no longer blocks the connection (a genuinely missing scope still surfaces as a 403 on first publish).
+
 ### Changed
 
 - **BREAKING (template scope): removed the four ecommerce-specific alias tokens `category`, `color`, `material`, and `dimensions`.** These were hardcoded in `buildTemplateScope` to specific metadata keys (`metadata.categoryLabel`, `metadata.googleColor`, `metadata.googleMaterial`, `metadata.dimensions`) left over from the plugin's product-catalog origins. They are meaningless for non-commerce hosts (a blog, an events site) and rendered as permanent empty tokens in the template builder for any source kind that does not expose those exact keys. The template scope now contains only the universal `SocialSourceContext` fields (`title`/`baseTitle`, `description`/`baseDescription`, `link`, `modelLabel`, `sourceId`, `sourceKind`) plus `metadata`. All domain-specific fields flow through `metadata.*`, discovered per source kind. Migration: any template using `{{ category }}`, `{{ color }}`, `{{ material }}`, or `{{ dimensions }}` should switch to the corresponding `{{ metadata.<key> }}` path exposed by that source's resolver.
