@@ -1,25 +1,37 @@
 # payload-plugin-socials
 
-Organic social publishing for [Payload CMS](https://payloadcms.com) v3.
+A social publishing control center for [Payload CMS](https://payloadcms.com) v3.
 
-Compose, preview, schedule, and publish posts to Pinterest, Instagram, Facebook, and Google Business Profile from inside Payload's admin panel, driven by your own content. Real API integrations for every platform, no copy-paste export tabs.
+Compose, preview, template, schedule, publish, and track organic posts across Pinterest, Instagram, Facebook, and Google Business Profile, all from inside Payload's admin panel and driven by the content you already manage. Every platform is a real API integration with encrypted OAuth, idempotent publishing, and a full audit trail. No copy-paste export tabs, no manual mode.
 
-**Extracted from production at [Fine's Gallery](https://finesgallery.com).** This plugin began as the Pinterest publishing engine behind Fine's Gallery, a luxury marble and bronze retailer, and was generalized into a four-platform plugin. The Pinterest path has run in production against real catalogs; Instagram and Facebook are validated end to end against the live Meta Graph API.
+**Running in production at [Fine's Gallery](https://finesgallery.com).** This plugin powers real social publishing for Fine's Gallery, a 30-year luxury marble and bronze retailer doing $2.4M/year, where staff turn products, projects, and collections into Pinterest pins and Instagram and Facebook posts without leaving the CMS. It began as the Pinterest engine behind that store and was generalized into the four-platform plugin documented here.
 
-Anything Fine's-specific (segments, catalog feeds, product enrichment) stays in the host application. The plugin ships only the reusable machinery: the composer, the platform adapters, encrypted token storage, scheduling, and templates.
+The plugin ships the reusable machinery and nothing else: the composer, the platform adapters, encrypted token storage, the template engine, scheduling, and the audit collection. Anything application-specific (segments, catalog feeds, product enrichment) stays in your host code, reached through the source resolvers you write.
+
+## Why it exists
+
+Publishing the same catalog to four networks by hand is slow, error-prone, and impossible to audit. Off-the-shelf schedulers live outside your data and can't see your products, prices, or media. This plugin closes that gap:
+
+- **Your content is the source.** Open a product, a blog post, or a project and publish it directly. Copy and media come from a resolver you write, so a post is always in sync with the record.
+- **One composer, every platform.** The same panel drives Pinterest boards, Facebook Pages, Instagram feeds, Reels, Stories, and Carousels, and Google Business Profile posts, with a live per-platform preview and per-platform character limits.
+- **Publish once, safely.** Every publish is idempotent and audited; re-publishing the same content returns the existing post instead of duplicating it.
+- **Templated, on-brand copy.** Operator-defined transformations and staff-editable templates keep voice consistent across thousands of posts.
+- **Built for real infrastructure.** Encrypted tokens, access control on every surface, format-safe media, and scheduling that plugs into whatever you already run.
 
 ## What the plugin does
 
 When enabled, the plugin:
 
-1. Adds a **Socials** tab to any collection you choose, with a per-record composer: pick a platform, pick a destination (board, Page, IG account, location), fill in copy and media, preview, and publish or schedule.
-2. Mounts a standalone composer at `/admin/socials` for posting ad-hoc content that isn't tied to a document.
-3. Registers a `social-posts` collection (one audited, idempotent row per publish) and a `social-templates` collection (reusable, per-collection copy templates).
-4. Stores OAuth tokens encrypted at rest (AES-256-GCM) in a hidden `socials-connections` global.
-5. Exposes a full REST surface under `/api/socials/*`: OAuth, destination discovery, preview, publish, history, delete, and scheduling.
-6. Defines the scheduled-publish, insights-refresh, and connection-refresh tasks. You wire the trigger (Payload cron, EventBridge, a worker loop, whatever you run).
+1. Adds a **Socials** tab to any collection you choose, with a per-record composer: pick a platform, pick a destination (board, Page, IG account, location), pick a format, choose and order media, write or template the copy, watch a live preview, then publish or schedule.
+2. Mounts a **standalone composer** at `/admin/socials` for ad-hoc posts that aren't tied to a document, publishable to several channels at once.
+3. Registers a `social-posts` collection (one audited, idempotent row per publish, with per-platform status, external IDs, and insights) and a `social-templates` collection (reusable copy templates bound to a source kind).
+4. Stores OAuth tokens **encrypted at rest** (AES-256-GCM) in a hidden `socials-connections` global, with key rotation support.
+5. Exposes a **full REST surface** under `/api/socials/*`: OAuth, destination discovery, preview, validate, publish, history, delete, insights, and scheduling.
+6. Enforces **access control** on every endpoint and every admin surface through your own `authorize` function. Users you reject see nothing at all.
+7. Handles **platform media rules** automatically: pre-publish format validation and optional WebP/AVIF to JPEG transcoding for the platforms that demand it.
+8. Defines the **scheduled-publish, insights-refresh, and connection-refresh** tasks. You wire the trigger (Payload cron, EventBridge, a worker loop, whatever you run).
 
-Everything is driven by **source resolvers** you write: small functions that map one of your documents (a product, a blog post, a project) into a channel-agnostic shape the composer understands. Register a resolver per collection kind and the composer works identically across all of them.
+Everything is driven by **source resolvers** you write: small functions that map one of your documents into a channel-agnostic shape the composer understands. Register a resolver per collection kind and the composer, templates, and copy builders work identically across all of them.
 
 ## Requirements
 
@@ -33,12 +45,14 @@ pnpm add payload-plugin-socials
 
 ## Platform maturity
 
-| Platform                    | Status         | Notes                                                                                                                                                                                                                                                                                        |
-| --------------------------- | -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Pinterest**               | Production     | The originating integration. OAuth, boards, pins (image + video), insights.                                                                                                                                                                                                                  |
-| **Facebook Pages**          | Validated live | Text, link, photo, multi-photo, video. Verified against the live Graph API.                                                                                                                                                                                                                  |
-| **Instagram Business**      | Validated live | Image, video, Reels, Stories, Carousel. Verified against the live Graph API.                                                                                                                                                                                                                 |
-| **Google Business Profile** | Experimental   | LocalPosts (Standard, Event, Offer, Alert) implemented to spec, not yet verified against the live API. GBP posting requires Google's Basic API Access approval per host, so validate in your own approved project. See [docs/google-business-profile.md](./docs/google-business-profile.md). |
+| Platform                    | Status         | Capabilities                                                                                                                                                                                                                                                                |
+| --------------------------- | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Pinterest**               | **Production** | OAuth, board discovery and creation, image and video pins, insights. The originating integration, running against real catalogs.                                                                                                                                            |
+| **Facebook Pages**          | **Production** | Text, link, single photo, multi-photo, and video posts. Live at Fine's Gallery via a Business Manager system-user token.                                                                                                                                                    |
+| **Instagram Business**      | **Production** | Image, video, Reels, Stories, and Carousel posts. Live at Fine's Gallery via a Business Manager system-user token.                                                                                                                                                          |
+| **Google Business Profile** | Experimental   | LocalPosts (Standard, Event, Offer, Alert) implemented to spec, not yet exercised against the live API. GBP posting requires Google's Basic API Access approval per host, so validate in your own approved project. See [the GBP guide](./docs/google-business-profile.md). |
+
+Three of the four platforms are live in production. Google Business Profile is code-complete and gated only by Google's per-host access approval, which every GBP integrator obtains independently.
 
 ## Minimal setup
 
@@ -110,6 +124,71 @@ pnpm payload migrate:create socials && pnpm payload migrate
 ```
 
 That mounts the REST surface under `/api/socials/*`, adds a Socials tab to your products collection, registers the `social-posts` and `social-templates` collections and the `socials-connections` global, and adds the `/admin/socials` route. See [docs/installation.md](./docs/installation.md) for the full walkthrough.
+
+## Configuration reference
+
+### Required options
+
+| Option          | Type                                    | Description                                                               |
+| --------------- | --------------------------------------- | ------------------------------------------------------------------------- |
+| `encryptionKey` | `string \| Buffer`                      | 32-byte key (hex or base64) for encrypting stored OAuth tokens            |
+| `authorize`     | `({ req, scope }) => boolean`           | Access control for the API and admin surfaces; `scope` is admin/publisher |
+| `sources`       | `Record<string, SourceContextResolver>` | At least one resolver, keyed by source kind                               |
+| `platforms`     | `object`                                | At least one platform configured (Pinterest, Facebook, Instagram, GBP)    |
+
+### All options
+
+```ts
+payloadPluginSocials({
+  // --- Required ---
+  encryptionKey: string | Buffer,                 // 32 bytes, hex or base64
+  authorize: ({ req, scope }) => boolean | Promise<boolean>,
+  sources: Record<string, SourceContextResolver>, // one per source kind
+  platforms: {
+    pinterest?: { clientId, clientSecret, redirectUri, environment?: 'production' | 'sandbox' },
+    facebook?:  { appId, appSecret, systemUserAccessToken?, redirectUri?, apiVersion? },
+    instagram?: { appId, appSecret, systemUserAccessToken?, redirectUri?, apiVersion? },
+    gbp?:       { clientId, clientSecret, redirectUri, serviceAccount? },
+  },
+
+  // --- Admin UI ---
+  admin?: {
+    mode?: 'route' | 'dashboard' | 'both' | 'headless',  // default: 'route'
+    route?: `/${string}`,                                // default: '/socials'
+    navLabel?: string,                                   // default: 'Socials'
+    injectInto?: Array<{ collection, sourceKind, label?, tabPosition? }>,
+  },
+
+  // --- Copy ---
+  transformations?: SocialsTransformations,  // config-first, per-source-kind copy
+  copyOverrides?: SocialsCopyOverrides,       // simple function overrides
+
+  // --- Image pipeline ---
+  assets?: {
+    autoConvert?: boolean,          // transcode disallowed formats to JPEG
+    renditionCollection?: string,   // upload collection for converted renditions
+    jpegQuality?: number,           // default: 82
+    preflight?: boolean,            // default: true; validate formats before publish
+  },
+
+  // --- Scheduling ---
+  scheduling?: {
+    internalApiKey?: string,
+    autoRun?: { cron, insightsRefreshCron?, connectionRefreshCron?, queue? },
+    sweepBatchSize?: number,
+    connectionRefreshWindowSeconds?: number,
+    insightsRefreshWindowSeconds?: number,
+  },
+
+  // --- API + operations ---
+  api?: { basePath?: `/${string}` },  // default: '/socials'
+  rateLimit?: SocialsRateLimitConfig, // concurrency, retries, backoff, distributed store
+  webhooks?: SocialsWebhookConfig,    // optional comment/mention receivers
+  previousEncryptionKeys?: (string | Buffer)[],  // for key rotation
+  testMode?: boolean,                 // e.g. Pinterest sandbox
+  disabled?: boolean,                 // build config without the plugin active
+})
+```
 
 ## Source resolvers
 
@@ -271,14 +350,31 @@ Per-platform setup, scopes, and gotchas live in the platform guides:
 - [Facebook](./docs/facebook.md)
 - [Google Business Profile](./docs/google-business-profile.md)
 
+## The composer
+
+The composer is where the work happens, and it adapts to each platform:
+
+- **Platform tabs** switch between Pinterest, Instagram, Facebook, and GBP, each with its own destination picker (board, Page, IG account, location), format selector, and copy fields. State is kept per platform, so you can tune a post for each network before publishing.
+- **Format-aware fields.** Choosing a format (Reel, Carousel, Offer, and so on) reshapes the form and the accepted media. Selecting an image format hides video, and vice versa; incompatible selections are pruned with a notice instead of failing at publish.
+- **Media pool with ordering.** Images and videos from the resolver, plus anything added from the media library or a URL, share one pool across the platform tabs. For multi-asset formats (Carousel, multi-photo) you drag or arrow-key to set the exact order, shown with numbered badges.
+- **Live preview.** A per-platform preview renders the title, body, link, and selected media as they will appear, updating as you type.
+- **Character limits and validation** are enforced per platform in the UI, and again server-side at publish, so limits are never silently exceeded.
+
 ## Publishing
 
-From a document's Socials tab or the standalone composer: choose a platform, choose a destination, review the preview, and publish. Every publish is idempotent. The plugin computes a per-platform key from `(platform, source, destination, primary asset)` and upserts a `social-posts` row on it, so publishing the same content twice returns the existing post instead of duplicating it.
+From a document's Socials tab or the standalone composer: choose a platform and destination, review the preview, and publish. Every publish is **idempotent and audited**. The plugin computes a per-platform key from `(platform, source, destination, primary asset)` and upserts a `social-posts` row on it, so publishing the same content twice returns the existing post instead of duplicating it. Each row records the platform, destination, status, external ID and URL, and a content fingerprint, giving you a complete, queryable history of what was posted where.
 
-Programmatic publishing is available too:
+Programmatic publishing is available for automations and scripts:
 
 ```ts
 import { composeAndPublish } from 'payload-plugin-socials'
+
+const result = await composeAndPublish({
+  payload,
+  platform: 'pinterest',
+  source: { kind: 'product', id: 42 },
+  input: { boardId: '...' /* platform-specific fields */ },
+})
 ```
 
 ### Deleting a post
@@ -311,6 +407,18 @@ assets: {
 The plugin detects the true format by magic bytes, transcodes to JPEG with sharp, uploads the rendition under a deterministic name (re-publishes reuse it), and sends the platform the rendition URL. Idempotency keys always derive from the original URL, so conversion never fragments post identity.
 
 The rendition collection must not itself re-encode. Point it at a plain upload collection with no `formatOptions`, or Payload will convert the plugin's JPEG right back. Full example in [docs/installation.md](./docs/installation.md).
+
+## Insights and analytics
+
+The plugin can pull engagement data back from each platform and snapshot it onto the `social-posts` row, so performance lives next to the post that produced it. The `socialInsightsRefresh` task walks published posts in a configurable window per platform, calls each adapter's insights endpoint, and stores the result on `insightsSnapshot` with a fetched-at timestamp. Trigger it on a schedule alongside the publish sweep. Pinterest pin metrics, Facebook and Instagram post metrics, and GBP LocalPost metrics are all supported by their adapters.
+
+## Admin surfaces
+
+- **Per-record Socials tab** on every injected collection: the full composer, plus a history list of everything published from that record with delete and reconcile actions.
+- **Standalone composer** at `/admin/socials`: compose one post and publish it to multiple channels at once, with a connections panel showing the health of each platform.
+- **Dashboard widget** (when `admin.mode` includes it): connection status at a glance.
+
+Every one of these is gated by `authorize`, styled with Payload's theme variables, and keyboard-navigable.
 
 ## Access control
 
@@ -371,6 +479,115 @@ import type {
 
 // payload-plugin-socials/client — admin components (for manual placement)
 // payload-plugin-socials/rsc    — server components
+```
+
+## Production configuration example
+
+A complete configuration publishing from several collections to all four platforms, with templated copy, automatic image conversion, and scheduling. This is the shape of a real deployment.
+
+```ts
+import { payloadPluginSocials } from 'payload-plugin-socials'
+
+const base = process.env.PUBLIC_URL!
+
+payloadPluginSocials({
+  encryptionKey: process.env.SOCIALS_ENCRYPTION_KEY!,
+
+  authorize: async ({ req, scope }) => {
+    const role = req.user?.role
+    if (!role) return false
+    if (scope === 'admin') return ['admin', 'owner'].includes(role)
+    return ['admin', 'owner', 'editor', 'marketing'].includes(role)
+  },
+
+  // Publish from products, blog posts, and projects. Each resolver maps a
+  // document into the channel-agnostic shape the composer understands.
+  sources: {
+    product: async ({ payload, id }) => {
+      const p = await payload.findByID({ collection: 'products', id, depth: 1 })
+      return {
+        sourceId: String(p.id),
+        sourceKind: 'product',
+        baseTitle: p.title,
+        baseDescription: p.description ?? '',
+        link: `${base}/products/${p.slug}`,
+        images: p.images.map((m, i) => ({
+          url: m.url,
+          role: i === 0 ? 'main' : 'detail',
+          format: m.mimeType?.split('/')[1],
+        })),
+        metadata: { material: p.material, price: p.price, sku: p.sku },
+      }
+    },
+    blogPost: async ({ payload, id }) => {
+      const post = await payload.findByID({ collection: 'posts', id, depth: 1 })
+      return {
+        sourceId: String(post.id),
+        sourceKind: 'blogPost',
+        baseTitle: post.title,
+        baseDescription: post.excerpt ?? '',
+        link: `${base}/blog/${post.slug}`,
+        images: post.heroImage?.url ? [{ url: post.heroImage.url, role: 'main' }] : [],
+        metadata: { author: post.author?.name, published: post.publishedOn },
+      }
+    },
+    project: async ({ payload, id }) => {
+      const project = await payload.findByID({ collection: 'projects', id, depth: 1 })
+      return {
+        sourceId: String(project.id),
+        sourceKind: 'project',
+        baseTitle: project.title,
+        baseDescription: project.summary ?? '',
+        link: `${base}/work/${project.slug}`,
+        images: (project.gallery ?? []).map((m) => ({ url: m.url, role: 'main' })),
+        metadata: { location: project.location, completedAt: project.date },
+      }
+    },
+  },
+
+  // Operator-set default copy, per source kind.
+  transformations: {
+    product: {
+      pinterestTitle: '{{ title }} | {{ metadata.material }}',
+      instagramCaption: '{{ title }}\n\n{{ description | truncate:2000 }}',
+    },
+    '*': {
+      facebookMessage: '{{ title }}\n\n{{ description | truncate:400 }}',
+    },
+  },
+
+  // Convert non-JPEG media so Instagram and Facebook always get JPEG.
+  assets: { autoConvert: true, renditionCollection: 'social-renditions' },
+
+  admin: {
+    mode: 'both',
+    injectInto: [
+      { collection: 'products', sourceKind: 'product' },
+      { collection: 'posts', sourceKind: 'blogPost' },
+      { collection: 'projects', sourceKind: 'project' },
+    ],
+  },
+
+  platforms: {
+    pinterest: {
+      clientId: process.env.PINTEREST_APP_ID!,
+      clientSecret: process.env.PINTEREST_APP_SECRET!,
+      redirectUri: `${base}/api/socials/pinterest/oauth/callback`,
+    },
+    facebook: {
+      appId: process.env.META_APP_ID!,
+      appSecret: process.env.META_APP_SECRET!,
+      systemUserAccessToken: process.env.META_SYSTEM_USER_TOKEN!,
+    },
+    instagram: {
+      appId: process.env.META_APP_ID!,
+      appSecret: process.env.META_APP_SECRET!,
+      systemUserAccessToken: process.env.META_SYSTEM_USER_TOKEN!,
+    },
+  },
+
+  scheduling: { internalApiKey: process.env.SOCIALS_INTERNAL_API_KEY! },
+})
 ```
 
 ## Documentation
