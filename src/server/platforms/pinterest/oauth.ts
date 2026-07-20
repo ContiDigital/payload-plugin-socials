@@ -78,6 +78,19 @@ export type CallbackResult = {
 
 const REQUIRED_SCOPES_FALLBACK = ['pins:read', 'pins:write', 'user_accounts:read'] as const
 
+/**
+ * Split the token response's `scope` string into scopes. Pinterest's authorize
+ * request uses comma-separated scopes, but the token response echoes them
+ * space-separated (per OAuth 2.0 / RFC 6749), and some responses omit the field
+ * entirely. Split on either delimiter so the grant is read correctly whichever
+ * form Pinterest returns; an absent field yields an empty list.
+ */
+export const parseGrantedScopes = (scope: string | undefined): string[] =>
+  (scope ?? '')
+    .split(/[\s,]+/)
+    .map((s) => s.trim())
+    .filter(Boolean)
+
 export const exchangeCodeForTokens = async (args: {
   code: string
   options: NormalizedPluginOptions
@@ -125,15 +138,18 @@ export const exchangeCodeForTokens = async (args: {
   }
 
   const data = (await tokenResponse.json()) as PinterestTokenResponse
-  const grantedScopes = (data.scope ?? '')
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean)
+  const grantedScopes = parseGrantedScopes(data.scope)
 
-  // Hard-fail when required scopes aren't granted — otherwise the publish
-  // path silently 403s later.
+  // Hard-fail when required scopes are demonstrably absent — otherwise the
+  // publish path silently 403s later. But ONLY when Pinterest actually returned
+  // a scope list: the token response `scope` field is optional (and, when
+  // present, OAuth 2.0 / RFC 6749 delimits it with spaces, while the authorize
+  // request uses commas), so an empty parse means "Pinterest did not echo the
+  // grant", not "nothing was granted". Blocking a valid token on a missing
+  // echo would make every real connection fail; a genuinely missing scope
+  // surfaces as a 403 on first publish instead.
   const required = cfg.scopes.length > 0 ? cfg.scopes : REQUIRED_SCOPES_FALLBACK
-  const missing = required.filter((scope) => !grantedScopes.includes(scope))
+  const missing = grantedScopes.length > 0 ? required.filter((s) => !grantedScopes.includes(s)) : []
   if (missing.length > 0) {
     const err = new PlatformApiError({
       message: `Pinterest granted scopes are missing required entries: ${missing.join(', ')}`,

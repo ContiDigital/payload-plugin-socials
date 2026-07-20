@@ -13,6 +13,7 @@ import { recordConnectionError, saveCredentials } from '../../../services/connec
 import {
   buildAuthorizeUrl,
   exchangeCodeForTokens,
+  parseGrantedScopes,
   STATE_COOKIE_NAME,
   STATE_COOKIE_TTL_SECONDS,
 } from '../oauth.js'
@@ -126,7 +127,7 @@ describe('pinterest oauth — exchangeCodeForTokens', () => {
     expect(saveCredentials).not.toHaveBeenCalled()
   })
 
-  it('hard-fails when a required scope was not granted', async () => {
+  it('hard-fails when a required scope was genuinely not granted', async () => {
     fetchMock.mockResolvedValueOnce(
       okJson({ access_token: 'AT', expires_in: 100, scope: 'pins:read', token_type: 'bearer' }),
     )
@@ -135,6 +136,42 @@ describe('pinterest oauth — exchangeCodeForTokens', () => {
     )
     expect(recordConnectionError).toHaveBeenCalled()
     expect(saveCredentials).not.toHaveBeenCalled()
+  })
+
+  it('accepts SPACE-delimited granted scopes (real Pinterest token response)', async () => {
+    fetchMock
+      .mockResolvedValueOnce(
+        okJson({
+          access_token: 'AT',
+          expires_in: 100,
+          refresh_token: 'RT',
+          // OAuth 2.0 delimits the token-response scope with spaces, not commas.
+          scope: 'pins:read pins:write user_accounts:read',
+          token_type: 'bearer',
+        }),
+      )
+      .mockResolvedValueOnce(okJson({ id: 'acct', username: 'finesgallery' }))
+    await exchangeCodeForTokens({ code: 'c', options, payload, req })
+    expect(recordConnectionError).not.toHaveBeenCalled()
+    expect(saveCredentials).toHaveBeenCalled()
+  })
+
+  it('does not block the connection when Pinterest omits the scope field', async () => {
+    fetchMock
+      .mockResolvedValueOnce(
+        okJson({ access_token: 'AT', expires_in: 100, refresh_token: 'RT', token_type: 'bearer' }),
+      )
+      .mockResolvedValueOnce(okJson({ id: 'acct', username: 'finesgallery' }))
+    await exchangeCodeForTokens({ code: 'c', options, payload, req })
+    expect(saveCredentials).toHaveBeenCalled()
+  })
+
+  it('parseGrantedScopes handles comma, space, mixed, and absent forms', () => {
+    expect(parseGrantedScopes('a:read,b:write')).toEqual(['a:read', 'b:write'])
+    expect(parseGrantedScopes('a:read b:write')).toEqual(['a:read', 'b:write'])
+    expect(parseGrantedScopes('a:read, b:write   c:read')).toEqual(['a:read', 'b:write', 'c:read'])
+    expect(parseGrantedScopes('')).toEqual([])
+    expect(parseGrantedScopes(undefined)).toEqual([])
   })
 
   it('still succeeds when the best-effort account fetch fails', async () => {
