@@ -177,8 +177,7 @@
 .socials-composer__asset--draggable {
   cursor: grab;
 }
-/* Bug 1: "Video" kind label moved to top-right so it never collides with the
-   order badge (top-left) or the arrow overlay (bottom). */
+/* Keep the media label clear of the order badge and controls. */
 .socials-composer__asset-kind {
   background: #000b;
   border-radius: 3px;
@@ -190,8 +189,7 @@
   pointer-events: none;
   position: absolute;
 }
-/* Bug 2: full-tile transparent toggle so the wrapping div can host the order
-   badge and arrow buttons without nesting interactive elements. */
+/* The wrapping element hosts sibling controls without nesting buttons. */
 .socials-composer__asset-toggle {
   background: transparent;
   border: 0;
@@ -246,7 +244,6 @@
   opacity: 0.35;
 }
 
-/* Fix A: lightweight video placeholder (no eager frame paint / no fetch). */
 .socials-composer__video-placeholder {
   align-items: center;
   background: var(--theme-elevation-100);

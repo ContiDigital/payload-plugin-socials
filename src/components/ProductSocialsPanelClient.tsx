@@ -44,8 +44,6 @@ type Props = {
   sourceKind?: string
 }
 type Destination = { id: string; label: string }
-// Fix 3: scheduledAt is now included in history rows so queued posts
-// can display their scheduled time in the history list.
 type HistoryRow = {
   externalUrl?: string
   id: number | string
@@ -124,17 +122,6 @@ const inferFormat = (url: string, mimeType?: string): string | undefined => {
   return ext || undefined
 }
 
-// ---------------------------------------------------------------------------
-// Fix A: load-on-demand video preview
-//
-// Large, non-faststart mp4s (moov atom at the end) cannot yield a first frame
-// to a bare <video preload="metadata"> without downloading most of the file, so
-// eager frame painting renders blank. We never mount a frame-painting <video>
-// for tiles; tiles show a lightweight placeholder (or the asset's poster image
-// when present) with no fetch on mount. The big preview stays a placeholder
-// until the operator clicks "Load video preview".
-// ---------------------------------------------------------------------------
-
 const VideoGlyph: React.FC = () => (
   <svg
     aria-hidden="true"
@@ -207,8 +194,7 @@ const SourceComposerAuthorized: React.FC<{ sourceKind: string }> = ({ sourceKind
   const { id } = useDocumentInfo()
   const { config } = useConfig()
 
-  // Fix 1: read from config.admin?.custom (serialized to browser) instead of
-  // config.custom (stripped by Payload 3.86 serverOnlyConfigProperties).
+  // Payload serializes plugin client configuration under admin.custom.
   const socials = asRecord(asRecord(config.admin?.custom)?.socials)
 
   const enabledPlatforms = Array.isArray(socials?.enabledPlatforms)
@@ -219,6 +205,7 @@ const SourceComposerAuthorized: React.FC<{ sourceKind: string }> = ({ sourceKind
     : []
   const [platform, setPlatform] = useState<PlatformId>(enabledPlatforms[0] ?? 'pinterest')
   const [envelopes, setEnvelopes] = useState<Partial<Record<PlatformId, PreviewEnvelope>>>({})
+  const envelopesRef = useRef(envelopes)
   const [states, setStates] = useState<Partial<Record<PlatformId, ComposerState>>>({})
   const [destinations, setDestinations] = useState<Destination[]>([])
   const [templates, setTemplates] = useState<ResolvedTemplate[]>([])
@@ -237,13 +224,9 @@ const SourceComposerAuthorized: React.FC<{ sourceKind: string }> = ({ sourceKind
   // Two-step delete/cancel/mark-deleted confirm: stores the post id that is armed.
   const [confirmingDeleteId, setConfirmingDeleteId] = useState<number | string>()
   const [deletingId, setDeletingId] = useState<number | string>()
-  // Bug 3: user-added media (Add URL / Media library) lives at the composer
-  // level, NOT inside a per-platform envelope, so the POOL is shared across
-  // every platform tab. Only `selectedMedia` (in each ComposerState) is
-  // per-platform.
+  // The media pool is shared while selection and ordering remain per platform.
   const [extraMedia, setExtraMedia] = useState<SocialDraftMedia[]>([])
 
-  // Fix 5 (source): destructure closeDrawer from the tuple.
   const [ListDrawer, , { closeDrawer, openDrawer }] = useListDrawer({
     collectionSlugs: undefined as never,
     uploads: true,
@@ -252,7 +235,6 @@ const SourceComposerAuthorized: React.FC<{ sourceKind: string }> = ({ sourceKind
   // URL input state
   const [urlInput, setUrlInput] = useState('')
   const [urlTypeOverride, setUrlTypeOverride] = useState<'image' | 'video'>('image')
-  // Bug 2: index (within selectedMedia) of the tile currently being dragged.
   const [dragFrom, setDragFrom] = useState<null | number>(null)
 
   const apiRoute = typeof config.routes?.api === 'string' ? config.routes.api : '/api'
@@ -265,9 +247,7 @@ const SourceComposerAuthorized: React.FC<{ sourceKind: string }> = ({ sourceKind
   )
   const envelope = envelopes[platform]
   const state = states[platform]
-  // Bug 3: the effective media pool for the active tab = resolver media concat
-  // the shared user-added media, deduped by url. Everything downstream
-  // (selection, pruning, reorder, compile, preview) operates on this draft.
+  // Resolver and operator media remain separate so cached previews are immutable.
   const mergedDraft = useMemo(
     () =>
       envelope
@@ -279,6 +259,10 @@ const SourceComposerAuthorized: React.FC<{ sourceKind: string }> = ({ sourceKind
     () => (state && mergedDraft ? compileComposerInput(platform, state, mergedDraft) : undefined),
     [mergedDraft, platform, state],
   )
+
+  useEffect(() => {
+    envelopesRef.current = envelopes
+  }, [envelopes])
 
   const updateState = useCallback(
     (patch: Partial<ComposerState>): void => {
@@ -343,15 +327,12 @@ const SourceComposerAuthorized: React.FC<{ sourceKind: string }> = ({ sourceKind
     [sourceBase],
   )
 
-  // Fix 4: cache-first envelope loading. Only fetch the preview when no
-  // envelope exists for this platform yet. This prevents overwriting media
-  // the user added via Add URL / Media library on tab return.
+  // Cache previews per platform so tab switches preserve operator state.
   useEffect(() => {
     if (!id) {
       return
     }
-    // Skip fetch if an envelope already exists for this platform.
-    if (!shouldFetchEnvelope(envelopes, platform)) {
+    if (!shouldFetchEnvelope(envelopesRef.current, platform)) {
       return
     }
     const controller = new AbortController()
@@ -387,10 +368,7 @@ const SourceComposerAuthorized: React.FC<{ sourceKind: string }> = ({ sourceKind
     }
     void load()
     return () => controller.abort()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, platform, sourceBase])
-  // Note: envelopes intentionally omitted from deps — this effect is
-  // cache-first: once an envelope exists it is never re-fetched by this effect.
 
   useEffect(() => {
     if (!id) {
@@ -497,28 +475,31 @@ const SourceComposerAuthorized: React.FC<{ sourceKind: string }> = ({ sourceKind
     }
   }, [input, sourceBase])
 
-  const applyTemplate = (templateId: string): void => {
-    setSelectedTemplateId(templateId)
-    const template = templates.find((candidate) => String(candidate.id) === templateId)
-    if (!template) {
-      return
-    }
-    const resolved = template.resolved
-    if (platform === 'pinterest') {
-      const tags = resolved.pinterestHashtags?.join(' ')
-      updateState({
-        altText: resolved.pinterestAltText ?? state?.altText,
-        copy: [resolved.pinterestDescription, tags].filter(Boolean).join('\n\n') || state?.copy,
-        title: resolved.pinterestTitle ?? state?.title,
-      })
-    } else if (platform === 'instagram' && resolved.instagramCaption) {
-      updateState({ copy: resolved.instagramCaption })
-    } else if (platform === 'facebook' && resolved.facebookMessage) {
-      updateState({ copy: resolved.facebookMessage })
-    } else if (platform === 'gbp' && resolved.gbpSummary) {
-      updateState({ copy: resolved.gbpSummary })
-    }
-  }
+  const applyTemplate = useCallback(
+    (templateId: string): void => {
+      setSelectedTemplateId(templateId)
+      const template = templates.find((candidate) => String(candidate.id) === templateId)
+      if (!template) {
+        return
+      }
+      const resolved = template.resolved
+      if (platform === 'pinterest') {
+        const tags = resolved.pinterestHashtags?.join(' ')
+        updateState({
+          altText: resolved.pinterestAltText ?? state?.altText,
+          copy: [resolved.pinterestDescription, tags].filter(Boolean).join('\n\n') || state?.copy,
+          title: resolved.pinterestTitle ?? state?.title,
+        })
+      } else if (platform === 'instagram' && resolved.instagramCaption) {
+        updateState({ copy: resolved.instagramCaption })
+      } else if (platform === 'facebook' && resolved.facebookMessage) {
+        updateState({ copy: resolved.facebookMessage })
+      } else if (platform === 'gbp' && resolved.gbpSummary) {
+        updateState({ copy: resolved.gbpSummary })
+      }
+    },
+    [platform, state?.altText, state?.copy, state?.title, templates, updateState],
+  )
 
   // Auto-apply the default template for a platform the first time its composer
   // state is ready. Runs once per platform (autoAppliedRef guard) so switching
@@ -540,8 +521,7 @@ const SourceComposerAuthorized: React.FC<{ sourceKind: string }> = ({ sourceKind
     if (preferred) {
       applyTemplate(String(preferred.id))
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [templatesLoaded, platform, states, templates, sourceKind])
+  }, [applyTemplate, platform, sourceKind, states, templates, templatesLoaded])
 
   const toggleMedia = (url: string): void => {
     if (!state) {
@@ -557,11 +537,7 @@ const SourceComposerAuthorized: React.FC<{ sourceKind: string }> = ({ sourceKind
     updateState({ selectedMedia: selected })
   }
 
-  // Fix 5 (source): call closeDrawer before processing selection so the
-  // drawer closes immediately. Payload's ListDrawer does not auto-close.
-  // Bug 1: URL normalization is delegated to normalizeSelectedUploadMedia so a
-  // relative or url-less upload doc still yields an absolute, playable src.
-  // Bug 3: the asset lands in the shared extraMedia pool, not the envelope.
+  // Payload's ListDrawer does not close itself after selection.
   const handleLibrarySelect = useCallback(
     async (doc: { collectionSlug: string; docID: string }) => {
       closeDrawer()
@@ -669,10 +645,7 @@ const SourceComposerAuthorized: React.FC<{ sourceKind: string }> = ({ sourceKind
     }
   }
 
-  /**
-   * Fix 4: Cancel a queued post. Calls DELETE on the same route; the server
-   * detects status='queued' and cancels without an upstream API call.
-   */
+  /** Cancel a queued row without an upstream mutation. */
   const cancelPost = async (postId: number | string): Promise<void> => {
     setDeletingId(postId)
     setConfirmingDeleteId(undefined)
@@ -737,7 +710,6 @@ const SourceComposerAuthorized: React.FC<{ sourceKind: string }> = ({ sourceKind
   const filteredTemplates = filterTemplatesForContext(templates, sourceKind, platform)
   const assets = mergedDraft.media
   const accepted = acceptedMediaTypes(platform, state.format)
-  // Bug 2: multi-asset formats surface order badges + drag/arrow reordering.
   const isMultiMedia = supportsMultipleMedia(platform, state.format)
   const moveSelected = (from: number, to: number): void => {
     updateState({ selectedMedia: reorderSelectedMedia(state.selectedMedia, from, to) })
@@ -762,9 +734,7 @@ const SourceComposerAuthorized: React.FC<{ sourceKind: string }> = ({ sourceKind
   // live upstream delete. Instagram posts cannot be removed via the API.
   const isInstagram = platform === 'instagram'
 
-  // Fix 1: compute the local-time minimum for the schedule picker so that
-  // UTC-offset machines see the correct boundary. formatLocalDateTimeMin reads
-  // local Date getters, not the UTC wall-clock that toISOString() returns.
+  // datetime-local values must use local fields rather than an ISO UTC wall clock.
   const scheduleMin = formatLocalDateTimeMin(new Date())
 
   return (
@@ -1060,7 +1030,7 @@ const SourceComposerAuthorized: React.FC<{ sourceKind: string }> = ({ sourceKind
                 {supportsMultipleMedia(platform, state.format) ? '(choose and order 2-10)' : ''}
               </legend>
               {assets.length === 0 && <p>No source media is available.</p>}
-              <div className="socials-composer__media-grid">
+              <div className="socials-composer__media-grid" role="list">
                 {orderedAssets.map((asset) => {
                   const orderIndex = state.selectedMedia.indexOf(asset.url)
                   const selected = orderIndex >= 0
@@ -1069,7 +1039,6 @@ const SourceComposerAuthorized: React.FC<{ sourceKind: string }> = ({ sourceKind
                   return (
                     // Drag reorder is a progressive enhancement; the per-tile
                     // arrow buttons provide the keyboard/touch-accessible path.
-                    // eslint-disable-next-line jsx-a11y/no-static-element-interactions
                     <div
                       className={[
                         'socials-composer__asset',
@@ -1102,6 +1071,7 @@ const SourceComposerAuthorized: React.FC<{ sourceKind: string }> = ({ sourceKind
                             }
                           : undefined
                       }
+                      role="listitem"
                     >
                       {asset.type === 'image' ? (
                         <img alt={asset.altText ?? ''} src={asset.url} />
@@ -1185,8 +1155,6 @@ const SourceComposerAuthorized: React.FC<{ sourceKind: string }> = ({ sourceKind
             </fieldset>
           )}
 
-          {/* Fix 1: min uses the local-time formatter so UTC-offset browsers
-              see the correct earliest-selectable time. */}
           <label>
             Schedule (optional){' '}
             <input
@@ -1280,9 +1248,6 @@ const SourceComposerAuthorized: React.FC<{ sourceKind: string }> = ({ sourceKind
                   >
                     {row.status ?? 'unknown'}
                   </span>
-                  {/* Fix 3: show publishedAt for published rows or scheduledAt
-                      for queued rows so the operator can see when the post is
-                      due to go out. */}
                   {row.status === 'queued' && row.scheduledAt
                     ? ` · scheduled for ${new Date(row.scheduledAt).toLocaleString()}`
                     : row.publishedAt
@@ -1337,8 +1302,6 @@ const SourceComposerAuthorized: React.FC<{ sourceKind: string }> = ({ sourceKind
                     )}
                   </span>
                 )}
-                {/* Fix 4: queued rows get a two-step Cancel action. No upstream
-                    API call is needed since the post has not been published yet. */}
                 {row.status === 'queued' && (
                   <span style={{ display: 'flex', gap: '0.25rem' }}>
                     {confirmingDeleteId === row.id ? (
@@ -1405,7 +1368,6 @@ const SourceComposer: React.FC<{ sourceKind: string }> = ({ sourceKind }) => {
 const StandaloneComposerAuthorized: React.FC = () => {
   const { config } = useConfig()
 
-  // Fix 1: read from config.admin?.custom (serialized to browser).
   const socials = asRecord(asRecord(config.admin?.custom)?.socials)
 
   const enabledPlatforms = Array.isArray(socials?.enabledPlatforms)
@@ -1438,7 +1400,6 @@ const StandaloneComposerAuthorized: React.FC = () => {
     }>
   >([])
 
-  // Fix 5 (standalone): destructure closeDrawer from the tuple.
   const [ListDrawer, , { closeDrawer, openDrawer }] = useListDrawer({
     collectionSlugs: undefined as never,
     uploads: true,
@@ -1447,7 +1408,6 @@ const StandaloneComposerAuthorized: React.FC = () => {
   // URL input state
   const [urlInput, setUrlInput] = useState('')
   const [urlTypeOverride, setUrlTypeOverride] = useState<'image' | 'video'>('image')
-  // Bug 2: index of the media tile currently being dragged (publish order).
   const [dragFrom, setDragFrom] = useState<null | number>(null)
 
   // Load destinations for selected channels
@@ -1515,8 +1475,7 @@ const StandaloneComposerAuthorized: React.FC = () => {
     }))
   }
 
-  // Fix 5 (standalone): call closeDrawer before processing selection.
-  // Bug 1: normalizeSelectedUploadMedia builds an absolute, playable URL.
+  // Payload's ListDrawer does not close itself after selection.
   const handleLibrarySelect = useCallback(
     async (doc: { collectionSlug: string; docID: string }) => {
       closeDrawer()
@@ -1560,7 +1519,6 @@ const StandaloneComposerAuthorized: React.FC = () => {
     toast.success('Media added by URL')
   }, [urlInput, urlTypeOverride])
 
-  // Fix 3: guard compose response shape before rendering results.
   const publish = async (): Promise<void> => {
     if (!state.title.trim()) {
       toast.error('Title is required.')
@@ -1598,8 +1556,7 @@ const StandaloneComposerAuthorized: React.FC = () => {
     }
   }
 
-  // Bug 2: media order is the publish order for carousel / multi-photo targets,
-  // so expose reordering whenever a selected channel uses a multi-asset format.
+  // Media order is the provider order for carousel and multi-photo targets.
   const mediaReorderable = state.channels.some((platform) =>
     supportsMultipleMedia(platform, perChannelFormat[platform] ?? ''),
   )
@@ -1664,11 +1621,10 @@ const StandaloneComposerAuthorized: React.FC = () => {
         <fieldset className="socials-composer__media">
           <legend>Media {mediaReorderable ? '(drag to order 2-10)' : ''}</legend>
           {state.media.length > 0 && (
-            <div className="socials-composer__media-grid">
+            <div className="socials-composer__media-grid" role="list">
               {state.media.map((asset, index) => (
                 // Drag reorder is a progressive enhancement; the per-tile arrow
                 // buttons provide the keyboard/touch-accessible path.
-                // eslint-disable-next-line jsx-a11y/no-static-element-interactions
                 <div
                   className={[
                     'socials-composer__asset',
@@ -1700,6 +1656,7 @@ const StandaloneComposerAuthorized: React.FC = () => {
                         }
                       : undefined
                   }
+                  role="listitem"
                 >
                   {asset.type === 'image' ? (
                     <img alt={asset.altText ?? ''} src={asset.url} />

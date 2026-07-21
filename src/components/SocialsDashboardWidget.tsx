@@ -39,8 +39,7 @@ export const SocialsDashboardWidget: React.FC<Props> = (props) => {
 const SocialsDashboardWidgetInner: React.FC<Props> = ({ enabledPlatforms }) => {
   const { config } = useConfig()
 
-  // Fix 1: read from config.admin?.custom (serialized to browser) instead of
-  // config.custom (stripped by Payload 3.86 serverOnlyConfigProperties).
+  // Payload serializes plugin client configuration under admin.custom.
   const socials = asRecord(asRecord(config.admin?.custom)?.socials)
 
   const configuredPlatforms = Array.isArray(socials?.enabledPlatforms)
