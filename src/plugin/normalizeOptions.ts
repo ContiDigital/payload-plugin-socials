@@ -22,6 +22,7 @@ import {
   DEFAULT_ADMIN_NAV_LABEL,
   DEFAULT_ADMIN_ROUTE_PATH,
   DEFAULT_API_BASE_PATH,
+  DEFAULT_ASSET_FETCH_TIMEOUT_MS,
   DEFAULT_BASE_RETRY_DELAY_MS,
   DEFAULT_MAX_CONCURRENCY,
   DEFAULT_MAX_REQUESTS_PER_MINUTE,
@@ -84,7 +85,30 @@ const normalizeAssets = (config: SocialsAssetsConfig | undefined): NormalizedAss
     jpegQuality = Math.max(1, Math.min(100, Math.round(rawQuality)))
   }
 
-  return { autoConvert, jpegQuality, preflight, renditionCollection }
+  const trustedRemoteHosts = Array.from(
+    new Set(
+      (config?.trustedRemoteHosts ?? []).map((host) => host.trim().toLowerCase()).filter(Boolean),
+    ),
+  )
+  for (const host of trustedRemoteHosts) {
+    if (host.includes('/') || host.includes(':') || host === 'localhost') {
+      throw new Error(
+        `${PLUGIN_SLUG}: assets.trustedRemoteHosts must contain exact DNS hostnames without ports`,
+      )
+    }
+  }
+
+  return {
+    autoConvert,
+    jpegQuality,
+    preflight,
+    remoteFetchTimeoutMs: normalizePositiveInteger(
+      config?.remoteFetchTimeoutMs,
+      DEFAULT_ASSET_FETCH_TIMEOUT_MS,
+    ),
+    renditionCollection,
+    trustedRemoteHosts,
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -407,6 +431,7 @@ const buildNormalizedOptions = (
       basePath: normalizePath(options.api?.basePath ?? DEFAULT_API_BASE_PATH),
     },
     assets: normalizeAssets(options.assets),
+    authCollection: options.authCollection?.trim() || undefined,
     authorize: options.authorize ?? (() => Promise.resolve(false)),
     coordination: options.coordination ?? {},
     copyOverrides: options.copyOverrides ?? {},

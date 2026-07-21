@@ -1,6 +1,11 @@
 import type { Payload, PayloadRequest } from 'payload'
 
-import type { NormalizedPluginOptions, PlatformId, SocialSourceContext } from '../types/index.js'
+import type {
+  NormalizedPluginOptions,
+  PlatformId,
+  PostStatus,
+  SocialSourceContext,
+} from '../types/index.js'
 
 import {
   PLATFORM_IDS,
@@ -8,22 +13,28 @@ import {
   SOCIAL_INSIGHTS_REFRESH_TASK_SLUG,
   SOCIAL_POST_PUBLISH_TASK_SLUG,
   SOCIAL_POST_RETRY_TASK_SLUG,
+  SOCIAL_POST_SWEEP_TASK_SLUG,
   SOCIAL_POSTS_SLUG,
 } from '../constants.js'
+import { reconcileFacebookScheduledPost } from '../server/platforms/facebook/publish.js'
+import { reconcileGbpLocalPostState } from '../server/platforms/gbp/publish.js'
 import { getPlatformAdapter } from '../server/platforms/registry.js'
+import { queuePublicationReconciliation } from '../server/services/publicationReconciliation.js'
+import { markPublicationOutcomeUnknown } from '../server/services/publicationReservation.js'
 import { resolveSourceContext } from '../server/sources/registry.js'
+import {
+  getUnknownPublicationRef,
+  hasUnknownPublicationOutcome,
+} from '../server/utilities/errors.js'
 import { createPluginLogger, redactSecretString } from '../server/utilities/logger.js'
 
 /**
  * Payload `TaskConfig` factories.
  *
- * The plugin OWNS the handler bodies but does NOT own the scheduling cadence
- * (see CLAUDE.md §1.13 "Plugin owns tasks; host wires triggers"). The host
- * decides when to fire — via Payload's native autoRun, via external cron
- * hitting the plugin's internal endpoints, or via a long-running worker
- * calling `runQueuedSocialsJobs` directly.
+ * The plugin owns handler bodies while the host controls cadence through
+ * Payload autoRun, external cron, or a worker loop.
  *
- * Handler discipline (copied from GMC §1.13):
+ * Handler discipline:
  *   - Handlers receive only `{ input, req }`. No closure over options —
  *     options are fetched fresh from the plugin's `getPluginOptions()`
  *     registry every invocation. This makes the handlers safe to register
@@ -36,23 +47,27 @@ import { createPluginLogger, redactSecretString } from '../server/utilities/logg
  *     re-entrant hooks inert.
  */
 
-let pluginOptionsRef: NormalizedPluginOptions | null = null
+const pluginOptionsByPayload = new WeakMap<Payload, NormalizedPluginOptions>()
 
 const safeErrorMessage = (error: unknown): string =>
   redactSecretString(error instanceof Error ? error.message : String(error))
 
 /** Internal: stash the normalized options so task handlers can look them up. */
-export const setPluginOptionsForTasks = (options: NormalizedPluginOptions): void => {
-  pluginOptionsRef = options
+export const setPluginOptionsForTasks = (
+  payload: Payload,
+  options: NormalizedPluginOptions,
+): void => {
+  pluginOptionsByPayload.set(payload, options)
 }
 
-const getPluginOptions = (): NormalizedPluginOptions => {
-  if (!pluginOptionsRef) {
+const getPluginOptions = (payload: Payload): NormalizedPluginOptions => {
+  const options = pluginOptionsByPayload.get(payload)
+  if (!options) {
     throw new Error(
       '[Socials] plugin options not initialised — plugin must be applied to Payload config before tasks run',
     )
   }
-  return pluginOptionsRef
+  return options
 }
 
 // ---------------------------------------------------------------------------
@@ -61,6 +76,7 @@ const getPluginOptions = (): NormalizedPluginOptions => {
 
 type PublishTaskInput = {
   postId: number | string
+  scheduleToken?: string
 }
 
 type SocialPostDoc = {
@@ -69,11 +85,12 @@ type SocialPostDoc = {
   externalUrl?: null | string
   id: number | string
   idempotencyKey: string
-  meta?: { queuedInput?: Record<string, unknown> } & Record<string, unknown>
+  meta?: { queuedInput?: Record<string, unknown>; scheduleToken?: string } & Record<string, unknown>
   platform: PlatformId
+  scheduledAt?: null | string
   sourceId: string
   sourceKind: string
-  status: 'cancelled' | 'draft' | 'failed' | 'published' | 'publishing' | 'queued'
+  status: PostStatus
 }
 
 const loadPost = async (payload: Payload, id: number | string): Promise<null | SocialPostDoc> => {
@@ -132,7 +149,7 @@ const buildPublishTaskConfig = () =>
   ({
     slug: SOCIAL_POST_PUBLISH_TASK_SLUG,
     handler: async ({ input, req }: { input: PublishTaskInput; req: PayloadRequest }) => {
-      const options = getPluginOptions()
+      const options = getPluginOptions(req.payload)
       const log = createPluginLogger(req.payload.logger, {
         postId: input.postId,
         task: SOCIAL_POST_PUBLISH_TASK_SLUG,
@@ -154,6 +171,88 @@ const buildPublishTaskConfig = () =>
       }
       if (post.status === 'cancelled') {
         return { errorMessage: 'post is cancelled', state: 'failed' as const }
+      }
+      if (post.platform === 'facebook' && post.status === 'scheduled' && post.externalId) {
+        const pageId = typeof post.meta?.pageId === 'string' ? post.meta.pageId : undefined
+        if (!pageId) {
+          await markPostFailed(
+            req.payload,
+            post.id,
+            'scheduled Facebook post is missing meta.pageId',
+          )
+          return { errorMessage: 'scheduled Facebook post is missing meta.pageId', state: 'failed' }
+        }
+        try {
+          const scheduledPublishTime =
+            typeof post.meta?.scheduledSeconds === 'number'
+              ? post.meta.scheduledSeconds
+              : typeof post.meta?.scheduledPublishTime === 'number'
+                ? post.meta.scheduledPublishTime
+                : undefined
+          const reconciliation = await reconcileFacebookScheduledPost({
+            externalId: post.externalId,
+            options,
+            pageId,
+            payload: req.payload,
+            postId: post.id,
+            scheduledPublishTime,
+          })
+          if (reconciliation.pending) {
+            await queuePublicationReconciliation({
+              payload: req.payload,
+              postId: post.id,
+              publishedRef: {
+                externalId: post.externalId,
+                meta: { pageId, scheduled: true, scheduledPublishTime },
+                platform: 'facebook',
+              },
+              req,
+            })
+          }
+          return { output: { pending: reconciliation.pending, postId: post.id } }
+        } catch (error) {
+          await markPostFailed(req.payload, post.id, error)
+          return { errorMessage: safeErrorMessage(error), state: 'failed' as const }
+        }
+      }
+      if (post.platform === 'gbp' && post.status === 'publishing' && post.externalId) {
+        try {
+          const reconciliation = await reconcileGbpLocalPostState({
+            options,
+            payload: req.payload,
+            postId: post.id,
+            postName: post.externalId,
+          })
+          if (reconciliation.pending) {
+            await queuePublicationReconciliation({
+              payload: req.payload,
+              postId: post.id,
+              publishedRef: {
+                externalId: post.externalId,
+                meta: { state: reconciliation.state },
+                platform: 'gbp',
+              },
+              req,
+            })
+          }
+          return {
+            output: {
+              pending: reconciliation.pending,
+              postId: post.id,
+              state: reconciliation.state,
+            },
+          }
+        } catch (error) {
+          await markPostFailed(req.payload, post.id, error)
+          return { errorMessage: safeErrorMessage(error), state: 'failed' as const }
+        }
+      }
+
+      if (input.scheduleToken && input.scheduleToken !== post.meta?.scheduleToken) {
+        return { output: { postId: post.id, staleSchedule: true } }
+      }
+      if (post.scheduledAt && Date.parse(post.scheduledAt) > Date.now()) {
+        return { output: { notDue: true, postId: post.id } }
       }
 
       const queuedInput = post.meta?.queuedInput
@@ -179,6 +278,7 @@ const buildPublishTaskConfig = () =>
           kind: post.sourceKind,
           payload: req.payload,
           req,
+          sources: options.sources,
         })
       } catch (error) {
         await markPostFailed(req.payload, post.id, error)
@@ -189,13 +289,19 @@ const buildPublishTaskConfig = () =>
       }
 
       try {
-        const adapter = getPlatformAdapter(post.platform)
+        const adapter = getPlatformAdapter(post.platform, options)
         const ref = await adapter.publish({
           ctx,
           input: queuedInput as never,
           options,
           payload: req.payload,
           postId: post.id,
+          req,
+        })
+        await queuePublicationReconciliation({
+          payload: req.payload,
+          postId: post.id,
+          publishedRef: ref,
           req,
         })
         log.info('published')
@@ -207,6 +313,16 @@ const buildPublishTaskConfig = () =>
           },
         }
       } catch (error) {
+        if (hasUnknownPublicationOutcome(error)) {
+          await markPublicationOutcomeUnknown(req.payload, post.id, getUnknownPublicationRef(error))
+          log.error('publish outcome unknown; automatic retry suppressed')
+          return {
+            output: {
+              outcomeUnknown: true,
+              postId: post.id,
+            },
+          }
+        }
         await markPostFailed(req.payload, post.id, error)
         log.error('publish failed', { error: safeErrorMessage(error) })
         return {
@@ -295,7 +411,7 @@ const refreshInsightsForPlatform = async (
 ): Promise<{ failed: number; platform: PlatformId; refreshed: number; skipped: number }> => {
   let adapter
   try {
-    adapter = getPlatformAdapter(platform)
+    adapter = getPlatformAdapter(platform, options)
   } catch {
     return { failed: 0, platform, refreshed: 0, skipped: 0 }
   }
@@ -391,7 +507,7 @@ const buildInsightsRefreshTaskConfig = () =>
   ({
     slug: SOCIAL_INSIGHTS_REFRESH_TASK_SLUG,
     handler: async ({ input, req }: { input: InsightsRefreshTaskInput; req: PayloadRequest }) => {
-      const options = getPluginOptions()
+      const options = getPluginOptions(req.payload)
       const log = createPluginLogger(req.payload.logger, {
         task: SOCIAL_INSIGHTS_REFRESH_TASK_SLUG,
       })
@@ -446,7 +562,7 @@ const buildConnectionRefreshTaskConfig = () =>
   ({
     slug: SOCIAL_CONNECTION_REFRESH_TASK_SLUG,
     handler: async ({ input, req }: { input: ConnectionRefreshTaskInput; req: PayloadRequest }) => {
-      const options = getPluginOptions()
+      const options = getPluginOptions(req.payload)
       const log = createPluginLogger(req.payload.logger, {
         task: SOCIAL_CONNECTION_REFRESH_TASK_SLUG,
       })
@@ -475,7 +591,7 @@ const buildConnectionRefreshTaskConfig = () =>
             refreshed.push({ platform, refreshed: false })
             continue
           }
-          const adapter = getPlatformAdapter(platform)
+          const adapter = getPlatformAdapter(platform, options)
           if (typeof adapter.refreshToken === 'function') {
             const result = await adapter.refreshToken({
               options,
@@ -516,8 +632,6 @@ const buildConnectionRefreshTaskConfig = () =>
 // social-post-sweep — finds due queued posts and queues publish tasks
 // ---------------------------------------------------------------------------
 
-export const SOCIAL_POST_SWEEP_TASK_SLUG = 'socialPostSweep'
-
 type SweepTaskInput = {
   /** Override the batch size (default: scheduling.sweepBatchSize). */
   limit?: number
@@ -527,7 +641,7 @@ const buildSweepTaskConfig = () =>
   ({
     slug: SOCIAL_POST_SWEEP_TASK_SLUG,
     handler: async ({ input, req }: { input: SweepTaskInput; req: PayloadRequest }) => {
-      const options = getPluginOptions()
+      const options = getPluginOptions(req.payload)
       const log = createPluginLogger(req.payload.logger, { task: SOCIAL_POST_SWEEP_TASK_SLUG })
       const limit = input.limit ?? options.scheduling.sweepBatchSize
 

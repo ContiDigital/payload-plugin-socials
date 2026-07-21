@@ -4,6 +4,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { NormalizedPluginOptions } from '../../types/index.js'
 
+import { PlatformApiError, PublicationPersistenceError } from '../../server/utilities/errors.js'
+
 vi.mock('../../server/platforms/registry.js', () => ({ getPlatformAdapter: vi.fn() }))
 vi.mock('../../server/sources/registry.js', () => ({ resolveSourceContext: vi.fn() }))
 vi.mock('../jobQueue.js', () => ({ queueSocialPostPublish: vi.fn() }))
@@ -40,8 +42,11 @@ const options = {
   },
 } as unknown as NormalizedPluginOptions
 
-const mkReq = (payload: Record<string, unknown>): PayloadRequest =>
-  ({ payload: { logger: undefined, ...payload } }) as unknown as PayloadRequest
+const mkReq = (payload: Record<string, unknown>): PayloadRequest => {
+  const req = { payload: { logger: undefined, ...payload } } as unknown as PayloadRequest
+  setPluginOptionsForTasks(req.payload, options)
+  return req
+}
 
 const publish = buildPublishTaskConfig().handler
 const retry = buildRetryTaskConfig().handler
@@ -51,7 +56,6 @@ const sweep = buildSweepTaskConfig().handler
 
 beforeEach(() => {
   vi.clearAllMocks()
-  setPluginOptionsForTasks(options)
 })
 
 describe('socialPostPublish handler', () => {
@@ -86,6 +90,44 @@ describe('socialPostPublish handler', () => {
     const result = await publish({ input: { postId: 1 }, req })
     expect(result.state).toBe('failed')
     expect(update).toHaveBeenCalled()
+  })
+
+  it('ignores a stale schedule token without claiming or publishing', async () => {
+    const adapterPublish = vi.fn()
+    vi.mocked(getPlatformAdapter).mockReturnValue({ publish: adapterPublish } as never)
+    const update = vi.fn()
+    const req = mkReq({
+      findByID: vi.fn().mockResolvedValue({
+        id: 1,
+        meta: { queuedInput: {}, scheduleToken: 'current' },
+        platform: 'pinterest',
+        status: 'queued',
+      }),
+      update,
+    })
+    expect(await publish({ input: { postId: 1, scheduleToken: 'stale' }, req })).toEqual({
+      output: { postId: 1, staleSchedule: true },
+    })
+    expect(update).not.toHaveBeenCalled()
+    expect(adapterPublish).not.toHaveBeenCalled()
+  })
+
+  it('does not claim a scheduled post before its current due time', async () => {
+    const update = vi.fn()
+    const req = mkReq({
+      findByID: vi.fn().mockResolvedValue({
+        id: 1,
+        meta: { queuedInput: {} },
+        platform: 'pinterest',
+        scheduledAt: new Date(Date.now() + 60_000).toISOString(),
+        status: 'queued',
+      }),
+      update,
+    })
+    expect(await publish({ input: { postId: 1 }, req })).toEqual({
+      output: { notDue: true, postId: 1 },
+    })
+    expect(update).not.toHaveBeenCalled()
   })
 
   it('fails when the source context cannot be resolved', async () => {
@@ -151,6 +193,76 @@ describe('socialPostPublish handler', () => {
     expect(result.state).toBe('failed')
     expect(result.errorMessage).toBe('upstream 500')
     expect(update).toHaveBeenCalled()
+  })
+
+  it('records an unknown provider outcome and suppresses automatic task retry', async () => {
+    vi.mocked(resolveSourceContext).mockResolvedValue({ images: [] } as never)
+    vi.mocked(getPlatformAdapter).mockReturnValue({
+      publish: vi.fn().mockRejectedValue(
+        new PlatformApiError({
+          message: 'response lost',
+          outcome: 'unknown',
+          platform: 'pinterest',
+        }),
+      ),
+    } as never)
+    const update = vi.fn().mockResolvedValue({ docs: [{ id: 1 }], errors: [] })
+    const req = mkReq({
+      findByID: vi.fn().mockResolvedValue({
+        id: 1,
+        meta: { queuedInput: { boardId: 'b' } },
+        platform: 'pinterest',
+        sourceId: 's',
+        sourceKind: 'product',
+        status: 'queued',
+      }),
+      update,
+    })
+    expect(await publish({ input: { postId: 1 }, req })).toEqual({
+      output: { outcomeUnknown: true, postId: 1 },
+    })
+    expect(update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: 'unknown' }),
+      }),
+    )
+  })
+
+  it('captures a provider id after audit persistence fails and suppresses task retry', async () => {
+    vi.mocked(resolveSourceContext).mockResolvedValue({ images: [] } as never)
+    vi.mocked(getPlatformAdapter).mockReturnValue({
+      publish: vi.fn().mockRejectedValue(
+        new PublicationPersistenceError(
+          {
+            externalId: 'pin_created',
+            meta: { boardId: 'b' },
+            platform: 'pinterest',
+          },
+          new Error('database unavailable'),
+        ),
+      ),
+    } as never)
+    const update = vi.fn().mockResolvedValue({ docs: [{ id: 1 }], errors: [] })
+    const req = mkReq({
+      findByID: vi.fn().mockResolvedValue({
+        id: 1,
+        meta: { queuedInput: { boardId: 'b' } },
+        platform: 'pinterest',
+        sourceId: 's',
+        sourceKind: 'product',
+        status: 'queued',
+      }),
+      update,
+    })
+
+    expect(await publish({ input: { postId: 1 }, req })).toEqual({
+      output: { outcomeUnknown: true, postId: 1 },
+    })
+    expect(update).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ externalId: 'pin_created', status: 'unknown' }),
+      }),
+    )
   })
 
   it('does not publish when another worker already claimed the row', async () => {

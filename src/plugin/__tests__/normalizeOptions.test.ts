@@ -90,12 +90,20 @@ describe('normalizePluginOptions — defaults', () => {
     expect(n.disabled).toBe(false)
   })
 
+  it('normalizes an empty auth collection to undefined', () => {
+    expect(
+      normalizePluginOptions(withOpts({ authCollection: '  ' })).authCollection,
+    ).toBeUndefined()
+  })
+
   it('resolves assets defaults', () => {
     expect(n.assets).toEqual({
       autoConvert: false,
       jpegQuality: 82,
       preflight: true,
+      remoteFetchTimeoutMs: 15_000,
       renditionCollection: undefined,
+      trustedRemoteHosts: [],
     })
   })
 })
@@ -180,6 +188,27 @@ describe('normalizePluginOptions — assets config', () => {
 
     const normal = normalizePluginOptions(withOpts({ assets: { jpegQuality: 75 } }))
     expect(normal.assets.jpegQuality).toBe(75)
+  })
+
+  it('normalizes the remote fetch timeout and trusted hostnames', () => {
+    const n = normalizePluginOptions(
+      withOpts({
+        assets: {
+          remoteFetchTimeoutMs: 2_500.9,
+          trustedRemoteHosts: [' MEDIA.EXAMPLE.COM ', 'media.example.com'],
+        },
+      }),
+    )
+    expect(n.assets.remoteFetchTimeoutMs).toBe(2_500)
+    expect(n.assets.trustedRemoteHosts).toEqual(['media.example.com'])
+  })
+
+  it('rejects trusted remote hosts containing a scheme, port, or localhost', () => {
+    for (const host of ['https://media.example.com', 'media.example.com:8443', 'localhost']) {
+      expect(() =>
+        normalizePluginOptions(withOpts({ assets: { trustedRemoteHosts: [host] } })),
+      ).toThrow(/exact DNS hostnames/)
+    }
   })
 })
 

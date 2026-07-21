@@ -35,30 +35,33 @@ beforeEach(() => {
 describe('platform adapter registry', () => {
   it('instantiates only enabled platforms', () => {
     initPlatformRegistry(options)
-    expect(listEnabledPlatforms()).toEqual(['pinterest'])
-    expect(Object.keys(getEnabledAdapters())).toEqual(['pinterest'])
+    expect(listEnabledPlatforms(options)).toEqual(['pinterest'])
+    expect(Object.keys(getEnabledAdapters(options))).toEqual(['pinterest'])
   })
 
   it('returns the adapter for an enabled platform with the matching id', () => {
     initPlatformRegistry(options)
-    const adapter = getPlatformAdapter('pinterest')
+    const adapter = getPlatformAdapter('pinterest', options)
     expect(adapter.id).toBe('pinterest')
   })
 
   it('throws NotFoundError for a disabled platform', () => {
     initPlatformRegistry(options)
-    expect(() => getPlatformAdapter('facebook')).toThrow(NotFoundError)
+    expect(() => getPlatformAdapter('facebook', options)).toThrow(NotFoundError)
   })
 
-  it('throws NotFoundError when nothing has been initialized', () => {
-    expect(() => getPlatformAdapter('pinterest')).toThrow(NotFoundError)
+  it('initializes lazily for one isolated options object', () => {
+    expect(getPlatformAdapter('pinterest', options).id).toBe('pinterest')
   })
 
   it('re-initialization clears the prior set', () => {
     initPlatformRegistry(options)
-    initPlatformRegistry(
-      normalizePluginOptions({ ...baseOptions, platforms: { pinterest: { enabled: false } } }),
-    )
-    expect(listEnabledPlatforms()).toEqual([])
+    const disabledOptions = normalizePluginOptions({
+      ...baseOptions,
+      platforms: { pinterest: { enabled: false } },
+    })
+    initPlatformRegistry(disabledOptions)
+    expect(listEnabledPlatforms(disabledOptions)).toEqual([])
+    expect(listEnabledPlatforms(options)).toEqual(['pinterest'])
   })
 })

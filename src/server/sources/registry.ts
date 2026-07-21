@@ -19,22 +19,22 @@ import { NotFoundError, PluginError } from '../utilities/errors.js'
  * introduce arbitrary new source kinds without a plugin release.
  */
 
-const resolvers = new Map<SocialSourceKind, SourceContextResolver>()
-
-export const registerSourceResolvers = (registry: SourceResolverRegistry): void => {
-  resolvers.clear()
+export const validateSourceResolvers = (registry: SourceResolverRegistry): void => {
   for (const [kind, resolver] of Object.entries(registry)) {
     if (typeof resolver !== 'function') {
       throw new PluginError(`source resolver for kind "${kind}" must be a function`, 500)
     }
-    resolvers.set(kind, resolver)
   }
 }
 
-export const getRegisteredSourceKinds = (): readonly SocialSourceKind[] =>
-  Array.from(resolvers.keys())
+export const getRegisteredSourceKinds = (
+  registry: SourceResolverRegistry,
+): readonly SocialSourceKind[] => Object.keys(registry)
 
-export const hasSourceResolver = (kind: SocialSourceKind): boolean => resolvers.has(kind)
+export const hasSourceResolver = (
+  registry: SourceResolverRegistry,
+  kind: SocialSourceKind,
+): boolean => typeof registry[kind] === 'function'
 
 /**
  * Resolve a source context. Throws `NotFoundError` (404) when the requested
@@ -46,8 +46,9 @@ export const resolveSourceContext = async (args: {
   kind: SocialSourceKind
   payload: Payload
   req?: PayloadRequest
+  sources: SourceResolverRegistry
 }): Promise<SocialSourceContext> => {
-  const resolver = resolvers.get(args.kind)
+  const resolver: SourceContextResolver | undefined = args.sources[args.kind]
   if (!resolver) {
     throw new NotFoundError(`${PLUGIN_SLUG}: no source resolver registered for kind "${args.kind}"`)
   }
@@ -68,12 +69,4 @@ export const resolveSourceContext = async (args: {
     )
   }
   return context
-}
-
-/**
- * Test-only escape hatch — clears every registered resolver. Never call
- * this from runtime code.
- */
-export const __resetSourceResolverRegistry = (): void => {
-  resolvers.clear()
 }

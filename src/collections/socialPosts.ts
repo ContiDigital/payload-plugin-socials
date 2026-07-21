@@ -1,4 +1,4 @@
-import type { CollectionConfig, PayloadRequest } from 'payload'
+import type { CollectionConfig, CollectionSlug, PayloadRequest } from 'payload'
 
 import type { AuthorizeFn } from '../types/index.js'
 
@@ -16,12 +16,10 @@ import {
  * Postgres index on `idempotencyKey` is the only true idempotency guard —
  * never drop it without a migration plan.
  *
- * Schema mirrors Fine's Gallery `pinterestPins` collection generalized to
- * N platforms. The `platform` field is the discriminator; each adapter
- * writes its `externalId` / `externalUrl` into the corresponding row.
- *
- * The plugin marks rows as `cancelled` (status), NEVER hard-deletes them —
- * the row is both the audit record AND the idempotency anchor.
+ * The `platform` field is the discriminator; each adapter writes its
+ * `externalId` and `externalUrl` into the corresponding row. Cancellation
+ * and deletion are soft state transitions because the row is also the
+ * idempotency anchor.
  */
 
 const buildAccessGate = (authorize: AuthorizeFn | undefined) => {
@@ -37,7 +35,10 @@ const buildAccessGate = (authorize: AuthorizeFn | undefined) => {
   }
 }
 
-export const buildSocialPostsCollection = (authorize?: AuthorizeFn): CollectionConfig => ({
+export const buildSocialPostsCollection = (
+  authorize?: AuthorizeFn,
+  authCollection?: CollectionSlug,
+): CollectionConfig => ({
   slug: SOCIAL_POSTS_SLUG,
   access: {
     create: () => false, // plugin-internal only; created via service layer
@@ -224,12 +225,16 @@ export const buildSocialPostsCollection = (authorize?: AuthorizeFn): CollectionC
       admin: { description: 'Next attempt time for failed posts.', readOnly: true },
       index: true,
     },
-    {
-      name: 'publishedBy',
-      type: 'relationship',
-      admin: { readOnly: true },
-      relationTo: 'users',
-    },
+    ...(authCollection
+      ? [
+          {
+            name: 'publishedBy',
+            type: 'relationship' as const,
+            admin: { readOnly: true },
+            relationTo: authCollection,
+          },
+        ]
+      : []),
     {
       name: 'meta',
       type: 'json',

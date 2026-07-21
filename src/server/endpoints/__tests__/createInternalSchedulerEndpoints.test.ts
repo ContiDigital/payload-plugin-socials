@@ -79,6 +79,15 @@ describe('sweep + run endpoints', () => {
     expect(runQueuedSocialsJobs).toHaveBeenCalledOnce()
   })
 
+  it('returns a server error when Payload cannot drain the queue', async () => {
+    vi.mocked(runQueuedSocialsJobs).mockRejectedValueOnce(new Error('database unavailable'))
+
+    const res = await byPath('/jobs/run').handler(mkReq())
+
+    expect(res.status).toBe(500)
+    expect(await res.json()).toEqual({ error: 'Internal server error' })
+  })
+
   it('rejects with the auth error status when the API key check fails', async () => {
     vi.mocked(assertSchedulerApiKey).mockImplementationOnce(() => {
       throw Object.assign(new Error('unauthorized'), { statusCode: 401 })

@@ -26,7 +26,11 @@ const options = {
 interface MockPayload {
   create: ReturnType<typeof vi.fn>
   find: ReturnType<typeof vi.fn>
-  jobs: { queue: ReturnType<typeof vi.fn>; run: ReturnType<typeof vi.fn> }
+  jobs: {
+    cancelByID: ReturnType<typeof vi.fn>
+    queue: ReturnType<typeof vi.fn>
+    run: ReturnType<typeof vi.fn>
+  }
   logger: undefined
   update: ReturnType<typeof vi.fn>
 }
@@ -35,17 +39,18 @@ let payload: MockPayload
 const asPayload = (p: MockPayload): Payload => p as unknown as Payload
 
 beforeEach(() => {
-  setSocialsQueueName(SOCIALS_QUEUE_NAME)
   payload = {
     create: vi.fn().mockResolvedValue({ id: 'post_1' }),
     find: vi.fn().mockResolvedValue({ docs: [] }),
     jobs: {
+      cancelByID: vi.fn().mockResolvedValue(undefined),
       queue: vi.fn().mockResolvedValue({ id: 'job_1' }),
       run: vi.fn().mockResolvedValue(undefined),
     },
     logger: undefined,
     update: vi.fn().mockResolvedValue({ id: 'post_1' }),
   }
+  setSocialsQueueName(asPayload(payload), SOCIALS_QUEUE_NAME)
 })
 
 describe('queue helpers', () => {
@@ -72,7 +77,7 @@ describe('queue helpers', () => {
   })
 
   it('uses the configured custom queue for queued tasks', async () => {
-    setSocialsQueueName('custom-socials')
+    setSocialsQueueName(asPayload(payload), 'custom-socials')
     await queueSocialPostPublish({ payload: asPayload(payload), postId: 'p' })
     expect(payload.jobs.queue.mock.calls[0][0].queue).toBe('custom-socials')
   })
@@ -126,9 +131,9 @@ describe('runQueuedSocialsJobs', () => {
     expect(payload.jobs.run).toHaveBeenCalledTimes(2)
   })
 
-  it('swallows drain errors instead of throwing', async () => {
+  it('propagates drain errors so external schedulers can retry', async () => {
     payload.jobs.run.mockRejectedValue(new Error('worker down'))
-    await expect(runQueuedSocialsJobs(asPayload(payload), options)).resolves.toBeUndefined()
+    await expect(runQueuedSocialsJobs(asPayload(payload), options)).rejects.toThrow('worker down')
   })
 })
 
@@ -180,6 +185,8 @@ describe('scheduleSocialPostPublish', () => {
     const created = payload.create.mock.calls[0][0].data
     expect(created.status).toBe('queued')
     expect(created.meta.queuedInput).toEqual({ boardId: 'b1', imageUrl: 'https://x/y.jpg' })
+    expect(created.meta.scheduleToken).toEqual(expect.any(String))
+    expect(payload.jobs.queue.mock.calls[0][0].input.scheduleToken).toBe(created.meta.scheduleToken)
     expect(payload.jobs.queue.mock.calls[0][0].waitUntil).toBeInstanceOf(Date)
     expect(payload.update).toHaveBeenCalledWith(
       expect.objectContaining({ data: { queuedJobId: 'job_1' } }),
@@ -192,6 +199,8 @@ describe('scheduleSocialPostPublish', () => {
     })
     const result = await scheduleSocialPostPublish(baseArgs())
     expect(result.postId).toBe('post_old')
+    expect(result.alreadyPublished).toBe(true)
+    expect(result.externalId).toBe('pin_1')
     expect(payload.create).not.toHaveBeenCalled()
     expect(payload.jobs.queue).not.toHaveBeenCalled()
   })
@@ -205,5 +214,14 @@ describe('scheduleSocialPostPublish', () => {
     expect(result.postId).toBe('post_old')
     expect(payload.create).not.toHaveBeenCalled()
     expect(payload.update).toHaveBeenCalledWith(expect.objectContaining({ id: 'post_old' }))
+  })
+
+  it('cancels the previous queued job when rescheduling', async () => {
+    payload.find.mockResolvedValue({
+      docs: [{ id: 'post_old', queuedJobId: 'job_old', status: 'queued' }],
+    })
+    payload.update.mockResolvedValue({ id: 'post_old' })
+    await scheduleSocialPostPublish(baseArgs())
+    expect(payload.jobs.cancelByID).toHaveBeenCalledWith({ id: 'job_old' })
   })
 })
