@@ -55,11 +55,11 @@ describe('resolveTemplateCopy', () => {
     const resolved = resolveTemplateCopy(
       {
         pinterestHashtags:
-          '{{metadata.googleMaterial}} #{{metadata.googleColor}} luxury, FinesGallery',
+          '{{metadata.googleMaterial}} #{{metadata.googleColor}} luxury, ExampleBrand',
       },
       ctx(),
     )
-    expect(resolved.pinterestHashtags).toEqual(['#marble', '#white', '#luxury', '#FinesGallery'])
+    expect(resolved.pinterestHashtags).toEqual(['#marble', '#white', '#luxury', '#ExampleBrand'])
   })
 
   it('omits hashtags entirely when the template is empty', () => {

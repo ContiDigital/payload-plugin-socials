@@ -5,7 +5,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { PayloadPluginSocialsConfig, SocialSourceContext } from '../../../types/index.js'
 
 import { normalizePluginOptions } from '../../../plugin/normalizeOptions.js'
-import { __resetSourceResolverRegistry, registerSourceResolvers } from '../../sources/registry.js'
 import { createResolvedTemplatesEndpoint } from '../createTemplateEndpoints.js'
 
 const authorize = vi.fn().mockResolvedValue(true)
@@ -29,8 +28,6 @@ const run = (endpoint: Endpoint, req: PayloadRequest) =>
 
 beforeEach(() => {
   vi.clearAllMocks()
-  __resetSourceResolverRegistry()
-  registerSourceResolvers({ product: () => Promise.resolve(context) })
   authorize.mockResolvedValue(true)
 })
 

@@ -20,7 +20,7 @@ export const createHealthEndpoint = (options: NormalizedPluginOptions): Endpoint
           api: { basePath: options.api.basePath },
           enabledPlatforms,
           plugin: 'payload-plugin-socials',
-          sourceKinds: getRegisteredSourceKinds(),
+          sourceKinds: getRegisteredSourceKinds(options.sources),
           status: 'ok',
           testMode: options.testMode,
           timestamp: new Date().toISOString(),

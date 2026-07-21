@@ -90,14 +90,14 @@ describe('pinterest oauth — exchangeCodeForTokens', () => {
         }),
       )
       .mockResolvedValueOnce(
-        okJson({ id: 'acc1', business_name: "Fine's Gallery", username: 'finesgallery' }),
+        okJson({ id: 'acc1', business_name: 'Example Gallery', username: 'examplegallery' }),
       )
 
     const result = await exchangeCodeForTokens({ code: 'c0de', options, payload, req })
 
     expect(result.scopes).toEqual(['pins:read', 'pins:write', 'user_accounts:read'])
     expect(result.accountId).toBe('acc1')
-    expect(result.accountLabel).toBe("Fine's Gallery")
+    expect(result.accountLabel).toBe('Example Gallery')
     expect(result.accessTokenExpiresAt).toBeTypeOf('string')
 
     // Token endpoint hit with HTTP Basic client auth.

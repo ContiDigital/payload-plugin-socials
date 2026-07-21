@@ -11,7 +11,7 @@ type NavComponent = NonNullable<NonNullable<AdminComponents>['beforeNavLinks']>[
 const SOCIALS_VIEW_KEY = 'socials'
 
 /**
- * Idempotent dedup helper. Re-applying the plugin (HMR, multiple instances)
+ * Idempotent dedup helper. Re-applying the same plugin config during HMR
  * must not stack the same nav link / dashboard widget multiple times.
  */
 const withUniqueComponent = <T>(components: T[] | undefined, component: T): T[] => {

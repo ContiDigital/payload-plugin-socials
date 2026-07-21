@@ -7,7 +7,7 @@ import { metaJson } from '../_meta/api.js'
 /**
  * Discover the IG Business user id from a Facebook Page id.
  *
- * CLAUDE.md §4.4: Instagram publishing requires the IG account to be:
+ * Instagram publishing requires the account to be:
  *   - Business or Creator type
  *   - Linked to the Facebook Page passed in
  *

@@ -7,7 +7,7 @@ import { pinterestJson } from './api.js'
 /**
  * Pinterest analytics — `GET /v5/pins/{pin_id}/analytics`.
  *
- * Per CLAUDE.md §3.3.8 the endpoint accepts a 90-day rolling window with
+ * The endpoint accepts a 90-day rolling window with
  * `start_date` / `end_date` (YYYY-MM-DD), a `metric_types` csv, and an
  * optional `split_field`. We always pull the canonical impression / click
  * / save / engagement set + the rate derivatives Pinterest is willing to
