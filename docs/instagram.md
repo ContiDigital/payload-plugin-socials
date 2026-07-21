@@ -25,7 +25,9 @@ The plugin supports two, in precedence order.
 
 ### System user access token (recommended for a backend)
 
-Best for a single business publishing from a server. The token does not expire.
+Best for a single business publishing from a server. Meta can issue a token
+configured without a scheduled expiry, but credentials can still be invalidated
+by revocation, asset or role changes, app changes, or provider enforcement.
 
 1. In Business Manager, open Settings, then Users, then System Users, and add an
    **employee** system user.
@@ -121,8 +123,9 @@ derivative at upload time, and point your source resolver at that derivative URL
 
 Meta's Graph API does not expose a delete endpoint for published Instagram
 Business media. Calling `DELETE /{ig-media-id}` always returns `OAuthException`
-code 10, regardless of the token or permissions used. This is a permanent
-platform limitation as of Meta Graph API v25.0.
+code 10, regardless of the token or permissions used. This is the behavior
+supported by this plugin against Meta Graph API v25.0; re-check Meta's current
+API surface before changing the reconciliation policy.
 
 The plugin removes Instagram API deletion as a capability:
 

@@ -25,14 +25,16 @@ businessprofileperformance.googleapis.com        (metrics, optional)
 
 ## 2. Request API access
 
-GBP APIs are not granted by default. Until approved, your quota is 0 QPM.
+GBP APIs are not granted by default. A project with quota `0` has not yet been
+granted access and must use Google's Basic API Access application rather than a
+quota-increase request. See Google's current [basic setup](https://developers.google.com/my-business/content/basic-setup) and [quota documentation](https://developers.google.com/my-business/content/limits).
 
 1. Confirm the APIs are enabled (even at 0 QPM).
 2. Submit the **Application for Basic API Access** form, with your Cloud
    **project number** (the numeric one), the GBP owner or manager email, your
    application URL, and a short use-case description.
-3. Wait. Approval takes anywhere from two days to four weeks. When approved your
-   quota moves to 300 QPM.
+3. Track the application through Google's process. Review time and assigned
+   quotas are provider-controlled and can change.
 
 ## 3. OAuth consent and scope verification
 

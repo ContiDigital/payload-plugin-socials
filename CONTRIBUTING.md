@@ -16,7 +16,7 @@ run the admin panel against the plugin source:
 pnpm dev
 ```
 
-The harness uses an in-process sqlite database, so you do not need a separate
+The harness uses a local SQLite database, so you do not need a separate
 database running.
 
 ## The verification gate
@@ -24,15 +24,14 @@ database running.
 Before opening a pull request, run the full gate and make sure it is green:
 
 ```bash
-pnpm exec tsc --noEmit   # strict type check
-pnpm format:check        # Prettier, no drift
-pnpm lint                # eslint, zero warnings allowed
-pnpm test                # vitest unit and integration suite
-pnpm build               # swc emit plus type declarations
-pnpm pack:smoke          # packs the tarball and imports it in a clean dir
+pnpm release:check # format, lint, types, coverage, build, package checks, audit
+pnpm test:e2e      # Chromium, Firefox, WebKit, and axe accessibility
 ```
 
-`pnpm release:check` runs all of these in sequence and is what CI enforces.
+CI runs `release:check` on Node 22.12 and Node 24, boots the schema on
+PostgreSQL and MongoDB, and runs the browser suite on Node 24. The package smoke
+test installs the tarball with its declared peers, executes the root export,
+and resolves the bundler-only client and RSC entrypoints.
 
 Read-only provider contract checks are opt-in because they require real approved
 credentials. Set `SOCIALS_LIVE_PLATFORM` to `pinterest`, `meta`, or `gbp`, set
@@ -73,7 +72,6 @@ and safe:
 - **Write tests for the logic you touch.** Adapters are unit-tested against a
   mocked `fetch`; pure logic is tested directly. A real Payload boot test
   guards the schema.
-- **Documentation uses a plain human voice with no emdashes.**
 
 ## Commits
 

@@ -1,8 +1,8 @@
 # Installation and configuration
 
-A complete, production-shaped walkthrough for wiring `payload-plugin-socials` into a Payload CMS 3 project. It follows the same shape as a real deployment: multiple content types as sources, a category that publishes its products' imagery, format-safe media, and scheduling driven by cloud infrastructure.
+A production-shaped walkthrough for wiring `payload-plugin-socials` into a Payload CMS 3 project: multiple source types, format-safe media, host-owned migrations, and scheduling through either Payload Jobs or external infrastructure.
 
-Every example uses ordinary collections (`products`, `categories`, `posts`, `projects`) rather than any one application's schema, so the patterns transfer to your project. Where a step maps to something Fine's Gallery does in production, that is called out.
+The example collection fields are illustrative. Replace them with the generated types and fields from your host project.
 
 ## What a full installation looks like
 
@@ -18,7 +18,8 @@ By the end of this guide you will have:
 
 ## Prerequisites
 
-- A Payload CMS `^3.37.0` project on a long-running host (for scheduling).
+- Payload CMS `^3.84.1` on Node.js `>=22.12.0`.
+- A deployment capable of running Payload Jobs, or an HTTPS deployment reachable by an external scheduler. A permanently running web process is not required when the scheduler endpoint drains jobs inline.
 - A database you run migrations against.
 - Developer credentials for the platforms you want:
   - **Pinterest:** an app in the [Pinterest developer portal](https://developers.pinterest.com/) with a client ID and secret, and a registered redirect URI.
@@ -51,21 +52,13 @@ PUBLIC_URL=https://your-site.com
 pnpm add payload-plugin-socials
 ```
 
-While the package is private, pin a git dependency:
-
-```json
-"payload-plugin-socials": "github:YourOrg/payload-plugin-socials#<commit-sha>"
-```
-
-If your deployment builds a Docker image, read [Deployment](#deployment) before pushing: a private git dependency needs a build-time token.
-
 ## Step 2: Scaffold the plugin config
 
 Create a dedicated module for the plugin so the resolvers have room to grow. This mirrors how a production app keeps its social wiring in one place.
 
 ```ts
 // src/plugins/socials.ts
-import type { Plugin } from 'payload'
+import type { PayloadPluginSocialsConfig } from 'payload-plugin-socials'
 import { payloadPluginSocials } from 'payload-plugin-socials'
 import {
   productResolver,
@@ -76,8 +69,9 @@ import {
 
 const base = () => (process.env.PUBLIC_URL ?? '').replace(/\/+$/, '')
 
-export const SocialsPlugin: Plugin = payloadPluginSocials({
+export const socialsOptions = {
   encryptionKey: process.env.SOCIALS_ENCRYPTION_KEY!,
+  authCollection: 'users',
 
   // scope is 'admin' (connections + templates) or 'publisher' (compose + publish).
   authorize: async ({ req, scope }) => {
@@ -87,7 +81,11 @@ export const SocialsPlugin: Plugin = payloadPluginSocials({
     return ['admin', 'owner', 'editor', 'marketing'].includes(role)
   },
 
-  assets: { autoConvert: true, renditionCollection: 'social-renditions' },
+  assets: {
+    autoConvert: true,
+    remoteFetchTimeoutMs: 15_000,
+    renditionCollection: 'social-renditions',
+  },
 
   sources: {
     product: productResolver,
@@ -110,22 +108,27 @@ export const SocialsPlugin: Plugin = payloadPluginSocials({
     pinterest: {
       clientId: process.env.PINTEREST_APP_ID!,
       clientSecret: process.env.PINTEREST_APP_SECRET!,
+      enabled: true,
       redirectUri: `${base()}/api/socials/pinterest/oauth/callback`,
     },
     facebook: {
       appId: process.env.META_APP_ID!,
       appSecret: process.env.META_APP_SECRET!,
+      enabled: true,
       systemUserAccessToken: process.env.META_SYSTEM_USER_TOKEN!,
     },
     instagram: {
       appId: process.env.META_APP_ID!,
       appSecret: process.env.META_APP_SECRET!,
+      enabled: true,
       systemUserAccessToken: process.env.META_SYSTEM_USER_TOKEN!,
     },
   },
 
   scheduling: { internalApiKey: process.env.SOCIALS_INTERNAL_API_KEY! },
-})
+} satisfies PayloadPluginSocialsConfig
+
+export const SocialsPlugin = payloadPluginSocials(socialsOptions)
 ```
 
 Add `SocialsPlugin` to your `plugins` array in `payload.config.ts`.
@@ -138,26 +141,43 @@ A resolver maps one of your documents into a `SocialSourceContext`, the shape th
 
 ```ts
 // src/plugins/socials-resolvers.ts
-import type { SourceContextResolver, SocialImage } from 'payload-plugin-socials'
+import type { SocialImage, SocialImageFormat, SourceContextResolver } from 'payload-plugin-socials'
 
 const base = () => (process.env.PUBLIC_URL ?? '').replace(/\/+$/, '')
 
 // Turn upload docs into SocialImages, skipping anything unpopulated or urlless.
 // `format` (the mime subtype) drives pre-publish format validation and conversion.
+const IMAGE_FORMATS = new Set<SocialImageFormat>([
+  'avif',
+  'bmp',
+  'gif',
+  'jpeg',
+  'png',
+  'tiff',
+  'webp',
+])
+
 const imagesFrom = (docs: unknown[], role = 'main'): SocialImage[] =>
-  docs.flatMap((d) =>
-    d && typeof d === 'object' && 'url' in d && (d as any).url
-      ? [
-          {
-            url: (d as any).url as string,
-            role,
-            width: (d as any).width,
-            height: (d as any).height,
-            format: (d as any).mimeType?.split('/')[1],
-          },
-        ]
-      : [],
-  )
+  docs.flatMap((value) => {
+    if (!value || typeof value !== 'object') return []
+    const doc = value as Record<string, unknown>
+    if (typeof doc.url !== 'string' || !doc.url) return []
+    const candidate =
+      typeof doc.mimeType === 'string' ? doc.mimeType.split('/')[1]?.toLowerCase() : undefined
+    const format =
+      candidate && IMAGE_FORMATS.has(candidate as SocialImageFormat)
+        ? (candidate as SocialImageFormat)
+        : undefined
+    return [
+      {
+        format,
+        height: typeof doc.height === 'number' ? doc.height : undefined,
+        role,
+        url: doc.url,
+        width: typeof doc.width === 'number' ? doc.width : undefined,
+      },
+    ]
+  })
 ```
 
 ### Products
@@ -175,7 +195,10 @@ export const productResolver: SourceContextResolver = async ({ payload, id }) =>
     link: `${base()}/products/${p.slug}`,
     // If you have a watermark-free image set, list it first.
     images: [...imagesFrom([p.mainImage]), ...imagesFrom(p.gallery ?? [], 'detail')],
-    videos: (p.videos ?? []).flatMap((v: any) => (v?.url ? [{ url: v.url }] : [])),
+    videos: (p.videos ?? []).flatMap((value) => {
+      if (!value || typeof value !== 'object' || !('url' in value)) return []
+      return typeof value.url === 'string' ? [{ url: value.url }] : []
+    }),
     metadata: { sku: p.sku, price: p.price, material: p.material },
   }
 }
@@ -183,7 +206,7 @@ export const productResolver: SourceContextResolver = async ({ payload, id }) =>
 
 ### Categories that publish their products' images
 
-This is the pattern to publish a collection page while offering the imagery of the products inside it. The resolver queries the member products and adds one image each to the pool; the post `link` still points at the category page. Fine's Gallery uses exactly this so staff can post a product shot that drives traffic to a category.
+This pattern publishes a collection page while offering imagery from its member records. The resolver adds one product image to the pool while keeping the outbound `link` on the category page.
 
 ```ts
 export const categoryResolver: SourceContextResolver = async ({ payload, id }) => {
@@ -197,9 +220,7 @@ export const categoryResolver: SourceContextResolver = async ({ payload, id }) =
     limit: 24, // cap so the composer media grid stays usable
   })
 
-  const memberImages = members.docs.flatMap((p: any) =>
-    imagesFrom([p.mainImage], 'product').slice(0, 1),
-  )
+  const memberImages = members.docs.flatMap((p) => imagesFrom([p.mainImage], 'product').slice(0, 1))
 
   return {
     sourceId: String(category.id),
@@ -249,7 +270,7 @@ export const projectResolver: SourceContextResolver = async ({ payload, id }) =>
 
 ### Resolver rules that matter in production
 
-1. **`metadata` is your extension surface.** Universal fields are `title`, `description`, `link`. Everything domain-specific goes in `metadata`, reachable as `{{ metadata.<key> }}`. Do not overload `baseTitle`/`baseDescription` with domain data.
+1. **`metadata` is your extension surface.** Universal context fields are `baseTitle`, `baseDescription`, and `link`; template aliases expose `title` and `description`. Put domain-specific data in `metadata`, reachable as `{{ metadata.<key> }}`.
 2. **Set `format` on images.** It flags a WebP-on-Instagram post in the composer instead of failing at publish, and it feeds automatic conversion (Step 4).
 3. **Image URLs must be publicly fetchable.** Platforms fetch server-side. Use CDN or public-bucket URLs, never localhost or short-lived signed URLs.
 4. **Resolvers are `async`.** Query other collections, follow relationships, compute values. The full Payload API is available.
@@ -294,7 +315,7 @@ pnpm payload migrate
 
 1. Start the app and open `/admin/socials`.
 2. On the **Connections** tab:
-   - **Facebook and Instagram** show as connected automatically (system-user token). Nothing to click.
+   - **Facebook and Instagram** use the configured system-user token. Verify the token, assigned assets, permissions, and actual expiry in Meta's tooling before relying on it.
    - **Pinterest** shows a Connect button. Click it, complete the OAuth flow. The refresh token is stored encrypted and rotates automatically. (Register the redirect URI in the Pinterest app first: `${PUBLIC_URL}/api/socials/pinterest/oauth/callback`.)
 3. Open a record in one of your source collections, go to the **Socials** tab, fill in a platform's fields, preview, and publish. Confirm the post on the platform, then delete it from the composer's history if it was a test.
 
@@ -379,15 +400,22 @@ scheduling: {
 
 ### Mode C: Worker loop
 
-Call the exported functions from your own long-running process:
+Call the exported functions from your own long-running process. The worker must construct the same normalized options used by the plugin:
 
 ```ts
-import { sweepDueSocialPosts, runQueuedSocialsJobs } from 'payload-plugin-socials'
+import {
+  normalizePluginOptions,
+  runQueuedSocialsJobs,
+  sweepDueSocialPosts,
+} from 'payload-plugin-socials'
+import { socialsOptions } from './socials'
+
+const normalizedOptions = normalizePluginOptions(socialsOptions)
 
 setInterval(
   async () => {
-    await sweepDueSocialPosts(payload, options)
-    await runQueuedSocialsJobs(payload, options)
+    await sweepDueSocialPosts(payload, normalizedOptions)
+    await runQueuedSocialsJobs(payload, normalizedOptions)
   },
   5 * 60 * 1000,
 )
@@ -414,16 +442,6 @@ transformations: {
 
 ## Deployment
 
-- **Private git dependency + Docker.** If your image build runs `pnpm install`, it needs a GitHub token there. Pass a build secret and rewrite the remote before install:
-
-  ```dockerfile
-  RUN --mount=type=secret,id=gh_token \
-      git config --global url."https://x-access-token:$(cat /run/secrets/gh_token)@github.com/".insteadOf "https://github.com/" \
-   && pnpm i --frozen-lockfile
-  ```
-
-  A runtime-only token does not help; it must reach the build stage.
-
 - **Import map in the build.** Run `generate:importmap` in the same build that ships the admin, or the composer and template builder render blank in production.
 
 - **Public asset URLs.** The platforms fetch images and rendition URLs from outside your network. Ensure they are public (CDN or public bucket), not localhost or short-lived signed URLs.
@@ -435,7 +453,7 @@ transformations: {
 ## Production checklist
 
 - [ ] `SOCIALS_ENCRYPTION_KEY` (32 bytes) set in every environment, stable per environment.
-- [ ] Meta system-user token generated with the six scopes; verify `expires_at: 0` in the Graph token debugger.
+- [ ] Meta token validated in the Access Token Debugger; assigned Pages, permissions, and actual expiry recorded in operations documentation.
 - [ ] Pinterest redirect URI registered; a publisher completed the one-time Connect on production.
 - [ ] `assets.autoConvert` on with a dedicated, format-free rendition collection (if your media is not JPEG).
 - [ ] Rendition and media URLs publicly fetchable from outside your network.
@@ -443,12 +461,16 @@ transformations: {
 - [ ] Migration generated, inspected, applied.
 - [ ] A scheduling trigger is firing (schedule a post 5 minutes out and watch it publish).
 - [ ] Smoke test per platform with real content, then delete.
+- [ ] Alerting covers failed and `unknown` publication rows; operators know how to verify and resolve ambiguous provider outcomes.
 
 ## Troubleshooting
 
 - **The Socials tab or template builder is blank.** Stale import map. Run `pnpm payload generate:importmap` and rebuild.
 - **A publish fails with a format error.** The image is a format the platform rejects (commonly WebP on Instagram). Enable `assets.autoConvert` with a rendition collection (Step 4), or serve JPEG.
 - **A publish fails fetching the image.** The URL is not publicly reachable. Check for localhost, expiring signed URLs, or IP allowlists.
+- **An extensionless CDN image fails preflight.** Extensions are not required; the plugin checks file-signature bytes. A failure means the signature was unreadable or unrecognized and is intentionally fail-closed while preflight is enabled.
+- **A private media origin is rejected.** Prefer a public CDN. If the origin is host-controlled and intentionally private, add its exact DNS hostname to `assets.trustedRemoteHosts`; this explicitly bypasses private-address rejection for that host.
+- **A post is `unknown`.** The provider may have accepted the write even though the response was lost, or the provider returned an ID but final audit persistence failed. The latter path captures that ID whenever the database accepts the safety-fence update. Verify the destination first; then use `POST /api/socials/posts/{id}/resolve` with `outcome: 'published'` plus the provider ID, or `outcome: 'not-published'`. Do not retry before reconciling.
 - **Pinterest connects but publishing 403s.** The account may lack a required scope, or the app may be in Trial Access. See [docs/pinterest.md](./pinterest.md).
 - **Scheduled posts never publish.** No sweep trigger is firing. Confirm your scheduler is POSTing `/api/socials/internal/jobs/sweep` (Step 7).
 - **A category composer shows no product images.** The `where` clause in the category resolver does not match your products-to-categories relationship. Adjust the field name to your schema.

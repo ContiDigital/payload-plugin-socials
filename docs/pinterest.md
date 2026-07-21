@@ -1,14 +1,13 @@
 # Pinterest setup
 
 This guide walks through creating a Pinterest app, granting the right scopes,
-and connecting it to the plugin. For the publishing API itself, see the
-[Publishing](../README.md#publishing) section of the README.
+and connecting it to the plugin. For publication behavior, see
+[Publication identity and retries](../README.md#publication-identity-and-retries).
 
 ## Prerequisites
 
-- A Pinterest **business** account (convert a personal account under Settings
-  if needed; write scopes are rate-limited far below business on personal
-  accounts).
+- A Pinterest **business** account and an app approved for the access tier your
+  deployment needs.
 - A public HTTPS URL for your Payload host, so Pinterest can redirect back to
   the OAuth callback.
 
@@ -43,23 +42,20 @@ without it.
 
 ## 4. Access tiers and review
 
-Pinterest apps start in **Trial Access**, where pins are visible only to the
-account that created them, with low quotas. To publish to a real audience you
-need **Standard Access**, which requires an app review (a screen recording of
-the OAuth flow and the publishing flow). Review typically takes a few business
-days. There is also an invite-only **Standard Plus** tier.
+Pinterest apps start in **Trial Access**, where API-created Pins and boards are
+visible only to their creator and quotas are lower. Production publishing needs
+**Standard Access**, which requires review and a recording of the OAuth and API
+flow. Consult Pinterest's current [access-tier documentation](https://developers.pinterest.com/docs/key-concepts/access-tiers/) for review and quota details.
 
 You can build and test the entire integration end to end on Trial Access before
 requesting Standard, because trial pins are real (just private to your account).
 
 ## 5. Tokens
 
-The plugin uses **continuous refresh tokens** (`refresh_on=true`). The access
-token lasts 30 days and the refresh token lasts 60 days and is refreshable
-indefinitely, so as long as the connection is exercised at least every 60 days
-it stays alive. The legacy non-renewable refresh token is deprecated and the
-plugin does not use it. Each refresh persists the most recent refresh token,
-which Pinterest may rotate.
+The plugin uses Pinterest's continuous refresh-token flow. At the time of this
+release, Pinterest documents 30-day access tokens and 60-day continuously
+refreshable refresh tokens. Each refresh persists the latest token in case the
+provider rotates it. Re-check Pinterest's current [authentication documentation](https://developers.pinterest.com/docs/getting-started/set-up-authentication-and-authorization/) when configuring operations.
 
 ## 6. Configure the plugin
 
@@ -85,9 +81,11 @@ Then connect from `/admin/socials`.
   Use a public CDN URL.
 - **Video source allowlist.** Video Pins use Pinterest's register and upload
   flow, so the plugin streams bytes from the source URL. Every source and
-  redirect host must be HTTPS and explicitly listed in `allowedVideoHosts`.
-  The source must provide `Content-Length` and an MP4, MOV, or M4V content type;
-  the plugin rejects files above Pinterest's 2 GB limit before transfer.
+  redirect host must be HTTPS, explicitly listed in `allowedVideoHosts`, and
+  resolve only to public IP space. Each connection is pinned to its validated
+  address. The source must provide `Content-Length` and an MP4, MOV, or M4V
+  content type; the plugin enforces the 2 GB limit against both the header and
+  the streamed body and rejects a body whose actual length differs.
 - **Minimum width 600px.** The plugin's preflight flags images below this. Aim
   for 1000 by 1500 (a 2:3 ratio) for the best placement.
 - **No Idea or Story pins.** They are not writable through the v5 API, so the

@@ -1,60 +1,48 @@
 # payload-plugin-socials
 
-A social publishing control center for [Payload CMS](https://payloadcms.com) v3.
+Multi-platform organic social publishing for [Payload CMS](https://payloadcms.com) 3.
 
-Compose, preview, template, schedule, publish, and track organic posts across Pinterest, Instagram, Facebook, and Google Business Profile, all from inside Payload's admin panel and driven by the content you already manage. Every platform is a real API integration with encrypted OAuth, idempotent publishing, and a full audit trail. No copy-paste export tabs, no manual mode.
+Compose, preview, template, schedule, publish, reconcile, and measure posts across Pinterest, Instagram Business, Facebook Pages, and Google Business Profile. The plugin provides real API adapters, encrypted credential storage, idempotency controls, a durable audit trail, and Payload-native admin surfaces. It does not provide a copy-and-paste fallback or embed application-specific catalog logic.
 
-**Running in production at [Fine's Gallery](https://finesgallery.com).** This plugin powers real social publishing for Fine's Gallery, a 30-year luxury marble and bronze retailer doing $2.4M/year, where staff turn products, projects, and collections into Pinterest pins and Instagram and Facebook posts without leaving the CMS. It began as the Pinterest engine behind that store and was generalized into the four-platform plugin documented here.
+The Pinterest path is derived from a production integration. Facebook, Instagram, and Google Business Profile are implemented with contract-tested adapters but should be canary-tested with each host's approved platform applications before production use.
 
-The plugin ships the reusable machinery and nothing else: the composer, the platform adapters, encrypted token storage, the template engine, scheduling, and the audit collection. Anything application-specific (segments, catalog feeds, product enrichment) stays in your host code, reached through the source resolvers you write.
+## What it adds
 
-## Why it exists
+- A per-record Socials composer injected into the collections you choose.
+- A standalone multi-channel composer at `/admin/socials`.
+- Plugin-owned `social-posts` and `social-templates` collections.
+- A hidden `socials-connections` global with AES-256-GCM encrypted tokens and key rotation.
+- Pinterest image/video Pins, Instagram images/Reels/Stories/Carousels, Facebook link/photo/multi-photo/video posts, and GBP Standard/Event/Offer/Alert Local Posts.
+- Destination discovery, preview, server-side validation, publication, history, deletion, reconciliation, insights, OAuth, and webhook endpoints.
+- Payload Jobs task definitions for scheduled publication, retries, insights, and credential refresh. The host controls when workers run.
+- Optional image-format preflight and deterministic JPEG rendition generation.
 
-Publishing the same catalog to four networks by hand is slow, error-prone, and impossible to audit. Off-the-shelf schedulers live outside your data and can't see your products, prices, or media. This plugin closes that gap:
-
-- **Your content is the source.** Open a product, a blog post, or a project and publish it directly. Copy and media come from a resolver you write, so a post is always in sync with the record.
-- **One composer, every platform.** The same panel drives Pinterest boards, Facebook Pages, Instagram feeds, Reels, Stories, and Carousels, and Google Business Profile posts, with a live per-platform preview and per-platform character limits.
-- **Publish once, safely.** Every publish is idempotent and audited; re-publishing the same content returns the existing post instead of duplicating it.
-- **Templated, on-brand copy.** Operator-defined transformations and staff-editable templates keep voice consistent across thousands of posts.
-- **Built for real infrastructure.** Encrypted tokens, access control on every surface, format-safe media, and scheduling that plugs into whatever you already run.
-
-## What the plugin does
-
-When enabled, the plugin:
-
-1. Adds a **Socials** tab to any collection you choose, with a per-record composer: pick a platform, pick a destination (board, Page, IG account, location), pick a format, choose and order media, write or template the copy, watch a live preview, then publish or schedule.
-2. Mounts a **standalone composer** at `/admin/socials` for ad-hoc posts that aren't tied to a document, publishable to several channels at once.
-3. Registers a `social-posts` collection (one audited, idempotent row per publish, with per-platform status, external IDs, and insights) and a `social-templates` collection (reusable copy templates bound to a source kind).
-4. Stores OAuth tokens **encrypted at rest** (AES-256-GCM) in a hidden `socials-connections` global, with key rotation support.
-5. Exposes a **full REST surface** under `/api/socials/*`: OAuth, destination discovery, preview, validate, publish, history, delete, insights, and scheduling.
-6. Enforces **access control** on every endpoint and every admin surface through your own `authorize` function. Users you reject see nothing at all.
-7. Handles **platform media rules** automatically: pre-publish format validation and optional WebP/AVIF to JPEG transcoding for the platforms that demand it.
-8. Defines the **scheduled-publish, insights-refresh, and connection-refresh** tasks. You wire the trigger (Payload cron, EventBridge, a worker loop, whatever you run).
-
-Everything is driven by **source resolvers** you write: small functions that map one of your documents into a channel-agnostic shape the composer understands. Register a resolver per collection kind and the composer, templates, and copy builders work identically across all of them.
+The host supplies source resolvers, authorization, credentials, the encryption key, and any scheduling trigger.
 
 ## Requirements
 
-- Payload CMS `^3.37.0`
-- Node.js `^18.20.2 || >=20.9.0`
-- **A long-running server process** for scheduling (EC2, ECS, a VPS, a worker). Immediate publishing works anywhere; see [Scheduling](#scheduling).
+- Payload CMS `^3.84.1`
+- Node.js `>=22.12.0`
+- pnpm 9 or 10 when working in this repository
+- `sharp` only when `assets.autoConvert` is enabled
+- A public HTTPS origin for OAuth callbacks and provider-fetchable media
 
 ```bash
 pnpm add payload-plugin-socials
 ```
 
-## Platform maturity
+## Platform readiness
 
-| Platform                    | Status         | Capabilities                                                                                                                                                                                                                                                                |
-| --------------------------- | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Pinterest**               | **Production** | OAuth, board discovery and creation, image and video pins, insights. The originating integration, running against real catalogs.                                                                                                                                            |
-| **Facebook Pages**          | **Production** | Text, link, single photo, multi-photo, and video posts. Live at Fine's Gallery via a Business Manager system-user token.                                                                                                                                                    |
-| **Instagram Business**      | **Production** | Image, video, Reels, Stories, and Carousel posts. Live at Fine's Gallery via a Business Manager system-user token.                                                                                                                                                          |
-| **Google Business Profile** | Experimental   | LocalPosts (Standard, Event, Offer, Alert) implemented to spec, not yet exercised against the live API. GBP posting requires Google's Basic API Access approval per host, so validate in your own approved project. See [the GBP guide](./docs/google-business-profile.md). |
+| Platform                | Implementation                                                                                         | Release guidance                                                                                            |
+| ----------------------- | ------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------- |
+| Pinterest               | OAuth, board discovery/CRUD, image and video Pins, insights, delete                                    | Production-used; run a sandbox or controlled-account canary for host credentials                            |
+| Facebook Pages          | System-user or OAuth credentials; link, photo, multi-photo, video, native scheduling, insights, delete | Production-used; validate Page permissions and one controlled post                                          |
+| Instagram Business      | System-user or OAuth credentials; image, Reels, Stories, Carousel, insights                            | Production-used; deletion is not exposed by Meta and requires local reconciliation after removal in the app |
+| Google Business Profile | OAuth or service account; account/location discovery; Standard, Event, Offer, Alert; insights, delete  | API-complete; requires Google Basic API Access and a host-owned live canary                                 |
 
-Three of the four platforms are live in production. Google Business Profile is code-complete and gated only by Google's per-host access approval, which every GBP integrator obtains independently.
+Provider approval, quotas, and policy compliance remain the host's responsibility. See the platform guides before enabling an adapter.
 
-## Minimal setup
+## Minimal configuration
 
 ```ts
 import { buildConfig } from 'payload'
@@ -63,10 +51,8 @@ import { payloadPluginSocials } from 'payload-plugin-socials'
 export default buildConfig({
   plugins: [
     payloadPluginSocials({
-      encryptionKey: process.env.SOCIALS_ENCRYPTION_KEY!, // 32 bytes; hex or base64
+      encryptionKey: process.env.SOCIALS_ENCRYPTION_KEY!,
 
-      // Who can use the plugin. `scope` is 'admin' (manage connections and
-      // templates) or 'publisher' (compose and publish). Map onto your roles.
       authorize: async ({ req, scope }) => {
         const role = req.user?.role
         if (!role) return false
@@ -75,39 +61,35 @@ export default buildConfig({
           : ['admin', 'owner', 'editor'].includes(role)
       },
 
-      // One resolver per collection you want to publish from.
       sources: {
         product: async ({ payload, id }) => {
-          const p = await payload.findByID({ collection: 'products', id, depth: 1 })
+          const product = await payload.findByID({ collection: 'products', id, depth: 1 })
           return {
-            sourceId: String(p.id),
+            sourceId: String(product.id),
             sourceKind: 'product',
-            baseTitle: p.title,
-            baseDescription: p.description ?? '',
-            link: `${process.env.PUBLIC_URL}/products/${p.slug}`,
-            images: (p.gallery ?? [])
-              .filter((m) => m?.url)
-              .map((m, i) => ({ url: m.url, role: i === 0 ? 'main' : 'detail' })),
+            baseTitle: product.title,
+            baseDescription: product.description ?? '',
+            link: `${process.env.PUBLIC_URL}/products/${product.slug}`,
+            images: (product.gallery ?? []).flatMap((asset, index) =>
+              typeof asset === 'object' && asset?.url
+                ? [{ role: index === 0 ? 'main' : 'detail', url: asset.url }]
+                : [],
+            metadata: { sku: product.sku },
           }
         },
       },
 
-      // Where the Socials tab appears, and which resolver drives each collection.
       admin: {
-        mode: 'both',
         injectInto: [{ collection: 'products', sourceKind: 'product' }],
+        mode: 'both',
       },
 
       platforms: {
-        facebook: {
-          appId: process.env.META_APP_ID!,
-          appSecret: process.env.META_APP_SECRET!,
-          systemUserAccessToken: process.env.META_SYSTEM_USER_TOKEN!,
-        },
-        instagram: {
-          appId: process.env.META_APP_ID!,
-          appSecret: process.env.META_APP_SECRET!,
-          systemUserAccessToken: process.env.META_SYSTEM_USER_TOKEN!,
+        pinterest: {
+          clientId: process.env.PINTEREST_APP_ID!,
+          clientSecret: process.env.PINTEREST_APP_SECRET!,
+          enabled: true,
+          redirectUri: `${process.env.PUBLIC_URL}/api/socials/pinterest/oauth/callback`,
         },
       },
     }),
@@ -115,84 +97,119 @@ export default buildConfig({
 })
 ```
 
-Then generate types, generate the admin import map, and create a migration:
+After adding or upgrading the plugin, generate the host-owned artifacts and inspect the migration before applying it:
 
 ```bash
 pnpm payload generate:types
-pnpm payload generate:importmap   # required, or the admin components render blank
-pnpm payload migrate:create socials && pnpm payload migrate
+pnpm payload generate:importmap
+pnpm payload migrate:create socials
+pnpm payload migrate
 ```
 
-That mounts the REST surface under `/api/socials/*`, adds a Socials tab to your products collection, registers the `social-posts` and `social-templates` collections and the `socials-connections` global, and adds the `/admin/socials` route. See [docs/installation.md](./docs/installation.md) for the full walkthrough.
+The plugin never creates or runs migration files.
 
-## Configuration reference
+## Configuration
 
-### Required options
+Required options:
 
-| Option          | Type                                    | Description                                                               |
-| --------------- | --------------------------------------- | ------------------------------------------------------------------------- |
-| `encryptionKey` | `string \| Buffer`                      | 32-byte key (hex or base64) for encrypting stored OAuth tokens            |
-| `authorize`     | `({ req, scope }) => boolean`           | Access control for the API and admin surfaces; `scope` is admin/publisher |
-| `sources`       | `Record<string, SourceContextResolver>` | At least one resolver, keyed by source kind                               |
-| `platforms`     | `object`                                | At least one platform configured (Pinterest, Facebook, Instagram, GBP)    |
-
-### All options
+| Option          | Purpose                                                                                       |
+| --------------- | --------------------------------------------------------------------------------------------- |
+| `encryptionKey` | A 32-byte Buffer, 64-character hex string, or valid base64 key used for credential encryption |
+| `authorize`     | Host authorization for `publisher` and `admin` scopes                                         |
+| `sources`       | At least one source-kind-to-resolver mapping                                                  |
+| `platforms`     | At least one declared platform; each adapter also has an `enabled` flag                       |
 
 ```ts
 payloadPluginSocials({
-  // --- Required ---
-  encryptionKey: string | Buffer,                 // 32 bytes, hex or base64
-  authorize: ({ req, scope }) => boolean | Promise<boolean>,
-  sources: Record<string, SourceContextResolver>, // one per source kind
+  encryptionKey,
+  authorize,
+  sources,
   platforms: {
-    pinterest?: { clientId, clientSecret, redirectUri, environment?: 'production' | 'sandbox' },
-    facebook?:  { appId, appSecret, systemUserAccessToken?, redirectUri?, apiVersion? },
-    instagram?: { appId, appSecret, systemUserAccessToken?, redirectUri?, apiVersion? },
-    gbp?:       { clientId, clientSecret, redirectUri, serviceAccount? },
-  },
+    pinterest?: {
+      enabled: boolean
+      clientId?: string
+      clientSecret?: string
+      redirectUri?: string
+      environment?: 'production' | 'sandbox'
+      allowedVideoHosts?: string[]
+    }
+    facebook?: {
+      enabled: boolean
+      appId?: string
+      appSecret?: string
+      redirectUri?: string
+      systemUserAccessToken?: string
+      apiVersion?: `v${number}.${number}`
+    }
+    instagram?: {
+      enabled: boolean
+      appId?: string
+      appSecret?: string
+      redirectUri?: string
+      systemUserAccessToken?: string
+      apiVersion?: `v${number}.${number}`
+    }
+    gbp?: {
+      enabled: boolean
+      clientId?: string
+      clientSecret?: string
+      redirectUri?: string
+      serviceAccount?: { clientEmail: string; privateKey: string; impersonate?: string }
+    }
+  }
 
-  // --- Admin UI ---
+  authCollection?: string // auto-detected only when the host has exactly one auth collection
   admin?: {
-    mode?: 'route' | 'dashboard' | 'both' | 'headless',  // default: 'route'
-    route?: `/${string}`,                                // default: '/socials'
-    navLabel?: string,                                   // default: 'Socials'
-    injectInto?: Array<{ collection, sourceKind, label?, tabPosition? }>,
-  },
-
-  // --- Copy ---
-  transformations?: SocialsTransformations,  // config-first, per-source-kind copy
-  copyOverrides?: SocialsCopyOverrides,       // simple function overrides
-
-  // --- Image pipeline ---
+    mode?: 'route' | 'dashboard' | 'both' | 'headless'
+    route?: `/${string}`
+    navLabel?: string
+    injectInto?: Array<{
+      collection: string
+      sourceKind: string
+      label?: string
+      tabPosition?: 'append' | 'before-last' | number
+    }>
+  }
+  api?: { basePath?: `/${string}` }
+  transformations?: SocialsTransformations
+  copyOverrides?: SocialsCopyOverrides
   assets?: {
-    autoConvert?: boolean,          // transcode disallowed formats to JPEG
-    renditionCollection?: string,   // upload collection for converted renditions
-    jpegQuality?: number,           // default: 82
-    preflight?: boolean,            // default: true; validate formats before publish
-  },
-
-  // --- Scheduling ---
+    preflight?: boolean
+    autoConvert?: boolean
+    renditionCollection?: string
+    jpegQuality?: number
+    remoteFetchTimeoutMs?: number
+    trustedRemoteHosts?: string[]
+  }
   scheduling?: {
-    internalApiKey?: string,
-    autoRun?: { cron, insightsRefreshCron?, connectionRefreshCron?, queue? },
-    sweepBatchSize?: number,
-    connectionRefreshWindowSeconds?: number,
-    insightsRefreshWindowSeconds?: number,
-  },
-
-  // --- API + operations ---
-  api?: { basePath?: `/${string}` },  // default: '/socials'
-  rateLimit?: SocialsRateLimitConfig, // concurrency, retries, backoff, distributed store
-  webhooks?: SocialsWebhookConfig,    // optional comment/mention receivers
-  previousEncryptionKeys?: (string | Buffer)[],  // for key rotation
-  testMode?: boolean,                 // e.g. Pinterest sandbox
-  disabled?: boolean,                 // build config without the plugin active
+    internalApiKey?: string
+    autoRun?: {
+      cron: string
+      insightsRefreshCron?: string
+      connectionRefreshCron?: string
+      queue?: string
+    }
+    sweepBatchSize?: number
+    drainBatchSize?: number
+    connectionRefreshWindowSeconds?: number
+    insightsRefreshWindowSeconds?: number
+  }
+  rateLimit?: SocialsRateLimitConfig
+  coordination?: SocialsCoordinationConfig
+  webhooks?: SocialsWebhookConfig
+  previousEncryptionKeys?: readonly (string | Buffer)[]
+  testMode?: boolean
+  disabled?: boolean
 })
 ```
 
+If a host has multiple auth-enabled collections, `authCollection` is required so the optional `publishedBy` relationship has an unambiguous target. A host with no auth collection may omit it; request authorization still remains mandatory.
+
+Version `0.9.x` supports one `payloadPluginSocials(...)` instance per Payload config. Combine all enabled platforms and source resolvers in that instance. The plugin-owned collection, global, endpoint, and task slugs are intentionally fixed, and task runtime options are associated with the Payload instance; applying two plugin instances to one Payload config would create conflicting ownership.
+
 ## Source resolvers
 
-Resolvers are the primary integration point. A resolver maps one of your documents into a `SocialSourceContext`, the channel-agnostic shape the composer, templates, and copy builders all operate on. You write one per source kind; the composer treats them all the same.
+A resolver converts a host document into the intentionally small, channel-neutral `SocialSourceContext`:
 
 ```ts
 type SourceContextResolver = (args: {
@@ -201,402 +218,154 @@ type SourceContextResolver = (args: {
   req?: PayloadRequest
 }) => Promise<SocialSourceContext>
 
-interface SocialSourceContext {
-  sourceId: string // stable id of the record (stringified)
-  sourceKind: string // the kind key, e.g. 'product'
-  baseTitle: string // channel-agnostic title
-  baseDescription: string // channel-agnostic body
-  link: string // outbound URL (bake in UTM params if you want)
-  images: SocialImage[] // in preference order; the UI surfaces all of them
-  videos?: SocialVideo[]
-  modelLabel?: string | null // optional secondary label
-  metadata?: Record<string, unknown> // anything else; reachable in templates as {{ metadata.key }}
-}
-
-interface SocialImage {
-  url: string // must be publicly fetchable by the platform
-  role: 'main' | 'detail' | 'lifestyle' | string
-  width?: number
-  height?: number
-  format?: 'jpeg' | 'png' | 'webp' | 'gif' | 'avif' | 'bmp' | 'tiff'
-  alt?: string
+type SocialSourceContext = {
+  sourceId: string
+  sourceKind: string
+  baseTitle: string
+  baseDescription: string
+  link: string
+  images: Array<{
+    url: string
+    role: string
+    width?: number
+    height?: number
+    format?: 'avif' | 'bmp' | 'gif' | 'jpeg' | 'png' | 'tiff' | 'webp'
+    alt?: string
+  }>
+  videos?: Array<{ url: string; posterUrl?: string }>
+  modelLabel?: string | null
+  metadata?: Record<string, unknown>
 }
 ```
 
-### Register a resolver per collection type
+Use a stable string `sourceId`, keep domain fields in `metadata`, and return durable public HTTPS media URLs. Provider fetchers cannot use localhost, private networks, or short-lived signed URLs. Exact `metadata.*` paths are available to templates.
 
-The point of the resolver registry is that **any collection can become a social source**. A product, a blog post, a project, a category: each just needs a function that produces a `SocialSourceContext`. Register the kinds you want and point `admin.injectInto` at the matching collections.
+## Copy and templates
 
-```ts
-sources: {
-  product: async ({ payload, id }) => {
-    const p = await payload.findByID({ collection: 'products', id, depth: 1 })
-    return {
-      sourceId: String(p.id),
-      sourceKind: 'product',
-      baseTitle: p.title,
-      baseDescription: p.description ?? '',
-      link: `${base}/products/${p.slug}`,
-      images: imagesFrom(p.gallery),
-      metadata: { material: p.material, price: p.price },  // -> {{ metadata.material }}
-    }
-  },
+Copy resolves in this order:
 
-  blogPost: async ({ payload, id }) => {
-    const post = await payload.findByID({ collection: 'posts', id, depth: 1 })
-    return {
-      sourceId: String(post.id),
-      sourceKind: 'blogPost',
-      baseTitle: post.title,
-      baseDescription: post.excerpt ?? '',
-      link: `${base}/blog/${post.slug}`,
-      images: imagesFrom([post.heroImage]),
-      metadata: { author: post.author?.name, published: post.publishedOn },
-    }
-  },
+1. A template selected for the post.
+2. The default template for the source kind.
+3. A source-kind or `'*'` config transformation.
+4. `copyOverrides`.
+5. Built-in defaults.
 
-  project: async ({ payload, id }) => {
-    const project = await payload.findByID({ collection: 'projects', id, depth: 1 })
-    return {
-      sourceId: String(project.id),
-      sourceKind: 'project',
-      baseTitle: project.title,
-      baseDescription: project.description ?? '',
-      link: `${base}/work/${project.slug}`,
-      images: imagesFrom([project.hero, ...(project.gallery ?? [])]),
-      metadata: { location: project.location, completed: project.date },
-    }
-  },
-},
-
-admin: {
-  mode: 'both',
-  injectInto: [
-    { collection: 'products', sourceKind: 'product' },
-    { collection: 'posts',    sourceKind: 'blogPost' },
-    { collection: 'projects', sourceKind: 'project' },
-  ],
-},
-```
-
-Guidance that pays off in production:
-
-- **`metadata` is the extension surface.** Every key you place there is reachable in templates as `{{ metadata.<key> }}` and appears in the template builder's field picker once a sample record is resolved. If a copywriter asks for a field, expose it here. Do not stuff domain fields into `baseTitle`/`baseDescription`.
-- **Set `format` on images** (the mime subtype). It powers pre-publish format validation, so a WebP image on an Instagram post is flagged in the composer instead of failing at publish time. See [Image handling](#image-handling).
-- **Image URLs must be publicly fetchable.** The platforms fetch your images server-side: no localhost, no signed URLs that expire quickly, no IP allowlists. Point resolvers at your CDN.
-- **Pull related records if it helps.** A category resolver can query the products in that category and add their images to `images`, while `link` still points at the category page. A resolver is just a function; use the full Payload API.
-
-### Enrich a parent from its children (a real pattern)
-
-```ts
-category: async ({ payload, id }) => {
-  const category = await payload.findByID({ collection: 'categories', id, depth: 1 })
-  const members = await payload.find({
-    collection: 'products',
-    where: { categories: { in: [id] } },
-    depth: 1,
-    limit: 24,
-  })
-  return {
-    sourceId: String(category.id),
-    sourceKind: 'category',
-    baseTitle: category.title,
-    baseDescription: category.description ?? '',
-    link: `${base}/browse/${category.slug}`,  // link stays on the category page
-    images: [
-      ...imagesFrom([category.image]),
-      ...members.docs.flatMap((p) => imagesFrom([p.mainImage])),  // but publish a product shot
-    ],
-  }
-},
-```
-
-## Copy: transformations and templates
-
-Default copy is generated from the source context. You customize it two ways, and they layer.
-
-**Config transformations** are the operator-set defaults, declared in code and keyed by source kind. Each field is a template string (rendered through the `{{ variable | filter }}` engine) or a function that receives the full context.
+Transform strings use the safe `{{ path | filter }}` renderer. Supported filters are `upper`, `lower`, `trim`, `truncate:N`, and `default:text`.
 
 ```ts
 transformations: {
   product: {
-    pinterestTitle: '{{ title | upper }} | {{ metadata.material }}',
-    pinterestHashtags: (ctx) => ['#design', `#${ctx.metadata?.material ?? 'home'}`],
+    pinterestTitle: '{{ title }} | {{ metadata.material }}',
+    instagramCaption: '{{ title }}\n\n{{ description | truncate:2000 }}',
   },
-  '*': {
-    facebookMessage: '{{ title }}\n\n{{ description | truncate:300 }}',
-  },
-},
+  '*': { facebookMessage: '{{ title }}\n\n{{ description | truncate:400 }}' },
+}
 ```
 
-**Templates** are staff-editable variants, created in the admin and bound to a collection. Each template is tied to a source kind, so a product template only appears when composing from products. Mark one "default for this collection" and it auto-applies. A template built in the admin uses the same interpolation engine, with a token picker scoped to that collection's real fields.
+## Publication identity and retries
 
-Precedence, most specific first: a template chosen for the post, then a default template for the kind, then config `transformations`, then the built-in copy builders.
+The default identity is derived from the platform, source, destination, format where relevant, and primary asset. Copy edits change the audit `sourceHash`, not the default identity. A previously published identity returns its existing reference.
 
-Available filters: `upper`, `lower`, `trim`, `truncate:N`, `default:text`.
+Use `publicationKey` in a platform input when the caller owns a stable logical campaign identity. Use `idempotencyKeyOverride` only to adopt a known legacy 64-character SHA-256 key during migration. Reusing either value intentionally addresses the same audit row.
 
-## Platform credentials
+The plugin retries safe reads and explicitly retryable throttling responses. It does not blindly replay an unsafe provider `POST` when its typed transport result cannot rule out provider acceptance. A provider success followed by local audit-persistence failure is fenced the same way, with the returned provider ID captured on the row whenever the database is reachable. The row becomes `unknown` (or remains non-reclaimable as `publishing` if the fence write also fails) and automatic publication retry is suppressed until an operator verifies the provider and calls:
 
-Each platform is configured under `platforms`. Only the platforms you configure are enabled.
+```http
+POST /api/socials/posts/{postId}/resolve
+Content-Type: application/json
 
-- **Pinterest** is OAuth only. Supply `clientId`, `clientSecret`, `redirectUri`. A publisher connects once from `/admin/socials`; the refresh token is stored encrypted and rotates automatically.
-- **Facebook and Instagram** share a Meta app. For a single-tenant install, a Business Manager **system-user token** is the simplest option: it never expires, needs no OAuth flow or App Review, and shows as connected automatically. Supply `appId`, `appSecret`, `systemUserAccessToken`. For multi-tenant products, supply `redirectUri` instead and each customer connects their own Page.
-- **Google Business Profile** is OAuth with a `business.manage` scope, gated by Google's Basic API Access approval.
-
-Per-platform setup, scopes, and gotchas live in the platform guides:
-
-- [Pinterest](./docs/pinterest.md)
-- [Instagram](./docs/instagram.md)
-- [Facebook](./docs/facebook.md)
-- [Google Business Profile](./docs/google-business-profile.md)
-
-## The composer
-
-The composer is where the work happens, and it adapts to each platform:
-
-- **Platform tabs** switch between Pinterest, Instagram, Facebook, and GBP, each with its own destination picker (board, Page, IG account, location), format selector, and copy fields. State is kept per platform, so you can tune a post for each network before publishing.
-- **Format-aware fields.** Choosing a format (Reel, Carousel, Offer, and so on) reshapes the form and the accepted media. Selecting an image format hides video, and vice versa; incompatible selections are pruned with a notice instead of failing at publish.
-- **Media pool with ordering.** Images and videos from the resolver, plus anything added from the media library or a URL, share one pool across the platform tabs. For multi-asset formats (Carousel, multi-photo) you drag or arrow-key to set the exact order, shown with numbered badges.
-- **Live preview.** A per-platform preview renders the title, body, link, and selected media as they will appear, updating as you type.
-- **Character limits and validation** are enforced per platform in the UI, and again server-side at publish, so limits are never silently exceeded.
-
-## Publishing
-
-From a document's Socials tab or the standalone composer: choose a platform and destination, review the preview, and publish. Every publish is **idempotent and audited**. The plugin computes a per-platform key from `(platform, source, destination, primary asset)` and upserts a `social-posts` row on it, so publishing the same content twice returns the existing post instead of duplicating it. Each row records the platform, destination, status, external ID and URL, and a content fingerprint, giving you a complete, queryable history of what was posted where.
-
-Programmatic publishing is available for automations and scripts:
-
-```ts
-import { composeAndPublish } from 'payload-plugin-socials'
-
-const result = await composeAndPublish({
-  payload,
-  platform: 'pinterest',
-  source: { kind: 'product', id: 42 },
-  input: { boardId: '...' /* platform-specific fields */ },
-})
+{ "outcome": "published", "externalId": "provider-id", "externalUrl": "https://..." }
 ```
 
-### Deleting a post
-
-Published posts can be deleted from the composer's history list. The plugin removes the post upstream (where the platform allows it) and soft-deletes the local row to `status: 'deleted'`, preserving the audit trail and idempotency anchor. Rows are never hard-deleted.
-
-Instagram is the exception: the Graph API has no delete endpoint for published media. The composer offers a **Mark deleted (removed in app)** action instead, which reconciles the local record after you remove the post in the Instagram app.
+or `{ "outcome": "not-published" }`. This prevents retry logic from creating duplicate public posts when the provider accepted a request but its response was lost.
 
 ## Scheduling
 
-The plugin defines the tasks; you fire the trigger. Set `scheduling.internalApiKey` (and optionally `scheduling.autoRun.cron`), then pick one:
+The plugin defines jobs; the host supplies cadence and workers. Any of these modes is valid:
 
-- **Native Payload Jobs.** Set `scheduling.autoRun.cron` and run a Payload jobs worker. The plugin registers the autoRun entry and the task definitions.
-- **External cron.** Have EventBridge, Vercel cron, a GitHub Action, or a plain cron job `POST /api/socials/internal/jobs/sweep` every few minutes with the `X-Socials-API-Key` header.
-- **Long-running worker.** Import `sweepDueSocialPosts` and `runQueuedSocialsJobs` and call them in a loop.
+- Payload Jobs `autoRun` configured through `scheduling.autoRun`.
+- An external scheduler that calls `POST /api/socials/internal/jobs/sweep` with `X-Socials-API-Key`.
+- A host worker that calls `sweepDueSocialPosts(payload, normalizedOptions)` and `runQueuedSocialsJobs(payload, normalizedOptions)`.
 
-A scheduled post is a `queued` row with a `scheduledAt` in the future; the sweep publishes due rows. Scheduling from the composer is safe: past or near-past times are rejected rather than published immediately, and queued posts show their scheduled time and can be cancelled.
+Scheduling uses a per-revision token, rechecks the due time in the task, and cancels superseded Payload jobs when possible. The token and status checks remain the correctness fence if cancellation races with a worker.
 
-## Image handling
+Facebook's `scheduledPublishTime` is provider-native scheduling. The generic source-publish `scheduledAt` is plugin scheduling. Accepted GBP posts and native Facebook schedules remain pending until reconciliation confirms the provider state; sweep jobs provide the backstop.
 
-Platforms disagree on formats. Instagram accepts JPEG only; Facebook and GBP reject WebP and AVIF; Pinterest accepts more. If your media is not guaranteed JPEG, enable automatic conversion:
+## Image safety
 
-```ts
-assets: {
-  autoConvert: true,
-  renditionCollection: 'social-renditions',  // a dedicated upload collection, see below
-},
-```
+With preflight enabled, remote image inspection is HTTPS-only, redirect-bounded, time-bounded, and streamed under a 25 MB processing cap. Every redirect hostname is resolved and validated, and the HTTPS connection is pinned to that validated address while preserving the hostname for TLS SNI and certificate verification. DNS names resolving to local, private, link-local, documentation, or otherwise non-public IP ranges are rejected. `trustedRemoteHosts` is an explicit exact-host bypass for a host-controlled private media origin and should normally remain empty; those connections are still DNS-pinned.
 
-The plugin detects the true format by magic bytes, transcodes to JPEG with sharp, uploads the rendition under a deterministic name (re-publishes reuse it), and sends the platform the rendition URL. Idempotency keys always derive from the original URL, so conversion never fragments post identity.
+Image detection uses file signatures, not URL extensions, so extensionless CDN URLs are supported. With preflight enabled, an unreadable or unrecognized signature fails closed instead of passing an uninspected asset to a provider. Set `assets.preflight: false` only when the host deliberately accepts that pass-through behavior.
 
-The rendition collection must not itself re-encode. Point it at a plain upload collection with no `formatOptions`, or Payload will convert the plugin's JPEG right back. Full example in [docs/installation.md](./docs/installation.md).
+When `autoConvert` is enabled, configure a dedicated public upload collection with no `formatOptions`; the plugin writes deterministic JPEG renditions there. Idempotency continues to use the original media URL.
 
-## Insights and analytics
+## Access and secrets
 
-The plugin can pull engagement data back from each platform and snapshot it onto the `social-posts` row, so performance lives next to the post that produced it. The `socialInsightsRefresh` task walks published posts in a configurable window per platform, calls each adapter's insights endpoint, and stores the result on `insightsSnapshot` with a fetched-at timestamp. Trigger it on a schedule alongside the publish sweep. Pinterest pin metrics, Facebook and Instagram post metrics, and GBP LocalPost metrics are all supported by their adapters.
+Every API and admin surface calls the host's `authorize` function. `publisher` covers compose, preview, publish, history, delete, and reconciliation. `admin` covers connection and template administration.
 
-## Admin surfaces
+Stored tokens use authenticated AES-256-GCM envelopes. Keep `encryptionKey` stable and identical across all instances. During rotation, make the new key primary and temporarily provide old keys in `previousEncryptionKeys`; successfully read envelopes are rewritten with the primary key. Secret-bearing fields are redacted before plugin logs reach the host logger.
 
-- **Per-record Socials tab** on every injected collection: the full composer, plus a history list of everything published from that record with delete and reconcile actions.
-- **Standalone composer** at `/admin/socials`: compose one post and publish it to multiple channels at once, with a connections panel showing the health of each platform.
-- **Dashboard widget** (when `admin.mode` includes it): connection status at a glance.
+For multi-process deployments, provide `coordination.withLock` for credential rotation and `coordination.acquireRequestLease` for fleet-wide outbound quotas. The built-in limiter is process-local.
 
-Every one of these is gated by `authorize`, styled with Payload's theme variables, and keyboard-navigable.
+## Primary endpoints
 
-## Access control
+Paths below are relative to Payload's `/api` route and the default `/socials` plugin base.
 
-Every REST endpoint and every admin surface (the nav link, the `/admin/socials` route, the dashboard widget, the composer) is gated by your `authorize` function. A user your `authorize` rejects sees nothing: no menu entry, no route, no forms. Mutations distinguish 401 (not signed in) from 403 (signed in, not permitted).
+| Method     | Path                                                                                    | Access                    |
+| ---------- | --------------------------------------------------------------------------------------- | ------------------------- |
+| GET        | `/socials/health`                                                                       | Public, non-secret status |
+| GET        | `/socials/access`                                                                       | Capability probe          |
+| GET        | `/socials/connections`                                                                  | Admin                     |
+| POST / GET | `/socials/{platform}/oauth/start`, `/oauth/callback`                                    | Admin / OAuth state       |
+| POST       | `/socials/{platform}/disconnect`                                                        | Admin                     |
+| GET / POST | `/socials/{platform}/{kind}/{id}/preview`, `/validate`                                  | Publisher                 |
+| POST       | `/socials/{platform}/{kind}/{id}/publish`                                               | Publisher                 |
+| GET        | `/socials/{platform}/{kind}/{id}/history`                                               | Publisher                 |
+| POST       | `/socials/compose/publish`                                                              | Publisher                 |
+| DELETE     | `/socials/posts/{postId}`                                                               | Publisher                 |
+| POST       | `/socials/posts/{postId}/resolve`                                                       | Publisher                 |
+| GET        | `/socials/pinterest/boards`, `/facebook/pages`, `/instagram/accounts`, `/gbp/locations` | Publisher                 |
+| POST       | `/socials/templates/preview`                                                            | Admin                     |
+| POST       | `/socials/internal/jobs/sweep`, `/jobs/run`                                             | Scheduler API key         |
 
-`authorize` receives `{ req, scope }` where `scope` is `'admin'` (connection management, template authoring) or `'publisher'` (composing and publishing). Return truthy to allow.
+The source preview route is `GET` for UI convenience; validate and all mutations are `POST`. The internal API key is separate from Payload user authentication.
 
-## Encryption and secrets
+## Programmatic use
 
-OAuth tokens are stored encrypted with AES-256-GCM. You supply a 32-byte `encryptionKey` (hex or base64). Keep it stable for the life of the environment; changing it orphans stored tokens. To rotate, pass the old key(s) in `previousEncryptionKeys` so existing tokens decrypt during the transition. The plugin never logs token values.
-
-## Migration policy
-
-The plugin contributes schema (the `social-posts` and `social-templates` collections, the `socials-connections` global) but never writes or runs migrations. After installing or upgrading, you run `payload migrate:create` and apply it, as you would for any schema change. Version bumps that change schema are called out in the changelog.
-
-## REST endpoints
-
-All under your configured `api.basePath` (default `/socials`).
-
-| Method | Path                               | Auth                        |
-| ------ | ---------------------------------- | --------------------------- |
-| GET    | `/health`                          | none                        |
-| GET    | `/access`                          | any user (capability probe) |
-| POST   | `/{platform}/oauth/start`          | admin                       |
-| GET    | `/{platform}/oauth/callback`       | OAuth state cookie          |
-| POST   | `/{platform}/disconnect`           | admin                       |
-| GET    | `/connections`                     | admin                       |
-| GET    | `/{platform}/{kind}/{id}/preview`  | publisher                   |
-| POST   | `/{platform}/{kind}/{id}/validate` | publisher                   |
-| POST   | `/{platform}/{kind}/{id}/publish`  | publisher                   |
-| GET    | `/{platform}/{kind}/{id}/history`  | publisher                   |
-| DELETE | `/posts/{id}`                      | publisher                   |
-| POST   | `/compose/publish`                 | publisher                   |
-| POST   | `/templates/preview`               | admin                       |
-| POST   | `/internal/jobs/sweep`             | API key                     |
-
-Destination discovery endpoints (`/pinterest/boards`, `/facebook/pages`, `/instagram/accounts`, `/gbp/locations`) and the internal scheduler routes are documented in [docs/installation.md](./docs/installation.md).
-
-## Exports
+HTTP is the stable integration surface for headless services. The low-level server helper is also exported when host code already has the normalized options and source context:
 
 ```ts
-// payload-plugin-socials
-import {
-  payloadPluginSocials, // the plugin factory (default export too)
-  composeAndPublish, // programmatic publish
-  sweepDueSocialPosts, // scheduling: publish due queued posts
-  runQueuedSocialsJobs, // scheduling: drain the queue
-  renderTemplate, // the {{ }} interpolation engine
-  transformImage, // sharp-based transcode helper
-} from 'payload-plugin-socials'
-
-import type {
-  PayloadPluginSocialsConfig,
-  SourceContextResolver,
-  SocialSourceContext,
-  SocialImage,
-} from 'payload-plugin-socials'
-
-// payload-plugin-socials/client — admin components (for manual placement)
-// payload-plugin-socials/rsc    — server components
-```
-
-## Production configuration example
-
-A complete configuration publishing from several collections to all four platforms, with templated copy, automatic image conversion, and scheduling. This is the shape of a real deployment.
-
-```ts
-import { payloadPluginSocials } from 'payload-plugin-socials'
-
-const base = process.env.PUBLIC_URL!
-
-payloadPluginSocials({
-  encryptionKey: process.env.SOCIALS_ENCRYPTION_KEY!,
-
-  authorize: async ({ req, scope }) => {
-    const role = req.user?.role
-    if (!role) return false
-    if (scope === 'admin') return ['admin', 'owner'].includes(role)
-    return ['admin', 'owner', 'editor', 'marketing'].includes(role)
-  },
-
-  // Publish from products, blog posts, and projects. Each resolver maps a
-  // document into the channel-agnostic shape the composer understands.
-  sources: {
-    product: async ({ payload, id }) => {
-      const p = await payload.findByID({ collection: 'products', id, depth: 1 })
-      return {
-        sourceId: String(p.id),
-        sourceKind: 'product',
-        baseTitle: p.title,
-        baseDescription: p.description ?? '',
-        link: `${base}/products/${p.slug}`,
-        images: p.images.map((m, i) => ({
-          url: m.url,
-          role: i === 0 ? 'main' : 'detail',
-          format: m.mimeType?.split('/')[1],
-        })),
-        metadata: { material: p.material, price: p.price, sku: p.sku },
-      }
+const result = await composeAndPublish({
+  ctx,
+  options: normalizedOptions,
+  payload,
+  req,
+  targets: [
+    {
+      platform: 'pinterest',
+      input: { boardId: 'board-id', imageUrl: ctx.images[0]?.url },
     },
-    blogPost: async ({ payload, id }) => {
-      const post = await payload.findByID({ collection: 'posts', id, depth: 1 })
-      return {
-        sourceId: String(post.id),
-        sourceKind: 'blogPost',
-        baseTitle: post.title,
-        baseDescription: post.excerpt ?? '',
-        link: `${base}/blog/${post.slug}`,
-        images: post.heroImage?.url ? [{ url: post.heroImage.url, role: 'main' }] : [],
-        metadata: { author: post.author?.name, published: post.publishedOn },
-      }
-    },
-    project: async ({ payload, id }) => {
-      const project = await payload.findByID({ collection: 'projects', id, depth: 1 })
-      return {
-        sourceId: String(project.id),
-        sourceKind: 'project',
-        baseTitle: project.title,
-        baseDescription: project.summary ?? '',
-        link: `${base}/work/${project.slug}`,
-        images: (project.gallery ?? []).map((m) => ({ url: m.url, role: 'main' })),
-        metadata: { location: project.location, completedAt: project.date },
-      }
-    },
-  },
-
-  // Operator-set default copy, per source kind.
-  transformations: {
-    product: {
-      pinterestTitle: '{{ title }} | {{ metadata.material }}',
-      instagramCaption: '{{ title }}\n\n{{ description | truncate:2000 }}',
-    },
-    '*': {
-      facebookMessage: '{{ title }}\n\n{{ description | truncate:400 }}',
-    },
-  },
-
-  // Convert non-JPEG media so Instagram and Facebook always get JPEG.
-  assets: { autoConvert: true, renditionCollection: 'social-renditions' },
-
-  admin: {
-    mode: 'both',
-    injectInto: [
-      { collection: 'products', sourceKind: 'product' },
-      { collection: 'posts', sourceKind: 'blogPost' },
-      { collection: 'projects', sourceKind: 'project' },
-    ],
-  },
-
-  platforms: {
-    pinterest: {
-      clientId: process.env.PINTEREST_APP_ID!,
-      clientSecret: process.env.PINTEREST_APP_SECRET!,
-      redirectUri: `${base}/api/socials/pinterest/oauth/callback`,
-    },
-    facebook: {
-      appId: process.env.META_APP_ID!,
-      appSecret: process.env.META_APP_SECRET!,
-      systemUserAccessToken: process.env.META_SYSTEM_USER_TOKEN!,
-    },
-    instagram: {
-      appId: process.env.META_APP_ID!,
-      appSecret: process.env.META_APP_SECRET!,
-      systemUserAccessToken: process.env.META_SYSTEM_USER_TOKEN!,
-    },
-  },
-
-  scheduling: { internalApiKey: process.env.SOCIALS_INTERNAL_API_KEY! },
+  ],
 })
 ```
 
+`normalizePluginOptions` is exported for worker entrypoints that construct the same host configuration outside Payload's plugin pipeline.
+
+## Release and migration policy
+
+Schema changes are versioned and documented in [CHANGELOG.md](./CHANGELOG.md). The host always generates, reviews, and applies its own Payload migration. Before production, run the repository's complete release gate and controlled canaries against each enabled provider account; automated tests never create or delete live social content.
+
 ## Documentation
 
-- [Installation and configuration walkthrough](./docs/installation.md)
-- [Pinterest setup](./docs/pinterest.md)
-- [Instagram setup](./docs/instagram.md)
-- [Facebook setup](./docs/facebook.md)
-- [Google Business Profile setup](./docs/google-business-profile.md)
+- [Installation and deployment](./docs/installation.md)
+- [Agent and headless integration](./docs/agent-integration.md)
+- [Pinterest](./docs/pinterest.md)
+- [Instagram Business](./docs/instagram.md)
+- [Facebook Pages](./docs/facebook.md)
+- [Google Business Profile](./docs/google-business-profile.md)
+- [Architecture decisions](./docs/decisions/)
+- [Security policy](./SECURITY.md)
+- [Contributing](./CONTRIBUTING.md)
 
 ## License
 
