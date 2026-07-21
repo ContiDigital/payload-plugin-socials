@@ -1,6 +1,6 @@
 {
   "name": "payload-plugin-socials",
-  "version": "0.9.0",
+  "version": "0.9.1",
   "description": "Multi-platform social publishing plugin for Payload CMS — Pinterest, Instagram Business, Facebook Pages, Google Business Profile",
   "keywords": [
     "payload",
@@ -23,6 +23,7 @@
     "url": "git+https://github.com/ContiDigital/payload-plugin-socials.git"
   },
   "license": "MIT",
+  "author": "Conti Digital",
   "packageManager": "pnpm@10.16.1",
   "sideEffects": [
     "**/*.css",
@@ -53,7 +54,8 @@
     "docs",
     "LICENSE",
     "README.md",
-    "CHANGELOG.md"
+    "CHANGELOG.md",
+    "SECURITY.md"
   ],
   "scripts": {
     "build": "pnpm clean && pnpm copyfiles && pnpm build:types && pnpm build:swc",
@@ -63,11 +65,11 @@
     "clean": "rimraf {dist,*.tsbuildinfo}",
     "copyfiles": "copyfiles -u 1 \"src/**/*.{html,css,scss,ttf,woff,woff2,eot,svg,jpg,png,json,d.ts}\" \"src/**/*.d.scss.ts\" dist/",
     "dev": "next dev dev --turbo",
-    "dev:e2e": "cross-env DATABASE_URI=file:./dev/e2e-database.db WATCHPACK_POLLING=true next dev dev --webpack",
+    "dev:e2e": "cross-env SOCIALS_E2E=true DATABASE_URI=file:./dev/e2e-database.db WATCHPACK_POLLING=true next dev dev --webpack",
     "dev:generate-importmap": "cd dev && cross-env PAYLOAD_CONFIG_PATH=./payload.config.ts ../node_modules/.bin/payload generate:importmap",
     "dev:generate-types": "pnpm dev:payload generate:types",
     "dev:payload": "cross-env PAYLOAD_CONFIG_PATH=./dev/payload.config.ts payload",
-    "generate:importmap": "pnpm dev:generate-importmap",
+    "generate:importmap": "pnpm dev:generate-importmap && prettier --write 'dev/app/(payload)/admin/importMap.js'",
     "generate:types": "pnpm dev:generate-types",
     "format": "prettier --write . --ignore-unknown",
     "format:check": "prettier --check . --ignore-unknown",
@@ -96,7 +98,7 @@
     "@payloadcms/ui": "3.86.0",
     "@playwright/test": "1.61.1",
     "@swc/cli": "0.8.1",
-    "@swc/core": "^1.15.43",
+    "@swc/core": "^1.15.46",
     "@types/node": "22.19.9",
     "@types/react": "19.2.17",
     "@types/react-dom": "19.2.3",

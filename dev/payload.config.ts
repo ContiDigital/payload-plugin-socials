@@ -14,8 +14,10 @@ import { seed } from './seed.js'
 const filename = fileURLToPath(import.meta.url)
 const dirname = path.dirname(filename)
 const publicUrl = process.env.PUBLIC_URL || 'http://localhost:3000'
-const hasMetaCredentials = Boolean(process.env.META_APP_ID && process.env.META_APP_SECRET)
-const hasGbpCredentials = Boolean(process.env.GBP_CLIENT_ID && process.env.GBP_CLIENT_SECRET)
+const isE2E = process.env.SOCIALS_E2E === 'true'
+const hasMetaCredentials = !isE2E && Boolean(process.env.META_APP_ID && process.env.META_APP_SECRET)
+const hasGbpCredentials =
+  !isE2E && Boolean(process.env.GBP_CLIENT_ID && process.env.GBP_CLIENT_SECRET)
 const testImageUrl = process.env.SOCIALS_TEST_IMAGE_URL || 'https://example.com/dev/main.jpg'
 const testLinkUrl = process.env.SOCIALS_TEST_LINK_URL || 'https://example.com/products/dev'
 const testVideoUrl = process.env.SOCIALS_TEST_VIDEO_URL
@@ -41,6 +43,11 @@ export default buildConfig({
     },
   },
   collections: [
+    {
+      slug: 'users',
+      auth: true,
+      fields: [],
+    },
     {
       slug: 'products',
       fields: [
@@ -72,6 +79,7 @@ export default buildConfig({
         renditionCollection: 'media',
       },
       authorize: () => Promise.resolve(true),
+      authCollection: 'users',
       encryptionKey:
         process.env.SOCIALS_ENCRYPTION_KEY ||
         '00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff',

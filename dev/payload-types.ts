@@ -67,12 +67,12 @@ export interface Config {
   };
   blocks: {};
   collections: {
+    users: User;
     products: Product;
     media: Media;
     'social-posts': SocialPost;
     'social-templates': SocialTemplate;
     'payload-kv': PayloadKv;
-    users: User;
     'payload-jobs': PayloadJob;
     'payload-locked-documents': PayloadLockedDocument;
     'payload-preferences': PayloadPreference;
@@ -80,12 +80,12 @@ export interface Config {
   };
   collectionsJoins: {};
   collectionsSelect: {
+    users: UsersSelect<false> | UsersSelect<true>;
     products: ProductsSelect<false> | ProductsSelect<true>;
     media: MediaSelect<false> | MediaSelect<true>;
     'social-posts': SocialPostsSelect<false> | SocialPostsSelect<true>;
     'social-templates': SocialTemplatesSelect<false> | SocialTemplatesSelect<true>;
     'payload-kv': PayloadKvSelect<false> | PayloadKvSelect<true>;
-    users: UsersSelect<false> | UsersSelect<true>;
     'payload-jobs': PayloadJobsSelect<false> | PayloadJobsSelect<true>;
     'payload-locked-documents': PayloadLockedDocumentsSelect<false> | PayloadLockedDocumentsSelect<true>;
     'payload-preferences': PayloadPreferencesSelect<false> | PayloadPreferencesSelect<true>;
@@ -138,6 +138,31 @@ export interface UserAuthOperations {
     email: string;
     password: string;
   };
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "users".
+ */
+export interface User {
+  id: number;
+  updatedAt: string;
+  createdAt: string;
+  email: string;
+  resetPasswordToken?: string | null;
+  resetPasswordExpiration?: string | null;
+  salt?: string | null;
+  hash?: string | null;
+  loginAttempts?: number | null;
+  lockUntil?: string | null;
+  sessions?:
+    | {
+        id: string;
+        createdAt?: string | null;
+        expiresAt: string;
+      }[]
+    | null;
+  password?: string | null;
+  collection: 'users';
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema
@@ -215,8 +240,9 @@ export interface SocialPost {
       | boolean
       | null;
   };
-  status: 'draft' | 'queued' | 'publishing' | 'published' | 'failed' | 'cancelled';
-  platformPublicationStatus?: ('pending' | 'publishing' | 'published' | 'failed' | 'skipped') | null;
+  status:
+    'draft' | 'queued' | 'scheduled' | 'publishing' | 'unknown' | 'published' | 'failed' | 'cancelled' | 'deleted';
+  platformPublicationStatus?: ('pending' | 'publishing' | 'unknown' | 'published' | 'failed' | 'skipped') | null;
   /**
    * Platform-side id (pin id, fb post id, ig media id, gbp localPost name).
    */
@@ -268,32 +294,7 @@ export interface SocialPost {
   createdAt: string;
 }
 /**
- * This interface was referenced by `Config`'s JSON-Schema
- * via the `definition` "users".
- */
-export interface User {
-  id: number;
-  updatedAt: string;
-  createdAt: string;
-  email: string;
-  resetPasswordToken?: string | null;
-  resetPasswordExpiration?: string | null;
-  salt?: string | null;
-  hash?: string | null;
-  loginAttempts?: number | null;
-  lockUntil?: string | null;
-  sessions?:
-    | {
-        id: string;
-        createdAt?: string | null;
-        expiresAt: string;
-      }[]
-    | null;
-  password?: string | null;
-  collection: 'users';
-}
-/**
- * Reusable post templates. Placeholders are filled per source record at compose time.
+ * Reusable post templates. Each template is bound to a collection (source kind) and its placeholders are filled per source record at compose time.
  *
  * This interface was referenced by `Config`'s JSON-Schema
  * via the `definition` "social-templates".
@@ -301,6 +302,14 @@ export interface User {
 export interface SocialTemplate {
   id: number;
   name: string;
+  /**
+   * The collection (source kind) this template is built from. The builder offers that collection’s fields, and the composer only shows this template when publishing from that collection.
+   */
+  sourceKind: 'product';
+  /**
+   * Default for this collection. When set, the composer auto-applies this template for its source kind (still honoring the platform filter below). Only one template per source kind can be the default.
+   */
+  isDefault?: boolean | null;
   /**
    * Internal note describing when to use this template.
    */
@@ -312,31 +321,31 @@ export interface SocialTemplate {
   appliesTo?: ('pinterest' | 'instagram' | 'facebook' | 'gbp')[] | null;
   templates?: {
     /**
-     * Use {{ variable }} placeholders. Available: {{title}}, {{description}}, {{material}}, {{color}}, {{category}}, {{dimensions}}, {{link}}, {{modelLabel}}, and {{metadata.<field>}}. Filters: | upper, | lower, | trim, | truncate:N, | default:text.
+     * Template for "pinterestTitle". Use the builder to pick tokens from the resolved scope and apply filters. Tokens must be mapped by the host's SourceContextResolver to produce output — fields not exposed via the resolver's metadata map will render as empty.
      */
     pinterestTitle?: string | null;
     /**
-     * Use {{ variable }} placeholders. Available: {{title}}, {{description}}, {{material}}, {{color}}, {{category}}, {{dimensions}}, {{link}}, {{modelLabel}}, and {{metadata.<field>}}. Filters: | upper, | lower, | trim, | truncate:N, | default:text.
+     * Template for "pinterestDescription". Use the builder to pick tokens from the resolved scope and apply filters. Tokens must be mapped by the host's SourceContextResolver to produce output — fields not exposed via the resolver's metadata map will render as empty.
      */
     pinterestDescription?: string | null;
     /**
-     * Use {{ variable }} placeholders. Available: {{title}}, {{description}}, {{material}}, {{color}}, {{category}}, {{dimensions}}, {{link}}, {{modelLabel}}, and {{metadata.<field>}}. Filters: | upper, | lower, | trim, | truncate:N, | default:text.
+     * Template for "pinterestAltText". Use the builder to pick tokens from the resolved scope and apply filters. Tokens must be mapped by the host's SourceContextResolver to produce output — fields not exposed via the resolver's metadata map will render as empty.
      */
     pinterestAltText?: string | null;
     /**
-     * Space or comma separated tags; a leading # is added automatically. Use {{ variable }} placeholders. Available: {{title}}, {{description}}, {{material}}, {{color}}, {{category}}, {{dimensions}}, {{link}}, {{modelLabel}}, and {{metadata.<field>}}. Filters: | upper, | lower, | trim, | truncate:N, | default:text.
+     * Space or comma separated tags; a leading # is added automatically. Use the builder to construct the template.
      */
     pinterestHashtags?: string | null;
     /**
-     * Use {{ variable }} placeholders. Available: {{title}}, {{description}}, {{material}}, {{color}}, {{category}}, {{dimensions}}, {{link}}, {{modelLabel}}, and {{metadata.<field>}}. Filters: | upper, | lower, | trim, | truncate:N, | default:text.
+     * Template for "instagramCaption". Use the builder to pick tokens from the resolved scope and apply filters. Tokens must be mapped by the host's SourceContextResolver to produce output — fields not exposed via the resolver's metadata map will render as empty.
      */
     instagramCaption?: string | null;
     /**
-     * Use {{ variable }} placeholders. Available: {{title}}, {{description}}, {{material}}, {{color}}, {{category}}, {{dimensions}}, {{link}}, {{modelLabel}}, and {{metadata.<field>}}. Filters: | upper, | lower, | trim, | truncate:N, | default:text.
+     * Template for "facebookMessage". Use the builder to pick tokens from the resolved scope and apply filters. Tokens must be mapped by the host's SourceContextResolver to produce output — fields not exposed via the resolver's metadata map will render as empty.
      */
     facebookMessage?: string | null;
     /**
-     * Use {{ variable }} placeholders. Available: {{title}}, {{description}}, {{material}}, {{color}}, {{category}}, {{dimensions}}, {{link}}, {{modelLabel}}, and {{metadata.<field>}}. Filters: | upper, | lower, | trim, | truncate:N, | default:text.
+     * Template for "gbpSummary". Use the builder to pick tokens from the resolved scope and apply filters. Tokens must be mapped by the host's SourceContextResolver to produce output — fields not exposed via the resolver's metadata map will render as empty.
      */
     gbpSummary?: string | null;
   };
@@ -475,6 +484,10 @@ export interface PayloadLockedDocument {
   id: number;
   document?:
     | ({
+        relationTo: 'users';
+        value: number | User;
+      } | null)
+    | ({
         relationTo: 'products';
         value: number | Product;
       } | null)
@@ -489,10 +502,6 @@ export interface PayloadLockedDocument {
     | ({
         relationTo: 'social-templates';
         value: number | SocialTemplate;
-      } | null)
-    | ({
-        relationTo: 'users';
-        value: number | User;
       } | null);
   globalSlug?: string | null;
   user: {
@@ -535,6 +544,28 @@ export interface PayloadMigration {
   batch?: number | null;
   updatedAt: string;
   createdAt: string;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "users_select".
+ */
+export interface UsersSelect<T extends boolean = true> {
+  updatedAt?: T;
+  createdAt?: T;
+  email?: T;
+  resetPasswordToken?: T;
+  resetPasswordExpiration?: T;
+  salt?: T;
+  hash?: T;
+  loginAttempts?: T;
+  lockUntil?: T;
+  sessions?:
+    | T
+    | {
+        id?: T;
+        createdAt?: T;
+        expiresAt?: T;
+      };
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema
@@ -609,6 +640,8 @@ export interface SocialPostsSelect<T extends boolean = true> {
  */
 export interface SocialTemplatesSelect<T extends boolean = true> {
   name?: T;
+  sourceKind?: T;
+  isDefault?: T;
   description?: T;
   enabled?: T;
   appliesTo?: T;
@@ -633,28 +666,6 @@ export interface SocialTemplatesSelect<T extends boolean = true> {
 export interface PayloadKvSelect<T extends boolean = true> {
   key?: T;
   data?: T;
-}
-/**
- * This interface was referenced by `Config`'s JSON-Schema
- * via the `definition` "users_select".
- */
-export interface UsersSelect<T extends boolean = true> {
-  updatedAt?: T;
-  createdAt?: T;
-  email?: T;
-  resetPasswordToken?: T;
-  resetPasswordExpiration?: T;
-  salt?: T;
-  hash?: T;
-  loginAttempts?: T;
-  lockUntil?: T;
-  sessions?:
-    | T
-    | {
-        id?: T;
-        createdAt?: T;
-        expiresAt?: T;
-      };
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema

@@ -42,8 +42,7 @@ next-env.d.ts
 .env
 
 /dev/media
-/dev/dev-database.db*
-/dev/e2e-database.db*
+/dev/*.db*
 
 # Playwright
 /test-results/
@@ -51,13 +50,8 @@ next-env.d.ts
 /blob-report/
 /playwright/.cache/
 
-# Internal agent memory — NOT shipped, NOT committed.
-# CLAUDE.md is the canonical project-internal context (mission, plugin authoring
-# patterns, origin context from Fine's Gallery, API references for Pinterest /
-# Meta Graph / GBP LocalPosts). AGENTS.md is a symlink to CLAUDE.md so non-
-# Claude agents (Codex, Cursor) pick up the same file.
+# Internal agent configuration
 CLAUDE.md
 AGENTS.md
 /.claude/
 /.codegraph/
-dev/fines-meta-test.db

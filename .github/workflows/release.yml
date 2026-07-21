@@ -32,6 +32,15 @@ jobs:
           registry-url: https://registry.npmjs.org
       - run: npm install --global npm@12.0.1 # zizmor: ignore[adhoc-packages] exact npm version required for trusted publishing
       - run: pnpm install --frozen-lockfile
+      - name: Verify release tag matches package version
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: >-
+          node --input-type=module -e
+          "import pkg from './package.json' with { type: 'json' };
+          if (process.env.RELEASE_TAG !== 'v' + pkg.version) {
+            throw new Error('Release tag must be v' + pkg.version)
+          }"
       - run: pnpm release:check
       - run: pnpm exec playwright install --with-deps
       - run: pnpm test:e2e
