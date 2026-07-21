@@ -110,7 +110,9 @@ describe('composeAndPublish', () => {
         { input: {}, platform: 'facebook' },
       ],
     })
-    expect(result.results.find((r) => r.platform === 'facebook')?.error).toContain('upstream 500')
+    expect(result.results.find((r) => r.platform === 'facebook')?.error).toBe(
+      'Internal server error',
+    )
     expect(result.results.find((r) => r.platform === 'pinterest')?.ok).toBe(true)
   })
 

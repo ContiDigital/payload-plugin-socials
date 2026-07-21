@@ -8,11 +8,13 @@ import type {
 } from '../../types/index.js'
 
 import { getPlatformAdapter } from '../platforms/registry.js'
+import { queuePublicationReconciliation } from '../services/publicationReconciliation.js'
 import {
   failPublicationReservation,
   reservePublication,
 } from '../services/publicationReservation.js'
 import { sha256Hex } from '../utilities/hash.js'
+import { publicErrorMessage } from '../utilities/http.js'
 import { buildPublicationIdentity } from '../utilities/publicationIdentity.js'
 
 /**
@@ -40,9 +42,6 @@ export type ComposeResult = {
   results: ComposeResultItem[]
 }
 
-const errorMessage = (error: unknown): string =>
-  error instanceof Error ? error.message : String(error)
-
 const publishOne = async (
   args: {
     ctx: SocialSourceContext
@@ -53,7 +52,7 @@ const publishOne = async (
   target: ComposeTarget,
 ): Promise<ComposeResultItem> => {
   try {
-    const adapter = getPlatformAdapter(target.platform)
+    const adapter = getPlatformAdapter(target.platform, args.options)
     const validation = await adapter.validate({
       ctx: args.ctx,
       input: target.input,
@@ -100,9 +99,15 @@ const publishOne = async (
         throw error
       }
     }
+    await queuePublicationReconciliation({
+      payload: args.payload,
+      postId: reservation.postId,
+      publishedRef,
+      req: args.req,
+    })
     return { ok: true, platform: target.platform, publishedRef }
   } catch (error) {
-    return { error: errorMessage(error), ok: false, platform: target.platform }
+    return { error: publicErrorMessage(error), ok: false, platform: target.platform }
   }
 }
 

@@ -13,8 +13,7 @@ import {
  * material taxonomy, brand tag) is driven by `ctx.metadata` /
  * `ctx.hints` so the plugin makes no assumptions about the host.
  *
- * Algorithm rationale and structure are extracted verbatim from Fine's
- * Gallery `src/lib/pinterest/pinAutomation.ts` (see CLAUDE.md §2.5):
+ * Compatibility behavior retained from the original production integration:
  *
  *   Title       : "<base title>[ | <model>]" — capped at 100
  *   Description : "<lead>. <product copy> <attributes> <hashtags>" — capped at 500
@@ -132,7 +131,7 @@ export const buildDefaultPinterestAltText = (ctx: SocialSourceContext): string =
  * Result is deduped and capped at 5 (`PINTEREST_HASHTAGS_MAX`) per
  * Pinterest's algorithm tolerance. No dynamic per-item tags — those
  * degrade quickly into junk. Hosts that want a brand tag (e.g.
- * `#FinesGallery`) supply their own builder via `copyOverrides.pinterestHashtags`.
+ * `#YourBrand`) supply their own builder via `copyOverrides.pinterestHashtags`.
  */
 export const buildDefaultPinterestHashtags = (ctx: SocialSourceContext): string[] => {
   const tags = new Set<string>()

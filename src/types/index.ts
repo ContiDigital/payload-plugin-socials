@@ -611,11 +611,18 @@ export type SocialsAssetsConfig = {
    * without format checks.
    */
   preflight?: boolean
+  /** Maximum time spent validating or downloading one remote image. Default: 15 seconds. */
+  remoteFetchTimeoutMs?: number
   /**
    * Payload upload collection slug where transcoded renditions are stored.
    * Required when `autoConvert` is true.
    */
   renditionCollection?: string
+  /**
+   * Exact hostnames that may resolve to private addresses. Only use this for
+   * host-controlled media origins, such as an internal development CDN.
+   */
+  trustedRemoteHosts?: string[]
 }
 
 // ---------------------------------------------------------------------------
@@ -698,6 +705,8 @@ export type PayloadPluginSocialsConfig = {
   api?: SocialsApiConfig
   /** Image format safety and transcoding. */
   assets?: SocialsAssetsConfig
+  /** Auth collection used by the optional `publishedBy` relationship. Auto-detected when unique. */
+  authCollection?: CollectionSlug
   /** Host-supplied access control. */
   authorize: AuthorizeFn
   coordination?: SocialsCoordinationConfig
@@ -796,7 +805,9 @@ export type NormalizedAssetsConfig = {
   autoConvert: boolean
   jpegQuality: number
   preflight: boolean
+  remoteFetchTimeoutMs: number
   renditionCollection?: string
+  trustedRemoteHosts: readonly string[]
 }
 
 export type NormalizedPluginOptions = {
@@ -817,6 +828,7 @@ export type NormalizedPluginOptions = {
     basePath: `/${string}`
   }
   assets: NormalizedAssetsConfig
+  authCollection?: CollectionSlug
   authorize: AuthorizeFn
   coordination: SocialsCoordinationConfig
   copyOverrides: SocialsCopyOverrides

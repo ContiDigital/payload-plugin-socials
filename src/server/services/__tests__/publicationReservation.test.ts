@@ -2,7 +2,7 @@ import type { Payload } from 'payload'
 
 import { describe, expect, it, vi } from 'vitest'
 
-import { ConflictError } from '../../utilities/errors.js'
+import { ConflictError, PublicationPersistenceError } from '../../utilities/errors.js'
 import { failPublicationReservation, reservePublication } from '../publicationReservation.js'
 
 const args = (payload: Payload) => ({
@@ -111,6 +111,41 @@ describe('publication reservations', () => {
     expect(update).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({ lastError: 'access_token=[REDACTED]', status: 'failed' }),
+      }),
+    )
+  })
+
+  it('fences a provider success as unknown and captures its external reference', async () => {
+    const update = vi.fn().mockResolvedValue({ id: 'post_1' })
+    const payload = {
+      findByID: vi.fn().mockResolvedValue({ meta: { queuedInput: { boardId: 'board_1' } } }),
+      update,
+    } as unknown as Payload
+    const publishedRef = {
+      externalId: 'pin_1',
+      externalUrl: 'https://www.pinterest.com/pin/pin_1/',
+      meta: { boardId: 'board_1' },
+      platform: 'pinterest' as const,
+    }
+
+    await failPublicationReservation(
+      payload,
+      { claimed: true, postId: 'post_1' },
+      new PublicationPersistenceError(publishedRef, new Error('database unavailable')),
+    )
+
+    expect(update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          externalId: 'pin_1',
+          externalUrl: 'https://www.pinterest.com/pin/pin_1/',
+          meta: {
+            boardId: 'board_1',
+            queuedInput: { boardId: 'board_1' },
+          },
+          platformPublicationStatus: 'unknown',
+          status: 'unknown',
+        }),
       }),
     )
   })

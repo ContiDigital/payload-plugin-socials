@@ -15,7 +15,6 @@ vi.mock('../../../plugin/jobQueue.js', () => ({ scheduleSocialPostPublish: vi.fn
 
 import { scheduleSocialPostPublish } from '../../../plugin/jobQueue.js'
 import { getPlatformAdapter } from '../../platforms/registry.js'
-import { __resetSourceResolverRegistry, registerSourceResolvers } from '../../sources/registry.js'
 import {
   createHistoryEndpoint,
   createPreviewEndpoint,
@@ -68,8 +67,7 @@ const run = (endpoint: Endpoint, req: PayloadRequest) =>
 
 beforeEach(() => {
   vi.clearAllMocks()
-  __resetSourceResolverRegistry()
-  registerSourceResolvers({ product: () => Promise.resolve(sampleCtx()) })
+  options.sources.product = () => Promise.resolve(sampleCtx())
   authorize.mockResolvedValue(true)
   adapter.preview.mockResolvedValue({ body: 'B', title: 'T' })
   adapter.publish.mockResolvedValue({ externalId: 'pin_1', platform: 'pinterest' })
@@ -183,8 +181,6 @@ describe('createPublishEndpoint', () => {
     expect(scheduleArg.queuedInput).not.toHaveProperty('scheduledAt')
   })
 
-  // ── Fix 2: past / near-future scheduledAt must be rejected ────────────────
-
   it('returns 400 ValidationError when scheduledAt is in the past', async () => {
     const past = new Date(Date.now() - 60_000).toISOString() // 1 minute ago
     const res = await run(
@@ -271,8 +267,6 @@ describe('createHistoryEndpoint', () => {
     const res = await run(createHistoryEndpoint(options), makeReq({ user: null }))
     expect(res.status).toBe(401)
   })
-
-  // ── Fix 3: history payload includes scheduledAt ───────────────────────────
 
   it('includes scheduledAt in each history row', async () => {
     const req = makeReq()

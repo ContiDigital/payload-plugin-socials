@@ -5,10 +5,10 @@
 Security fixes land on the latest supported major release. Upgrade promptly
 when a patch is released.
 
-| Version      | Supported |
-| ------------ | --------- |
-| latest `1.x` | yes       |
-| `0.x`        | no        |
+| Version        | Supported |
+| -------------- | --------- |
+| latest `0.9.x` | Yes       |
+| `<0.9.1`       | No        |
 
 ## Reporting a vulnerability
 
@@ -22,8 +22,7 @@ ship a fix or a mitigation as quickly as the severity warrants.
 
 ## How the plugin handles secrets
 
-The plugin is built so that a host never has to store a platform token as
-plaintext.
+The plugin never persists a platform token as plaintext.
 
 - **Token encryption at rest.** OAuth refresh tokens, and any access tokens the
   plugin persists between requests, are stored as AES-256-GCM envelopes
@@ -44,9 +43,17 @@ plaintext.
   by the start route, so a forged callback cannot complete a connection.
 - **Webhook authentication.** Meta webhook bodies are capped at 1 MB and their
   raw bytes are authenticated with `X-Hub-Signature-256` before host code runs.
-- **Remote-media boundary.** Pinterest video transfer accepts only HTTPS source
-  hosts explicitly listed in `platforms.pinterest.allowedVideoHosts`, including
-  every redirect target.
+- **Remote-media boundary.** Remote image inspection requires HTTPS, rejects
+  local and non-public network targets on every redirect, pins each HTTPS
+  connection to the validated DNS address while retaining hostname-based TLS
+  verification, enforces a request timeout, and streams under a fixed byte
+  limit. Pinterest video sources use the same pinned transport plus the
+  explicit `platforms.pinterest.allowedVideoHosts` allowlist, and the streamed
+  body must match its bounded `Content-Length`.
+- **Post-success retry fence.** When a provider returns a publication ID but
+  the final audit write fails, automatic retry is suppressed and the ID is
+  carried into an `unknown` safety-fence update. If the database also rejects
+  that update, the existing `publishing` reservation remains non-reclaimable.
 - **Key rotation.** A temporary `previousEncryptionKeys` ring permits old
   envelopes to be decrypted and immediately rewritten under the active key.
 
@@ -62,3 +69,8 @@ plaintext.
   and serving the admin and OAuth routes over HTTPS so the state cookie is sent.
 - Providing a distributed lock and request-lease implementation when global
   token rotation and quotas must span more than one process.
+- Configuring one plugin instance per Payload config in `0.9.x`; combine all
+  platforms and source resolvers in that instance.
+- Monitoring `failed` and `unknown` publication rows. An `unknown` row means a
+  provider may have accepted a write whose response was lost; verify it at the
+  provider and use the reconciliation endpoint before retrying.

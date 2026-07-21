@@ -1,22 +1,24 @@
 import type { Payload, PayloadRequest } from 'payload'
 
-import type { NormalizedPluginOptions, PlatformId } from '../types/index.js'
+import { randomUUID } from 'node:crypto'
+
+import type { NormalizedPluginOptions, PlatformId, PostStatus } from '../types/index.js'
 
 import {
   SOCIAL_CONNECTION_REFRESH_TASK_SLUG,
   SOCIAL_INSIGHTS_REFRESH_TASK_SLUG,
   SOCIAL_POST_PUBLISH_TASK_SLUG,
   SOCIAL_POST_RETRY_TASK_SLUG,
+  SOCIAL_POST_SWEEP_TASK_SLUG,
   SOCIAL_POSTS_SLUG,
   SOCIALS_QUEUE_NAME,
 } from '../constants.js'
 import { logAsyncOperationFailure } from '../server/utilities/logger.js'
-import { SOCIAL_POST_SWEEP_TASK_SLUG } from './jobTaskDefinitions.js'
 
 /**
  * Queue helpers + the per-`Payload` runner singleton (`runQueuedSocialsJobs`).
  *
- * Host scheduling pattern is documented in CLAUDE.md §1.13:
+ * Every supported scheduling mode converges on these helpers:
  *
  *   - Plugin defines tasks (see `jobTaskDefinitions.ts`).
  *   - Plugin exposes `queueX` helpers + a single `runQueuedSocialsJobs`
@@ -42,10 +44,10 @@ const getRecordID = (value: unknown): number | string | undefined => {
   return undefined
 }
 
-let configuredQueueName = SOCIALS_QUEUE_NAME
+const queueNames = new WeakMap<Payload, string>()
 
-export const setSocialsQueueName = (queue: string): void => {
-  configuredQueueName = queue
+export const setSocialsQueueName = (payload: Payload, queue: string): void => {
+  queueNames.set(payload, queue)
 }
 
 // ---------------------------------------------------------------------------
@@ -77,9 +79,6 @@ export const runQueuedSocialsJobs = async (
   const promise = payload.jobs
     .run({ limit, queue, req })
     .then(() => undefined)
-    .catch((error: unknown) => {
-      logAsyncOperationFailure(payload, 'socials.jobs.run', error)
-    })
     .finally(() => {
       runnerState.delete(payload)
     })
@@ -94,8 +93,11 @@ export const runQueuedSocialsJobs = async (
 
 type SocialPostQueueRow = {
   id: number | string
+  meta?: { scheduleToken?: string }
+  nextRetryAt?: null | string
+  queuedJobId?: null | string
   scheduledAt?: null | string
-  status: 'cancelled' | 'draft' | 'failed' | 'published' | 'publishing' | 'queued'
+  status: PostStatus
 }
 
 export type SweepResult = {
@@ -117,7 +119,23 @@ export const sweepDueSocialPosts = async (
     overrideAccess: true,
     sort: 'scheduledAt',
     where: {
-      and: [{ status: { equals: 'queued' } }, { scheduledAt: { less_than_equal: now } }],
+      or: [
+        { and: [{ status: { equals: 'queued' } }, { scheduledAt: { less_than_equal: now } }] },
+        {
+          and: [
+            { platform: { equals: 'gbp' } },
+            { status: { equals: 'publishing' } },
+            { nextRetryAt: { less_than_equal: now } },
+          ],
+        },
+        {
+          and: [
+            { platform: { equals: 'facebook' } },
+            { status: { equals: 'scheduled' } },
+            { nextRetryAt: { less_than_equal: now } },
+          ],
+        },
+      ],
     },
   })
 
@@ -158,7 +176,7 @@ const queueOnSocialsQueue = async (args: {
     waitUntil?: Date
   } = {
     input: args.input,
-    queue: configuredQueueName,
+    queue: queueNames.get(args.payload) ?? SOCIALS_QUEUE_NAME,
     req: args.req,
     task: args.task,
   }
@@ -174,18 +192,24 @@ export type QueuePublishArgs = {
   postId: number | string
   /** Defer the work until this instant (Payload Jobs' `waitUntil`). */
   scheduledAt?: Date | string
+  scheduleToken?: string
 } & QueueArgs
 
 export const queueSocialPostPublish = async (
   args: QueuePublishArgs,
-): Promise<number | string | undefined> =>
-  queueOnSocialsQueue({
-    input: { postId: args.postId },
+): Promise<number | string | undefined> => {
+  const input: Record<string, unknown> = { postId: args.postId }
+  if (args.scheduleToken) {
+    input.scheduleToken = args.scheduleToken
+  }
+  return queueOnSocialsQueue({
+    input,
     payload: args.payload,
     req: args.req,
     task: SOCIAL_POST_PUBLISH_TASK_SLUG,
     waitUntil: args.scheduledAt,
   })
+}
 
 export type QueueRetryArgs = { postId: number | string } & QueueArgs
 
@@ -304,6 +328,8 @@ export const scheduleSocialPostPublish = async (args: {
   sourceKind: string
   title?: string
 }): Promise<{
+  alreadyPublished?: boolean
+  externalId?: string
   jobId?: number | string
   postId: number | string
   scheduledAt: string
@@ -325,10 +351,14 @@ export const scheduleSocialPostPublish = async (args: {
   if (existingDoc && existingDoc.status === 'published' && existingDoc.externalId) {
     // Already published — surface as a no-op so callers can return early.
     return {
+      alreadyPublished: true,
+      externalId: existingDoc.externalId,
       postId: existingDoc.id,
-      scheduledAt: scheduledIso,
+      scheduledAt: existingDoc.scheduledAt ?? scheduledIso,
     }
   }
+
+  const scheduleToken = randomUUID()
 
   const baseFields = {
     attempts: 0,
@@ -337,9 +367,9 @@ export const scheduleSocialPostPublish = async (args: {
     idempotencyKey: args.idempotencyKey,
     imageUrl: args.imageUrl,
     link: args.link,
-    meta: { queuedInput: args.queuedInput },
+    meta: { queuedInput: args.queuedInput, scheduleToken },
     platform: args.platform,
-    publishedBy: args.publishedByUserId,
+    ...(args.options.authCollection ? { publishedBy: args.publishedByUserId } : {}),
     scheduledAt: scheduledIso,
     sourceHash: args.sourceHash,
     sourceId: args.sourceId,
@@ -358,12 +388,33 @@ export const scheduleSocialPostPublish = async (args: {
     })) as unknown as { id: number | string }
     postId = updated.id
   } else {
-    const created = (await args.payload.create({
-      collection: SOCIAL_POSTS_SLUG as never,
-      data: baseFields as never,
-      overrideAccess: true,
-    })) as unknown as { id: number | string }
-    postId = created.id
+    try {
+      const created = (await args.payload.create({
+        collection: SOCIAL_POSTS_SLUG as never,
+        data: baseFields as never,
+        overrideAccess: true,
+      })) as unknown as { id: number | string }
+      postId = created.id
+    } catch (error) {
+      const raced = await args.payload.find({
+        collection: SOCIAL_POSTS_SLUG as never,
+        depth: 0,
+        limit: 1,
+        overrideAccess: true,
+        where: { idempotencyKey: { equals: args.idempotencyKey } },
+      })
+      const racedDoc = raced.docs[0] as unknown as SocialPostQueueRow | undefined
+      if (!racedDoc) {
+        throw error
+      }
+      const updated = (await args.payload.update({
+        id: racedDoc.id as never,
+        collection: SOCIAL_POSTS_SLUG as never,
+        data: baseFields as never,
+        overrideAccess: true,
+      })) as unknown as { id: number | string }
+      postId = updated.id
+    }
   }
 
   const jobId = await queueSocialPostPublish({
@@ -371,6 +422,7 @@ export const scheduleSocialPostPublish = async (args: {
     postId,
     req: args.req,
     scheduledAt: scheduledIso,
+    scheduleToken,
   })
 
   // Stamp the queued job id back onto the post for diagnostics.
@@ -384,6 +436,14 @@ export const scheduleSocialPostPublish = async (args: {
       })
     } catch {
       /* non-fatal */
+    }
+  }
+
+  if (existingDoc?.queuedJobId && String(existingDoc.queuedJobId) !== String(jobId)) {
+    try {
+      await args.payload.jobs.cancelByID({ id: existingDoc.queuedJobId as never })
+    } catch (error) {
+      logAsyncOperationFailure(args.payload, 'socials.jobs.cancel-stale', error)
     }
   }
 

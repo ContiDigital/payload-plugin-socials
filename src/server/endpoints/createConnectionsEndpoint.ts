@@ -20,7 +20,7 @@ export const createConnectionsEndpoint = (options: NormalizedPluginOptions): End
               try {
                 return [
                   platform,
-                  await getPlatformAdapter(platform).isConnected({
+                  await getPlatformAdapter(platform, options).isConnected({
                     options,
                     payload: req.payload,
                   }),

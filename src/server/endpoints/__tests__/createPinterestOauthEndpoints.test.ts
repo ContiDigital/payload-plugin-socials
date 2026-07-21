@@ -87,7 +87,6 @@ describe('callback endpoint', () => {
       mkReq({ cookie: `${STATE_COOKIE_NAME}=abc`, search: { code: 'c0de', state: 'abc' } }),
     )
     expect(res.status).toBe(302)
-    // Fix 2: redirect must include the admin base prefix.
     expect(res.headers.get('location')).toBe('/admin/socials?connected=pinterest')
     expect(res.headers.get('set-cookie')).toContain('Max-Age=0')
     expect(adapter.exchangeCallback).toHaveBeenCalledWith(expect.objectContaining({ code: 'c0de' }))

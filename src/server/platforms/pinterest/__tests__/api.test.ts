@@ -188,6 +188,24 @@ describe('makePinterestRequest', () => {
     const response = await makePinterestRequest(payload, options, '/v5/pins')
     expect(response.status).toBe(400)
   })
+
+  it('does not replay a POST after an ambiguous network failure', async () => {
+    let apiCalls = 0
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((url: string | URL) => {
+        if (String(url).includes('/v5/oauth/token')) {
+          return Promise.resolve(res(tokenBody()))
+        }
+        apiCalls += 1
+        return Promise.reject(new Error('socket closed'))
+      }),
+    )
+    await expect(
+      makePinterestRequest(payload, options, '/v5/pins', { init: { method: 'POST' } }),
+    ).rejects.toMatchObject({ outcome: 'unknown', retryable: false })
+    expect(apiCalls).toBe(1)
+  })
 })
 
 describe('pinterestJson', () => {
@@ -205,5 +223,12 @@ describe('pinterestJson', () => {
       upstreamCode: 1,
       upstreamMessage: 'Invalid parameters',
     })
+  })
+
+  it('classifies a POST 5xx response as an unknown outcome', async () => {
+    stubFetch([res({ message: 'upstream failed' }, 500)])
+    await expect(
+      pinterestJson(payload, options, '/v5/pins', { method: 'POST' }),
+    ).rejects.toMatchObject({ outcome: 'unknown', retryable: false })
   })
 })

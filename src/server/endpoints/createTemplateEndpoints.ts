@@ -32,6 +32,7 @@ export const createResolvedTemplatesEndpoint = (options: NormalizedPluginOptions
         kind: sourceKind,
         payload: req.payload,
         req,
+        sources: options.sources,
       })
       const result = await req.payload.find({
         collection: SOCIAL_TEMPLATES_SLUG as never,
@@ -97,6 +98,7 @@ export const createTemplatePreviewEndpoint = (options: NormalizedPluginOptions):
         kind: sourceKind,
         payload: req.payload,
         req,
+        sources: options.sources,
       })
 
       const resolved = resolveTemplateCopy(fields as SocialTemplateFields, ctx)

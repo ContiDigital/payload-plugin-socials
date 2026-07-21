@@ -1,4 +1,7 @@
 import type { SocialImageFormat } from '../../types/index.js'
+import type { PinnedHttpsRequest, RemoteImagePolicy } from './safeRemoteImage.js'
+
+import { fetchRemoteImageBytes } from './safeRemoteImage.js'
 
 /**
  * Detect the image format of a remote URL by reading its magic bytes.
@@ -9,46 +12,22 @@ import type { SocialImageFormat } from '../../types/index.js'
  */
 export const detectImageFormat = async (
   url: string,
-  fetchImpl: typeof fetch = globalThis.fetch,
+  policy: RemoteImagePolicy,
+  dependencies?: {
+    lookupHostname?: (hostname: string) => Promise<readonly string[]>
+    requestImpl?: PinnedHttpsRequest
+  },
 ): Promise<SocialImageFormat | undefined> => {
-  try {
-    const controller = new AbortController()
-    const response = await fetchImpl(url, {
-      headers: { Range: 'bytes=0-31' },
-      method: 'GET',
-      signal: controller.signal,
-    })
-
-    if (!response.ok && response.status !== 206) {
-      controller.abort()
-      return undefined
-    }
-
-    let bytes: Uint8Array
-
-    if (response.status === 206 || Number(response.headers.get('content-length')) <= 32) {
-      // Partial content or small response: read the whole body.
-      const buf = await response.arrayBuffer()
-      bytes = new Uint8Array(buf)
-    } else {
-      // Full body returned. Read just the first chunk, then abort.
-      const reader = response.body?.getReader()
-      if (!reader) {
-        controller.abort()
-        return undefined
-      }
-      const { value } = await reader.read()
-      controller.abort()
-      if (!value) {
-        return undefined
-      }
-      bytes = value
-    }
-
-    return identifyFormat(bytes)
-  } catch {
-    return undefined
-  }
+  const result = await fetchRemoteImageBytes({
+    lookupHostname: dependencies?.lookupHostname,
+    maxBytes: 32,
+    policy,
+    range: { end: 31, start: 0 },
+    requestImpl: dependencies?.requestImpl,
+    truncateAtLimit: true,
+    url,
+  })
+  return identifyFormat(result.bytes)
 }
 
 /**

@@ -21,10 +21,7 @@ type Tab = 'compose' | 'connections'
 export const SocialsAdminViewClient: React.FC<Props> = ({ enabledPlatforms }) => {
   const [activeTab, setActiveTab] = useState<Tab>('compose')
 
-  // Fix 2: read the `connected` query param on mount. When present, default to
-  // the Connections tab, fire a success toast naming the platform, then strip
-  // the param from the URL via history.replaceState so a page reload does not
-  // re-trigger the toast.
+  // Consume the one-shot OAuth callback marker without replaying it on reload.
   useEffect(() => {
     if (typeof window === 'undefined') {
       return

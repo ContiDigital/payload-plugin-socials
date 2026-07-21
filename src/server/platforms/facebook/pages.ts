@@ -13,8 +13,8 @@ import { metaJson } from '../_meta/api.js'
  * these Page tokens to publish to a specific Page — calling /feed with the
  * USER token would 200 but post to the user's timeline, NOT the Page.
  *
- * Page tokens derived from a long-lived USER token are effectively
- * non-expiring as long as the user remains a Page admin (CLAUDE.md §4.1).
+ * Provider-side role or token changes can invalidate a derived Page token;
+ * connection health must still be monitored.
  */
 
 export type FacebookPage = {
@@ -39,8 +39,8 @@ type AccountsResponse = {
 
 /**
  * Returns every Facebook Page the connected token can manage. Page-scoped
- * `accessToken` is included when the underlying credential has `pages_show_list`
- * granted (CLAUDE.md §4.1.6).
+ * `accessToken` is included when the underlying credential has
+ * `pages_show_list` granted.
  */
 export const listManagedPages = async (
   payload: Payload,

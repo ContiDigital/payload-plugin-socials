@@ -17,8 +17,10 @@ import {
   resolveConfiguredHashtags,
   resolveConfiguredText,
 } from '../../copy/resolveConfiguredCopy.js'
-import { ValidationError } from '../../utilities/errors.js'
+import { persistPublicationAudit } from '../../services/publicationPersistence.js'
+import { PlatformApiError, ValidationError } from '../../utilities/errors.js'
 import { sha256Hex } from '../../utilities/hash.js'
+import { resolvePublicationIdempotencyKey } from '../../utilities/publicationIdentity.js'
 import { pinterestJson } from './api.js'
 import {
   buildDefaultPinterestAltText,
@@ -29,11 +31,10 @@ import {
 import { uploadPinterestVideoFromUrl } from './videoUpload.js'
 
 /**
- * Pinterest publish path — the on-demand staff-driven flow extracted from
- * Fine's `src/lib/pinterest/manualPin.ts`.
+ * Pinterest image and video publication path.
  *
  * Idempotency:
- *   key = sha256("pinterest:" + sourceKind + ":" + sourceId + ":" + boardId + ":" + imageUrl)
+ *   key = sha256("manual:" + sourceKind + ":" + sourceId + ":" + boardId + ":" + primaryAsset)
  *
  * Same (kind, id, board, image) → identical key → "already published"
  * short-circuit. Different board OR different image → different key →
@@ -41,8 +42,7 @@ import { uploadPinterestVideoFromUrl } from './videoUpload.js'
  * to be republished (status reset to `published`); the audit history
  * shows the most recent publish.
  *
- * NEVER hard-deletes a `social-posts` row — it's both audit AND idempotency
- * anchor. Cancellation flips `status: 'cancelled'`.
+ * Audit rows are never hard-deleted.
  *
  * Image conversion (assets.autoConvert) happens ONLY when constructing the
  * outbound Pinterest API request body, AFTER the idempotency key and
@@ -56,10 +56,14 @@ export type PinterestPublishInput = {
   boardName?: string
   coverImageUrl?: string
   description?: string
+  /** Exact legacy SHA-256 identity used when adopting an existing audit row. */
+  idempotencyKeyOverride?: string
   imageUrl?: string
   link?: string
   mediaId?: string
   mediaType?: 'IMAGE' | 'VIDEO'
+  /** Caller-defined logical publication identity for intentional repeat campaigns. */
+  publicationKey?: string
   publishedByUserId?: number | string
   title?: string
   videoUrl?: string
@@ -79,8 +83,16 @@ type SocialPostRow = {
   status: 'cancelled' | 'draft' | 'failed' | 'published' | 'publishing' | 'queued'
 }
 
-const buildIdempotencyKey = (ctx: SocialSourceContext, boardId: string, imageUrl: string): string =>
-  sha256Hex(`pinterest:${ctx.sourceKind}:${ctx.sourceId}:${boardId}:${imageUrl}`)
+const buildIdempotencyKey = (
+  ctx: SocialSourceContext,
+  input: PinterestPublishInput,
+  imageUrl: string,
+): string =>
+  resolvePublicationIdempotencyKey({
+    defaultValue: `manual:${ctx.sourceKind}:${ctx.sourceId}:${input.boardId}:${imageUrl}`,
+    input: input as Record<string, unknown>,
+    platform: 'pinterest',
+  })
 
 const buildSourceHash = (snapshot: {
   altText: string
@@ -172,7 +184,7 @@ export const derivePinterestIdentity = (
   const videoUrl = input.videoUrl?.trim() || ctx.videos?.[0]?.url || ''
   const primaryAssetUrl = mediaType === 'VIDEO' ? videoUrl || input.mediaId?.trim() || '' : imageUrl
   return {
-    idempotencyKey: buildIdempotencyKey(ctx, input.boardId, primaryAssetUrl),
+    idempotencyKey: buildIdempotencyKey(ctx, input, primaryAssetUrl),
     primaryAssetUrl,
   }
 }
@@ -266,7 +278,7 @@ export const publishPinterestPin = async (args: {
   }
 
   // Lock the idempotency key to the ORIGINAL primaryAssetUrl before any conversion.
-  const idempotencyKey = buildIdempotencyKey(ctx, input.boardId, primaryAssetUrl)
+  const idempotencyKey = buildIdempotencyKey(ctx, input, primaryAssetUrl)
   const existing = await findExistingByIdempotencyKey(payload, idempotencyKey)
 
   if (existing && existing.status === 'published' && existing.externalId) {
@@ -336,8 +348,15 @@ export const publishPinterestPin = async (args: {
     title,
   })
 
-  const pinId = pin.id ?? ''
-  const pinUrl = pin.link || (pinId ? `https://www.pinterest.com/pin/${pinId}/` : undefined)
+  if (!pin.id?.trim()) {
+    throw new PlatformApiError({
+      message: 'Pinterest create Pin response did not include an id',
+      platform: 'pinterest',
+      statusCode: 502,
+    })
+  }
+  const pinId = pin.id
+  const pinUrl = `https://www.pinterest.com/pin/${pinId}/`
 
   const baseFields = {
     altText,
@@ -365,7 +384,7 @@ export const publishPinterestPin = async (args: {
     platform: 'pinterest' as const,
     platformPublicationStatus: 'published' as const,
     publishedAt: new Date().toISOString(),
-    publishedBy: input.publishedByUserId,
+    ...(options.authCollection ? { publishedBy: input.publishedByUserId } : {}),
     sourceHash,
     sourceId: ctx.sourceId,
     sourceKind: ctx.sourceKind,
@@ -373,38 +392,42 @@ export const publishPinterestPin = async (args: {
     title,
   }
 
-  let savedId: number | string
-  if (existing) {
-    const updated = (await payload.update({
-      id: existing.id as never,
-      collection: SOCIAL_POSTS_SLUG as never,
-      data: baseFields as never,
-      overrideAccess: true,
-    })) as unknown as { id: number | string }
-    savedId = updated.id
-  } else {
-    const created = (await payload.create({
-      collection: SOCIAL_POSTS_SLUG as never,
-      data: baseFields as never,
-      overrideAccess: true,
-    })) as unknown as { id: number | string }
-    savedId = created.id
+  const publishedRef: PublishedRef = {
+    externalId: pinId,
+    externalUrl: pinUrl,
+    meta: {
+      boardId: input.boardId,
+      boardName: input.boardName,
+      mediaId,
+      mediaType,
+    },
+    platform: 'pinterest',
   }
+  const savedId = await persistPublicationAudit({
+    persist: async () => {
+      if (existing) {
+        const updated = (await payload.update({
+          id: existing.id as never,
+          collection: SOCIAL_POSTS_SLUG as never,
+          data: baseFields as never,
+          overrideAccess: true,
+        })) as unknown as { id: number | string }
+        return updated.id
+      }
+      const created = (await payload.create({
+        collection: SOCIAL_POSTS_SLUG as never,
+        data: baseFields as never,
+        overrideAccess: true,
+      })) as unknown as { id: number | string }
+      return created.id
+    },
+    publishedRef,
+  })
 
   return {
     alreadyExisted: false,
     postId: savedId,
-    publishedRef: {
-      externalId: pinId,
-      externalUrl: pinUrl,
-      meta: {
-        boardId: input.boardId,
-        boardName: input.boardName,
-        mediaId,
-        mediaType,
-      },
-      platform: 'pinterest',
-    },
+    publishedRef,
   }
 }
 
@@ -440,26 +463,5 @@ export const deletePinterestPin = async (args: {
     throw new ValidationError(
       `Pinterest pin delete failed: ${response.status} ${await response.text().catch(() => '')}`,
     )
-  }
-
-  // Flip local row to cancelled (best-effort lookup by externalId).
-  const result = await payload.find({
-    collection: SOCIAL_POSTS_SLUG as never,
-    depth: 0,
-    limit: 1,
-    overrideAccess: true,
-    where: {
-      externalId: { equals: publishedRef.externalId },
-      platform: { equals: 'pinterest' },
-    },
-  })
-  const doc = result.docs[0] as { id: number | string } | undefined
-  if (doc) {
-    await payload.update({
-      id: doc.id as never,
-      collection: SOCIAL_POSTS_SLUG as never,
-      data: { status: 'cancelled' } as never,
-      overrideAccess: true,
-    })
   }
 }

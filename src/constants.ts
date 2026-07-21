@@ -46,6 +46,7 @@ export const SOCIAL_DRAFT_VERSION = 1
 export const SOCIALS_QUEUE_NAME = 'socials'
 export const SOCIAL_POST_PUBLISH_TASK_SLUG = 'socialPostPublish'
 export const SOCIAL_POST_RETRY_TASK_SLUG = 'socialPostRetry'
+export const SOCIAL_POST_SWEEP_TASK_SLUG = 'socialPostSweep'
 export const SOCIAL_INSIGHTS_REFRESH_TASK_SLUG = 'socialInsightsRefresh'
 export const SOCIAL_CONNECTION_REFRESH_TASK_SLUG = 'socialConnectionRefresh'
 
@@ -75,6 +76,9 @@ export const DEFAULT_BASE_RETRY_DELAY_MS = 500
 export const DEFAULT_MAX_RETRY_DELAY_MS = 30_000
 export const DEFAULT_RETRY_JITTER_FACTOR = 0.25
 export const DEFAULT_REQUEST_TIMEOUT_MS = 20_000
+export const DEFAULT_ASSET_FETCH_TIMEOUT_MS = 15_000
+export const MAX_SOURCE_IMAGE_BYTES = 25 * 1024 * 1024
+export const MAX_REMOTE_ASSET_REDIRECTS = 3
 export const DEFAULT_MAX_REQUESTS_PER_MINUTE = 60
 export const MAX_WEBHOOK_BODY_BYTES = 1024 * 1024
 
@@ -95,8 +99,7 @@ export const RETRYABLE_ERROR_CODES = new Set([
 ])
 
 // ---------------------------------------------------------------------------
-// Pinterest-specific defaults preserved from the Fine's Gallery extraction.
-// See CLAUDE.md §2.5 for the rationale (these values are load-bearing).
+// Pinterest compatibility defaults retained for existing publication behavior.
 // ---------------------------------------------------------------------------
 
 export const PINTEREST_TITLE_MAX = 100
@@ -135,7 +138,9 @@ export const GBP_SUMMARY_MAX_CHARS = 1500
 export const POST_STATUSES = [
   'draft',
   'queued',
+  'scheduled',
   'publishing',
+  'unknown',
   'published',
   'failed',
   'cancelled',
@@ -146,6 +151,7 @@ export type PostStatus = (typeof POST_STATUSES)[number]
 export const PLATFORM_PUBLICATION_STATUSES = [
   'pending',
   'publishing',
+  'unknown',
   'published',
   'failed',
   'skipped',

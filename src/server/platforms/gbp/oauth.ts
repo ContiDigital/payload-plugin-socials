@@ -9,8 +9,7 @@ import { policyFetch } from '../../utilities/requestPolicy.js'
 /**
  * Google Business Profile OAuth 2.0 — Authorization Code grant.
  *
- * Required scope: `https://www.googleapis.com/auth/business.manage`
- *   (single canonical sensitive scope; see CLAUDE.md §5.2)
+ * Required scope: `https://www.googleapis.com/auth/business.manage`.
  *
  * Refresh tokens for Google don't expire from age but DO get revoked
  * after 6 months of inactivity. The plugin's token cache schedules a
@@ -45,9 +44,7 @@ export const buildAuthorizeUrl = (
     state: input.state,
     // `access_type=offline` is mandatory to receive a refresh token.
     access_type: 'offline',
-    // `prompt=consent` forces Google to mint a fresh refresh token on
-    // every authorize, which is the only reliable way to handle the
-    // 50-refresh-token-per-user cap (see CLAUDE.md §5.9 #20).
+    // Explicit consent ensures the callback receives a refresh token for offline work.
     include_granted_scopes: 'true',
     prompt: 'consent',
   })

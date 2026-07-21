@@ -1,0 +1,17 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 5
+    groups:
+      payload:
+        patterns:
+          - payload
+          - '@payloadcms/*'
+      development-tooling:
+        dependency-type: development
+        exclude-patterns:
+          - payload
+          - '@payloadcms/*'

@@ -369,7 +369,7 @@ export const supportsMultipleMedia = (platform: PlatformId, format: string): boo
   (platform === 'facebook' && format === 'PHOTO_MULTI')
 
 // ---------------------------------------------------------------------------
-// Bug 1: media-library upload URL normalization
+// Media-library upload normalization
 // ---------------------------------------------------------------------------
 
 /** The subset of a Payload upload REST document the composer reads. */
@@ -398,10 +398,8 @@ const asString = (value: unknown): string => (typeof value === 'string' ? value.
 /**
  * Resolve a fetchable, absolute file URL from a Payload upload document.
  *
- * Empirically (Payload 3.86 local-storage upload) the doc carries a RELATIVE
- * `url` like `/api/media/file/clip.mp4`; some storage adapters omit `url`
- * entirely and only surface `filename`. Both cases previously produced an
- * empty/relative `<video src>` and rendered blank. Resolution order:
+ * Payload local-storage documents may carry a relative `url`, while some
+ * storage adapters expose only `filename`. Resolution order:
  *   1. `url` present  -> pass through (absolute) or prefix `origin` (relative).
  *   2. else `filename` -> construct `{origin}{apiRoute}/{collection}/file/{name}`.
  *   3. else            -> '' (caller surfaces "could not load media").
@@ -485,7 +483,7 @@ export const resolveDocPosterUrl = (
 
 /**
  * Normalize a selected Payload upload document into a SocialDraftMedia asset:
- * absolute playable URL (Bug 1), inferred type/format, and image dimensions.
+ * absolute playable URL, inferred type/format, and image dimensions.
  * Video docs additionally carry an optional `posterUrl` when the doc exposes a
  * generic poster field, so the composer can show a thumbnail with no extra
  * fetch. Returns undefined when no usable URL can be resolved.
@@ -517,16 +515,6 @@ export const normalizeSelectedUploadMedia = (
 }
 
 /**
- * Video tile/preview `src` that forces the browser to paint the first frame.
- * `preload="metadata"` fetches duration/dimensions but does NOT decode a frame,
- * so a bare `<video>` shows an empty box. Appending a `#t=0.1` media fragment
- * makes the browser seek to and render that frame — no codec/HLS logic, purely
- * a URL hint. Left untouched when the url already carries a fragment.
- */
-export const videoPosterFrameSrc = (url: string): string =>
-  url.includes('#') ? url : `${url}#t=0.1`
-
-/**
  * Human-readable filename derived from a media URL's last path segment, with
  * query string and fragment stripped and percent-encoding decoded. Used to
  * label a video placeholder tile without any network request. Falls back to the
@@ -551,7 +539,7 @@ export const isVideoAsset = (asset: Pick<SocialDraftMedia, 'type'>): boolean =>
   asset.type === 'video'
 
 // ---------------------------------------------------------------------------
-// Bug 3: shared media pool across platform tabs
+// Shared media pool across platform tabs
 // ---------------------------------------------------------------------------
 
 /**
@@ -577,7 +565,7 @@ export const mergeDraftMedia = (
 }
 
 // ---------------------------------------------------------------------------
-// Bug 2: reorder selected media (drag + arrow affordances)
+// Selected-media ordering
 // ---------------------------------------------------------------------------
 
 /**
@@ -711,7 +699,7 @@ export const compileStandalonePublishBody = (
 }
 
 // ---------------------------------------------------------------------------
-// Compose response guard (Fix 3: standalone composer crash on error response)
+// Compose response guard
 // ---------------------------------------------------------------------------
 
 export type ComposeResult = {
@@ -759,7 +747,7 @@ export const parseComposeResponse = (
 }
 
 // ---------------------------------------------------------------------------
-// Envelope cache helper (Fix 4: media preserved on tab switch)
+// Envelope cache helper
 // ---------------------------------------------------------------------------
 
 /**

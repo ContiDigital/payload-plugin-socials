@@ -5,7 +5,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { PayloadPluginSocialsConfig, SocialSourceContext } from '../../../types/index.js'
 
 import { normalizePluginOptions } from '../../../plugin/normalizeOptions.js'
-import { __resetSourceResolverRegistry, registerSourceResolvers } from '../../sources/registry.js'
 import {
   createResolvedTemplatesEndpoint,
   createTemplatePreviewEndpoint,
@@ -51,8 +50,6 @@ const makePostReq = (
 
 beforeEach(() => {
   vi.clearAllMocks()
-  __resetSourceResolverRegistry()
-  registerSourceResolvers({ product: () => Promise.resolve(context) })
   authorize.mockResolvedValue(true)
 })
 

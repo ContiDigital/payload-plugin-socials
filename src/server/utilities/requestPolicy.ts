@@ -25,6 +25,11 @@ type LimiterState = {
 const limiterRegistry = new WeakMap<Payload, Map<string, LimiterState>>()
 const WINDOW_MS = 60_000
 
+const RETRY_SAFE_METHODS = new Set(['DELETE', 'GET', 'HEAD', 'OPTIONS', 'PUT'])
+
+export const isSafeToRetryRequest = (init: RequestInit | undefined): boolean =>
+  RETRY_SAFE_METHODS.has((init?.method ?? 'GET').toUpperCase())
+
 const getLimiter = (payload: Payload, scope: string): LimiterState => {
   let byScope = limiterRegistry.get(payload)
   if (!byScope) {

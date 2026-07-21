@@ -6,6 +6,7 @@ import { PLATFORM_IDS, SOCIAL_POSTS_SLUG } from '../../constants.js'
 import { scheduleSocialPostPublish } from '../../plugin/jobQueue.js'
 import { buildSocialDraft } from '../compose/socialDraft.js'
 import { getPlatformAdapter } from '../platforms/registry.js'
+import { queuePublicationReconciliation } from '../services/publicationReconciliation.js'
 import {
   failPublicationReservation,
   reservePublication,
@@ -78,8 +79,9 @@ export const createPreviewEndpoint = (options: NormalizedPluginOptions): Endpoin
         kind: sourceKind,
         payload: req.payload,
         req,
+        sources: options.sources,
       })
-      const adapter = getPlatformAdapter(platform)
+      const adapter = getPlatformAdapter(platform, options)
       const preview = await adapter.preview({ ctx, options, payload: req.payload, req })
 
       return jsonResponse({
@@ -112,8 +114,9 @@ export const createValidateEndpoint = (options: NormalizedPluginOptions): Endpoi
         kind: sourceKind,
         payload: req.payload,
         req,
+        sources: options.sources,
       })
-      const adapter = getPlatformAdapter(platform)
+      const adapter = getPlatformAdapter(platform, options)
       const validation = await adapter.validate({ ctx, input, options })
 
       return jsonResponse({ platform, validation })
@@ -141,12 +144,7 @@ export const createPublishEndpoint = (options: NormalizedPluginOptions): Endpoin
       // remaining fields are the per-adapter publish input.
       const { scheduledAt: rawScheduledAt, ...adapterInput } = body
 
-      // ── Fix 2: explicit past / near-future scheduledAt rejection ─────────
-      // When the caller sends a scheduledAt that is not in the future (or is
-      // within the 60 s grace window), refuse with a 400 ValidationError
-      // instead of silently falling through to an immediate publish. This
-      // prevents a user mistake (e.g. a time already past) from publishing a
-      // live post without the operator's intent.
+      // Never reinterpret an invalid schedule as an immediate public mutation.
       if (rawScheduledAt !== undefined && rawScheduledAt !== null && rawScheduledAt !== '') {
         if (!isFutureIso(rawScheduledAt)) {
           const detail = isParsableIso(rawScheduledAt)
@@ -163,8 +161,9 @@ export const createPublishEndpoint = (options: NormalizedPluginOptions): Endpoin
         kind: sourceKind,
         payload: req.payload,
         req,
+        sources: options.sources,
       })
-      const adapter = getPlatformAdapter(platform)
+      const adapter = getPlatformAdapter(platform, options)
       const validation = await adapter.validate({
         ctx,
         input: adapterInput,
@@ -217,10 +216,12 @@ export const createPublishEndpoint = (options: NormalizedPluginOptions): Endpoin
           title: ctx.baseTitle,
         })
         return jsonResponse({
+          alreadyPublished: result.alreadyPublished ?? false,
+          externalId: result.externalId,
           jobId: result.jobId,
           platform,
           postId: result.postId,
-          scheduled: true,
+          scheduled: !result.alreadyPublished,
           scheduledAt: result.scheduledAt,
           source: { id: String(sourceId), kind: sourceKind },
         })
@@ -261,6 +262,12 @@ export const createPublishEndpoint = (options: NormalizedPluginOptions): Endpoin
           throw error
         }
       }
+      await queuePublicationReconciliation({
+        payload: req.payload,
+        postId: reservation.postId,
+        publishedRef: ref,
+        req,
+      })
       return jsonResponse({
         platform,
         publishedRef: ref,
@@ -297,8 +304,6 @@ export const createHistoryEndpoint = (options: NormalizedPluginOptions): Endpoin
         },
       })
 
-      // Fix 3: include scheduledAt in every history row so the UI can show
-      // queued posts with their scheduled time.
       type RawDoc = Record<string, unknown>
       const posts = (result.docs as RawDoc[]).map((doc) => ({
         id: doc.id,

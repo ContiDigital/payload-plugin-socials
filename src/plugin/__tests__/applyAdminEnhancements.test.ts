@@ -92,8 +92,6 @@ describe('applyAdminEnhancements', () => {
     expect(custom?.enabledPlatforms).toContain('pinterest')
   })
 
-  // Fix 1: admin.custom.socials must be populated so useConfig() in the browser
-  // can read enabledPlatforms, apiBasePath, sourceKinds, and adminRoute.
   it('populates admin.custom.socials for client-side useConfig() readers', () => {
     const { config, options } = optionsWith({ mode: 'route' })
     applyAdminEnhancements(config, options)
@@ -123,8 +121,6 @@ describe('applyAdminEnhancements', () => {
     expect(adminCustom.socials).toBeDefined()
   })
 
-  // Fix 2: adminBase must be stored on options.admin so OAuth callback endpoints
-  // can build the correct post-auth redirect URL.
   it('stores the resolved adminBase on options.admin', () => {
     const { config, options } = optionsWith({ mode: 'route' }, {
       routes: { admin: '/cms' },

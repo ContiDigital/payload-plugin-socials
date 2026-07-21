@@ -21,7 +21,7 @@ import { createPinterestAdapter } from './pinterest/adapter.js'
  * no cost for Meta/GBP wiring.
  */
 
-const adapters = new Map<PlatformId, PlatformAdapter>()
+const adaptersByOptions = new WeakMap<NormalizedPluginOptions, Map<PlatformId, PlatformAdapter>>()
 
 type AdapterFactory = (options: NormalizedPluginOptions) => PlatformAdapter
 
@@ -36,7 +36,7 @@ const isPlatformEnabled = (options: NormalizedPluginOptions, id: PlatformId): bo
   options.platforms[id].enabled === true
 
 export const initPlatformRegistry = (options: NormalizedPluginOptions): void => {
-  adapters.clear()
+  const adapters = new Map<PlatformId, PlatformAdapter>()
   for (const id of PLATFORM_IDS) {
     if (!isPlatformEnabled(options, id)) {
       continue
@@ -51,9 +51,26 @@ export const initPlatformRegistry = (options: NormalizedPluginOptions): void => 
     }
     adapters.set(id, adapter)
   }
+  adaptersByOptions.set(options, adapters)
 }
 
-export const getPlatformAdapter = (id: PlatformId): PlatformAdapter => {
+const getAdapters = (options: NormalizedPluginOptions): Map<PlatformId, PlatformAdapter> => {
+  let adapters = adaptersByOptions.get(options)
+  if (!adapters) {
+    initPlatformRegistry(options)
+    adapters = adaptersByOptions.get(options)
+  }
+  if (!adapters) {
+    throw new PluginError('platform registry failed to initialize', 500)
+  }
+  return adapters
+}
+
+export const getPlatformAdapter = (
+  id: PlatformId,
+  options: NormalizedPluginOptions,
+): PlatformAdapter => {
+  const adapters = getAdapters(options)
   const adapter = adapters.get(id)
   if (!adapter) {
     throw new NotFoundError(`${PLUGIN_SLUG}: platform "${id}" is not enabled in plugin options`)
@@ -61,11 +78,12 @@ export const getPlatformAdapter = (id: PlatformId): PlatformAdapter => {
   return adapter
 }
 
-export const listEnabledPlatforms = (): readonly PlatformId[] => Array.from(adapters.keys())
+export const listEnabledPlatforms = (options: NormalizedPluginOptions): readonly PlatformId[] =>
+  Array.from(getAdapters(options).keys())
 
-export const getEnabledAdapters = (): PlatformAdapterRegistry => {
+export const getEnabledAdapters = (options: NormalizedPluginOptions): PlatformAdapterRegistry => {
   const out: PlatformAdapterRegistry = {}
-  for (const [id, adapter] of adapters.entries()) {
+  for (const [id, adapter] of getAdapters(options).entries()) {
     out[id] = adapter
   }
   return out
@@ -73,5 +91,5 @@ export const getEnabledAdapters = (): PlatformAdapterRegistry => {
 
 /** Test-only escape hatch. */
 export const __resetPlatformRegistry = (): void => {
-  adapters.clear()
+  // WeakMap entries are isolated by normalized options and expire naturally.
 }

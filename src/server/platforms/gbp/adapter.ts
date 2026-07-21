@@ -41,7 +41,7 @@ const CAPABILITIES: PlatformCapabilities = {
   scheduling: true,
   serviceAccount: true,
   stories: false,
-  video: false, // LocalPosts technically supports VIDEO but acceptance is spotty (CLAUDE.md §5.6).
+  video: false, // The v1 adapter deliberately supports photo media only.
 }
 
 /**

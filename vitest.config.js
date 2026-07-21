@@ -28,11 +28,8 @@ export default defineConfig(() => {
         include: ['src/**/*.ts'],
         provider: 'v8',
         reporter: ['text', 'lcov'],
-        // Floors sit a few points below the current actuals (lines ~92,
-        // statements ~90, functions ~87, branches ~80 once the analytics +
-        // scheduled-sync coverage landed). They guard against regression
-        // without being brittle. Raise them as coverage climbs; never lower
-        // silently.
+        // Browser components are exercised by Playwright; these thresholds
+        // measure the server and pure-model TypeScript surface.
         thresholds: {
           branches: 78,
           functions: 85,
@@ -41,9 +38,7 @@ export default defineConfig(() => {
         },
       },
       environment: 'node',
-      // Fast, deterministic, DB-free unit suite is the backbone. The
-      // Payload-boot integration spec (dev/) is added once the dev harness
-      // config is repaired; the Playwright e2e spec runs via `pnpm test:e2e`.
+      // Payload boot coverage lives under src; browser behavior runs through Playwright.
       exclude: ['**/node_modules/**', '**/dist/**', 'dev/e2e.spec.ts', 'dev/int.spec.ts'],
       hookTimeout: 30_000,
       include: ['src/**/*.{test,spec}.ts'],

@@ -1,12 +1,17 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { NormalizedPluginOptions } from '../../../types/index.js'
 
+import { ValidationError } from '../../utilities/errors.js'
 import { resolvePlatformImageUrl } from '../resolvePlatformImage.js'
+import { fetchRemoteImageBytes } from '../safeRemoteImage.js'
 
 // Mock detectImageFormat at the module level
 vi.mock('../detectImageFormat.js', () => ({
   detectImageFormat: vi.fn(),
+}))
+vi.mock('../safeRemoteImage.js', () => ({
+  fetchRemoteImageBytes: vi.fn(),
 }))
 
 // Mock the sharp import used inside resolvePlatformImage
@@ -20,6 +25,7 @@ vi.mock('sharp', () => ({
 
 const { detectImageFormat } = await import('../detectImageFormat.js')
 const mockedDetect = vi.mocked(detectImageFormat)
+const mockedFetchRemoteImageBytes = vi.mocked(fetchRemoteImageBytes)
 
 const makeOptions = (
   overrides: Partial<NormalizedPluginOptions['assets']> = {},
@@ -29,7 +35,9 @@ const makeOptions = (
       autoConvert: false,
       jpegQuality: 82,
       preflight: true,
+      remoteFetchTimeoutMs: 15_000,
       renditionCollection: undefined,
+      trustedRemoteHosts: ['cdn.example.com'],
       ...overrides,
     },
   }) as unknown as NormalizedPluginOptions
@@ -46,18 +54,10 @@ const makePayload = (findDocs: Array<{ url: string }> = []) => {
 describe('resolvePlatformImageUrl — additional branch coverage', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue({
-        arrayBuffer: () => Promise.resolve(new ArrayBuffer(100)),
-        headers: new Headers({ 'content-length': '100' }),
-        ok: true,
-      }),
-    )
-  })
-
-  afterEach(() => {
-    vi.unstubAllGlobals()
+    mockedFetchRemoteImageBytes.mockResolvedValue({
+      bytes: new Uint8Array(100),
+      finalUrl: 'https://cdn.example.com/photo.webp',
+    })
   })
 
   it('throws when autoConvert is enabled but renditionCollection is not set', async () => {
@@ -74,14 +74,8 @@ describe('resolvePlatformImageUrl — additional branch coverage', () => {
   })
 
   it('throws when fetch returns a non-ok response during transcode', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue({
-        headers: new Headers({}),
-        ok: false,
-        status: 404,
-        statusText: 'Not Found',
-      }),
+    mockedFetchRemoteImageBytes.mockRejectedValueOnce(
+      new ValidationError('Remote image could not be fetched (HTTP 404)'),
     )
     const options = makeOptions({ autoConvert: true, renditionCollection: 'media' })
     await expect(
@@ -92,17 +86,12 @@ describe('resolvePlatformImageUrl — additional branch coverage', () => {
         payload: makePayload(),
         platform: 'instagram',
       }),
-    ).rejects.toThrow(/Failed to fetch source image/)
+    ).rejects.toThrow(/Remote image could not be fetched/)
   })
 
   it('throws when content-length exceeds 25MB', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue({
-        arrayBuffer: () => Promise.resolve(new ArrayBuffer(100)),
-        headers: new Headers({ 'content-length': String(30 * 1024 * 1024) }),
-        ok: true,
-      }),
+    mockedFetchRemoteImageBytes.mockRejectedValueOnce(
+      new ValidationError('Remote image exceeds the configured 25 MB processing limit'),
     )
     const options = makeOptions({ autoConvert: true, renditionCollection: 'media' })
     await expect(
@@ -113,19 +102,12 @@ describe('resolvePlatformImageUrl — additional branch coverage', () => {
         payload: makePayload(),
         platform: 'instagram',
       }),
-    ).rejects.toThrow(/too large for transcoding/)
+    ).rejects.toThrow(/25 MB processing limit/)
   })
 
-  it('throws when arrayBuffer byteLength exceeds 25MB', async () => {
-    // content-length header is absent or zero but the actual body is huge
-    const bigBuf = new ArrayBuffer(26 * 1024 * 1024)
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue({
-        arrayBuffer: () => Promise.resolve(bigBuf),
-        headers: new Headers({ 'content-length': '0' }),
-        ok: true,
-      }),
+  it('stops streaming when the actual body exceeds 25MB', async () => {
+    mockedFetchRemoteImageBytes.mockRejectedValueOnce(
+      new ValidationError('Remote image exceeds the configured 25 MB processing limit'),
     )
     const options = makeOptions({ autoConvert: true, renditionCollection: 'media' })
     await expect(
@@ -136,7 +118,7 @@ describe('resolvePlatformImageUrl — additional branch coverage', () => {
         payload: makePayload(),
         platform: 'instagram',
       }),
-    ).rejects.toThrow(/too large for transcoding/)
+    ).rejects.toThrow(/25 MB processing limit/)
   })
 
   it('absolutizes a relative rendition URL from existing rendition lookup', async () => {

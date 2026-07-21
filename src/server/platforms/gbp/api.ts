@@ -12,12 +12,16 @@ import {
 } from '../../services/connectionService.js'
 import { PlatformApiError } from '../../utilities/errors.js'
 import { createPluginLogger } from '../../utilities/logger.js'
-import { isRetryableNetworkError, policyFetch } from '../../utilities/requestPolicy.js'
+import {
+  isRetryableNetworkError,
+  isSafeToRetryRequest,
+  policyFetch,
+} from '../../utilities/requestPolicy.js'
 
 /**
  * Google Business Profile HTTP client.
  *
- * Supports BOTH credential paths documented in CLAUDE.md §5.2:
+ * Supports both configured credential paths:
  *
  *   1. **OAuth 2.0 web-app flow** — preferred for SaaS where each tenant
  *      authorizes their own GBP. Refresh tokens persist indefinitely.
@@ -33,9 +37,8 @@ import { isRetryableNetworkError, policyFetch } from '../../utilities/requestPol
  * `socials-connections`); SA is the fallback for cold starts where the
  * tenant hasn't completed OAuth yet.
  *
- * The plugin owns NONE of Google's API hosts as constants — each module
- * that consumes a specific endpoint imports the host URL from this file.
- * GBP is split across multiple sub-API hosts (see CLAUDE.md §5.1).
+ * Google splits Business Profile resources across several API hosts; this
+ * module is the single source of those base URLs.
  */
 
 export const GBP_HOSTS = {
@@ -380,6 +383,7 @@ export const makeGbpRequest = async (
   const log = createPluginLogger(payload.logger, { platform: 'gbp', url })
   const rl = options.rateLimit
   const maxRetries = requestOptions.maxRetries ?? rl.maxRetries
+  const safeToRetry = isSafeToRetryRequest(requestOptions.init)
   let attempt = 0
   let didRefresh = false
 
@@ -403,7 +407,7 @@ export const makeGbpRequest = async (
         scope: 'gbp',
       })
     } catch (error) {
-      if (isRetryableNetworkError(error) && attempt < maxRetries) {
+      if (safeToRetry && isRetryableNetworkError(error) && attempt < maxRetries) {
         const delayMs = computeBackoffMs(
           attempt,
           rl.baseRetryDelayMs,
@@ -417,9 +421,10 @@ export const makeGbpRequest = async (
       }
       throw new PlatformApiError({
         message: 'GBP request failed before receiving a response',
+        outcome: safeToRetry ? 'failed' : 'unknown',
         platform: 'gbp',
         raw: error,
-        retryable: isRetryableNetworkError(error),
+        retryable: safeToRetry && isRetryableNetworkError(error),
         statusCode: 502,
         upstreamCode: error instanceof Error ? error.name : 'network_error',
         upstreamMessage: error instanceof Error ? error.message : String(error),
@@ -442,7 +447,11 @@ export const makeGbpRequest = async (
       continue
     }
 
-    if (RETRYABLE_STATUS_CODES.has(response.status) && attempt < maxRetries) {
+    if (
+      (safeToRetry || response.status === 429) &&
+      RETRYABLE_STATUS_CODES.has(response.status) &&
+      attempt < maxRetries
+    ) {
       const retryAfter = parseRetryAfter(response.headers.get('retry-after'))
       const delayMs =
         retryAfter !== null
@@ -478,11 +487,17 @@ export const gbpJson = async <T>(
       typeof upstream === 'object' && upstream !== null && 'error' in upstream
         ? (upstream as { error?: Record<string, unknown> }).error
         : undefined
+    const safeToRetry = isSafeToRetryRequest(init)
+    const outcome =
+      !safeToRetry && response.status !== 429 && RETRYABLE_STATUS_CODES.has(response.status)
+        ? 'unknown'
+        : 'failed'
     throw new PlatformApiError({
       message: `GBP ${url} failed: ${response.status}`,
+      outcome,
       platform: 'gbp',
       raw: upstream,
-      retryable: RETRYABLE_STATUS_CODES.has(response.status),
+      retryable: outcome === 'failed' && RETRYABLE_STATUS_CODES.has(response.status),
       statusCode: response.status,
       upstreamCode: typeof errorBody?.status === 'string' ? errorBody.status : response.status,
       upstreamMessage: typeof errorBody?.message === 'string' ? errorBody.message : text,

@@ -94,7 +94,7 @@ export const listAllBoards = async (
     bookmark = page.bookmark
   }
 
-  // Stable sort: pinCount desc, then name asc. Matches Fine's UI ordering.
+  // Stable ordering prevents destination menus from moving between refreshes.
   out.sort((a, b) => {
     const pinDelta = (b.pinCount ?? 0) - (a.pinCount ?? 0)
     if (pinDelta !== 0) {
@@ -115,8 +115,7 @@ export type CreateBoardInput = {
 /**
  * Create a new board. Test-mode (sandbox env OR `options.testMode === true`)
  * forces a `[TEST]` name prefix and `SECRET` privacy to keep production
- * audiences clean during integration testing — matches Fine's
- * `applyTestModeToBoardCreate` behaviour.
+ * audiences clean during integration testing.
  */
 export const createBoard = async (
   payload: Payload,

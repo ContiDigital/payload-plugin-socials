@@ -1,12 +1,12 @@
 import { defineConfig, devices } from '@playwright/test'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
+import { loadEnv } from 'payload/node'
 
-/**
- * Read environment variables from file.
- * https://github.com/motdotla/dotenv
- */
-// import dotenv from 'dotenv';
-// import path from 'path';
-// dotenv.config({ path: path.resolve(__dirname, '.env') });
+loadEnv(path.resolve(process.cwd(), 'dev'))
+
+const artifactsDir =
+  process.env.PLAYWRIGHT_ARTIFACTS_DIR || path.join(tmpdir(), 'payload-plugin-socials-playwright')
 
 /**
  * See https://playwright.dev/docs/test-configuration.
@@ -14,16 +14,24 @@ import { defineConfig, devices } from '@playwright/test'
 export default defineConfig({
   testDir: './dev',
   testMatch: '**/e2e.spec.{ts,js}',
-  /* Run tests in files in parallel */
-  fullyParallel: true,
+  /* Projects share one seeded user and SQLite database, so auth writes must be serialized. */
+  fullyParallel: false,
   /* Fail the build on CI if you accidentally left test.only in the source code. */
   forbidOnly: !!process.env.CI,
   /* Retry on CI only */
   retries: process.env.CI ? 2 : 0,
-  /* Opt out of parallel tests on CI. */
-  workers: process.env.CI ? 1 : undefined,
+  workers: 1,
   /* Reporter to use. See https://playwright.dev/docs/test-reporters */
-  reporter: 'html',
+  outputDir: path.join(artifactsDir, 'test-results'),
+  reporter: [
+    [
+      'html',
+      {
+        open: 'never',
+        outputFolder: path.join(artifactsDir, 'playwright-report'),
+      },
+    ],
+  ],
   /* Shared settings for all the projects below. See https://playwright.dev/docs/api/class-testoptions. */
   projects: [
     {
@@ -48,7 +56,7 @@ export default defineConfig({
   },
   webServer: {
     command: 'pnpm dev:e2e',
-    reuseExistingServer: true,
+    reuseExistingServer: false,
     url: 'http://localhost:3000/admin',
   },
 })

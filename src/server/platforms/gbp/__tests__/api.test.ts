@@ -185,6 +185,16 @@ describe('makeGbpRequest', () => {
     expect(res.ok).toBe(true)
   })
 
+  it('does not replay a POST after a 5xx response', async () => {
+    routeRequests([errResText(500), okJson({ ok: 1 })])
+    const res = await makeGbpRequest(payload, saOptions(), 'https://host/x', {
+      init: { method: 'POST' },
+    })
+    expect(res.status).toBe(500)
+    const apiCalls = fetchMock.mock.calls.filter(([input]) => input !== TOKEN_URL)
+    expect(apiCalls).toHaveLength(1)
+  })
+
   it('returns a non-retryable 400 without retrying', async () => {
     routeRequests([errResText(400)])
     const res = await makeGbpRequest(payload, saOptions(), 'https://host/x')

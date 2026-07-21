@@ -30,7 +30,6 @@ import {
   shouldFetchEnvelope,
   stripLeadingTitle,
   supportsMultipleMedia,
-  videoPosterFrameSrc,
 } from '../socialComposerModel.js'
 
 const draft: SocialDraft = {
@@ -71,7 +70,7 @@ const state = (over: Partial<ComposerState> = {}): ComposerState => ({
 })
 
 // ---------------------------------------------------------------------------
-// Fix 1: formatLocalDateTimeMin — local-time picker boundary
+// Local-time picker boundary
 // ---------------------------------------------------------------------------
 
 describe('formatLocalDateTimeMin', () => {
@@ -565,7 +564,7 @@ describe('compileStandalonePublishBody', () => {
 })
 
 // ---------------------------------------------------------------------------
-// Fix 3: parseComposeResponse - standalone composer error-shape guard
+// Standalone composer response guard
 // ---------------------------------------------------------------------------
 
 describe('parseComposeResponse', () => {
@@ -620,7 +619,7 @@ describe('parseComposeResponse', () => {
 })
 
 // ---------------------------------------------------------------------------
-// Fix 4: shouldFetchEnvelope - envelope cache guard
+// Envelope cache guard
 // ---------------------------------------------------------------------------
 
 describe('shouldFetchEnvelope', () => {
@@ -782,7 +781,7 @@ describe('pickDefaultTemplate', () => {
 })
 
 // ---------------------------------------------------------------------------
-// Bug 1: media-library upload URL normalization
+// Media-library upload URL normalization
 // ---------------------------------------------------------------------------
 
 const uploadCtx = { apiRoute: '/api', collectionSlug: 'media', origin: 'https://host.test' }
@@ -988,26 +987,8 @@ describe('isVideoAsset', () => {
   })
 })
 
-describe('videoPosterFrameSrc', () => {
-  it('appends a #t=0.1 fragment so the browser paints the first frame', () => {
-    expect(videoPosterFrameSrc('https://cdn.test/clip.mp4')).toBe('https://cdn.test/clip.mp4#t=0.1')
-  })
-
-  it('preserves a query string before the fragment', () => {
-    expect(videoPosterFrameSrc('https://cdn.test/clip.mp4?v=2')).toBe(
-      'https://cdn.test/clip.mp4?v=2#t=0.1',
-    )
-  })
-
-  it('leaves a url that already carries a fragment untouched', () => {
-    expect(videoPosterFrameSrc('https://cdn.test/clip.mp4#t=5')).toBe(
-      'https://cdn.test/clip.mp4#t=5',
-    )
-  })
-})
-
 // ---------------------------------------------------------------------------
-// Bug 3: shared media pool across platform tabs
+// Shared media pool across platform tabs
 // ---------------------------------------------------------------------------
 
 describe('mergeDraftMedia', () => {
@@ -1041,7 +1022,7 @@ describe('mergeDraftMedia', () => {
 })
 
 // ---------------------------------------------------------------------------
-// Bug 2: reorder selected media
+// Selected-media ordering
 // ---------------------------------------------------------------------------
 
 describe('reorderSelectedMedia', () => {

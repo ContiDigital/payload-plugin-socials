@@ -9,8 +9,10 @@ import type {
 import { SOCIAL_POSTS_SLUG } from '../../../constants.js'
 import { resolvePlatformImageUrl } from '../../assets/resolvePlatformImage.js'
 import { resolveConfiguredText } from '../../copy/resolveConfiguredCopy.js'
+import { persistPublicationAudit } from '../../services/publicationPersistence.js'
 import { PlatformApiError, ValidationError } from '../../utilities/errors.js'
 import { sha256Hex } from '../../utilities/hash.js'
+import { resolvePublicationIdempotencyKey } from '../../utilities/publicationIdentity.js'
 import { makeMetaRequest } from '../_meta/api.js'
 import { buildDefaultFacebookMessage } from './copy.js'
 import { getPageAccessToken } from './pages.js'
@@ -48,6 +50,8 @@ export type FacebookPublishInput = {
   altText?: string
   /** Format. Default `LINK`. */
   format?: FacebookFormat
+  /** Exact legacy SHA-256 identity used when adopting an existing audit row. */
+  idempotencyKeyOverride?: string
   /** PHOTO: single photo URL. */
   imageUrl?: string
   /** PHOTO_MULTI: array of public URLs (2-10). */
@@ -60,6 +64,8 @@ export type FacebookPublishInput = {
   pageId: string
   /** Optional location tag (FB Page id of a place). */
   place?: string
+  /** Caller-defined logical publication identity for intentional repeat campaigns. */
+  publicationKey?: string
   publishedByUserId?: number | string
   /**
    * Schedule the post. 10-minute min, 75-day max from now for /feed.
@@ -90,11 +96,16 @@ const SCHEDULE_VIDEO_MAX_OFFSET_MS = 6 * 30 * 24 * 60 * 60 * 1000
 
 const buildIdempotencyKey = (
   ctx: SocialSourceContext,
+  input: FacebookPublishInput,
   pageId: string,
   format: FacebookFormat,
   primaryAssetUrl: string,
 ): string =>
-  sha256Hex(`facebook:${ctx.sourceKind}:${ctx.sourceId}:${pageId}:${format}:${primaryAssetUrl}`)
+  resolvePublicationIdempotencyKey({
+    defaultValue: `facebook:${ctx.sourceKind}:${ctx.sourceId}:${pageId}:${format}:${primaryAssetUrl}`,
+    input: input as unknown as Record<string, unknown>,
+    platform: 'facebook',
+  })
 
 const resolveMessage = (
   ctx: SocialSourceContext,
@@ -148,13 +159,15 @@ const findExistingByIdempotencyKey = async (
   return (result.docs[0] as SocialPostRow | undefined) ?? null
 }
 
-const buildPermalink = (postId: string): string => {
+const buildPermalink = (postId: string, pageId: string, format: FacebookFormat): string => {
   // /{page_id}_{post_id} format. Facebook also resolves /{post_id} alone.
   const [page, post] = postId.split('_')
   if (page && post) {
     return `https://www.facebook.com/${page}/posts/${post}`
   }
-  return `https://www.facebook.com/${postId}`
+  return format === 'VIDEO'
+    ? `https://www.facebook.com/${pageId}/videos/${postId}`
+    : `https://www.facebook.com/${postId}`
 }
 
 // ---------------------------------------------------------------------------
@@ -415,7 +428,7 @@ export const deriveFacebookIdentity = (
   const format: FacebookFormat = input.format ?? 'LINK'
   const primaryAssetUrl = resolvePrimaryAssetUrl(input)
   return {
-    idempotencyKey: buildIdempotencyKey(ctx, input.pageId, format, primaryAssetUrl),
+    idempotencyKey: buildIdempotencyKey(ctx, input, input.pageId, format, primaryAssetUrl),
     primaryAssetUrl,
   }
 }
@@ -452,7 +465,7 @@ export const publishFacebookPost = async (args: {
     }
   }
 
-  const idempotencyKey = buildIdempotencyKey(ctx, input.pageId, format, primaryAssetUrl)
+  const idempotencyKey = buildIdempotencyKey(ctx, input, input.pageId, format, primaryAssetUrl)
   const existing = await findExistingByIdempotencyKey(payload, idempotencyKey)
   if (existing && existing.status === 'published' && existing.externalId) {
     return {
@@ -552,7 +565,7 @@ export const publishFacebookPost = async (args: {
     })
   }
 
-  const externalUrl = buildPermalink(externalId)
+  const externalUrl = buildPermalink(externalId, input.pageId, format)
   // sourceHash uses the ORIGINAL primaryAssetUrl, not any converted URL.
   const sourceHash = sha256Hex(
     JSON.stringify({ format, message, pageId: input.pageId, primaryAssetUrl }),
@@ -574,47 +587,103 @@ export const publishFacebookPost = async (args: {
     lastError: null,
     link: input.link ?? ctx.link,
     meta: { format, pageId: input.pageId, raw, scheduledSeconds },
+    nextRetryAt: scheduledSeconds ? new Date(scheduledSeconds * 1000 + 60_000).toISOString() : null,
     platform: 'facebook' as const,
     platformPublicationStatus: scheduledSeconds ? 'pending' : 'published',
-    publishedAt: scheduledSeconds
-      ? new Date(scheduledSeconds * 1000).toISOString()
-      : new Date().toISOString(),
-    publishedBy: input.publishedByUserId,
+    publishedAt: scheduledSeconds ? undefined : new Date().toISOString(),
+    scheduledAt: scheduledSeconds ? new Date(scheduledSeconds * 1000).toISOString() : undefined,
+    ...(options.authCollection ? { publishedBy: input.publishedByUserId } : {}),
     sourceHash,
     sourceId: ctx.sourceId,
     sourceKind: ctx.sourceKind,
-    status: 'published' as const,
+    status: scheduledSeconds ? ('scheduled' as const) : ('published' as const),
     title: ctx.baseTitle,
   }
 
-  let savedId: number | string
-  if (existing) {
-    const updated = (await payload.update({
-      id: existing.id as never,
-      collection: SOCIAL_POSTS_SLUG as never,
-      data: baseFields as never,
-      overrideAccess: true,
-    })) as unknown as { id: number | string }
-    savedId = updated.id
-  } else {
-    const created = (await payload.create({
-      collection: SOCIAL_POSTS_SLUG as never,
-      data: baseFields as never,
-      overrideAccess: true,
-    })) as unknown as { id: number | string }
-    savedId = created.id
+  const publishedRef: PublishedRef = {
+    externalId,
+    externalUrl,
+    meta: {
+      format,
+      pageId: input.pageId,
+      scheduled: Boolean(scheduledSeconds),
+      scheduledPublishTime: scheduledSeconds,
+    },
+    platform: 'facebook',
   }
+  const savedId = await persistPublicationAudit({
+    persist: async () => {
+      if (existing) {
+        const updated = (await payload.update({
+          id: existing.id as never,
+          collection: SOCIAL_POSTS_SLUG as never,
+          data: baseFields as never,
+          overrideAccess: true,
+        })) as unknown as { id: number | string }
+        return updated.id
+      }
+      const created = (await payload.create({
+        collection: SOCIAL_POSTS_SLUG as never,
+        data: baseFields as never,
+        overrideAccess: true,
+      })) as unknown as { id: number | string }
+      return created.id
+    },
+    publishedRef,
+  })
 
   return {
     alreadyExisted: false,
     postId: savedId,
-    publishedRef: {
-      externalId,
-      externalUrl,
-      meta: { format, pageId: input.pageId, scheduled: Boolean(scheduledSeconds) },
-      platform: 'facebook',
-    },
+    publishedRef,
   }
+}
+
+export const reconcileFacebookScheduledPost = async (args: {
+  externalId: string
+  options: NormalizedPluginOptions
+  pageId: string
+  payload: Payload
+  postId: number | string
+  scheduledPublishTime?: number
+}): Promise<{ pending: boolean }> => {
+  const pageAccessToken = await getPageAccessToken(args.payload, args.options, args.pageId)
+  const response = await makeMetaRequest(
+    args.payload,
+    args.options,
+    'facebook',
+    `/${encodeURIComponent(args.externalId)}?fields=id,is_published,permalink_url`,
+    { accessToken: pageAccessToken },
+  )
+  if (!response.ok) {
+    throw new PlatformApiError({
+      message: `Facebook scheduled post lookup failed: ${response.status}`,
+      platform: 'facebook',
+      retryable: response.status >= 500 || response.status === 429,
+      statusCode: response.status,
+      upstreamCode: response.status,
+    })
+  }
+  const result = (await response.json()) as { is_published?: boolean; permalink_url?: string }
+  const published = result.is_published === true
+  const overdue =
+    args.scheduledPublishTime !== undefined &&
+    Date.now() > args.scheduledPublishTime * 1000 + 24 * 60 * 60 * 1000
+  await args.payload.update({
+    id: args.postId as never,
+    collection: SOCIAL_POSTS_SLUG as never,
+    data: {
+      externalUrl: result.permalink_url,
+      lastAttemptedAt: new Date().toISOString(),
+      lastError: overdue ? 'Facebook did not publish the scheduled post within 24 hours.' : null,
+      nextRetryAt: published || overdue ? null : new Date(Date.now() + 5 * 60_000).toISOString(),
+      platformPublicationStatus: published ? 'published' : overdue ? 'failed' : 'pending',
+      ...(published ? { publishedAt: new Date().toISOString() } : {}),
+      status: published ? 'published' : overdue ? 'failed' : 'scheduled',
+    } as never,
+    overrideAccess: true,
+  })
+  return { pending: !published && !overdue }
 }
 
 export const deleteFacebookPost = async (args: {
@@ -630,8 +699,10 @@ export const deleteFacebookPost = async (args: {
     return
   }
 
-  // Need the Page token. Recover Page id from the compound id `{page}_{post}`.
-  const [pageId] = publishedRef.externalId.split('_')
+  const metadataPageId =
+    typeof publishedRef.meta?.pageId === 'string' ? publishedRef.meta.pageId.trim() : ''
+  const [compoundPageId] = publishedRef.externalId.split('_')
+  const pageId = metadataPageId || compoundPageId
   if (!pageId) {
     throw new ValidationError(`Cannot resolve Page id from externalId "${publishedRef.externalId}"`)
   }
@@ -648,25 +719,5 @@ export const deleteFacebookPost = async (args: {
     throw new ValidationError(
       `Facebook post delete failed: ${response.status} ${await response.text().catch(() => '')}`,
     )
-  }
-
-  const result = await payload.find({
-    collection: SOCIAL_POSTS_SLUG as never,
-    depth: 0,
-    limit: 1,
-    overrideAccess: true,
-    where: {
-      externalId: { equals: publishedRef.externalId },
-      platform: { equals: 'facebook' },
-    },
-  })
-  const doc = result.docs[0] as { id: number | string } | undefined
-  if (doc) {
-    await payload.update({
-      id: doc.id as never,
-      collection: SOCIAL_POSTS_SLUG as never,
-      data: { status: 'cancelled' } as never,
-      overrideAccess: true,
-    })
   }
 }

@@ -24,9 +24,10 @@ The plugin derives the Page token for you. You just need a credential that can
 reach the Page:
 
 - **System user token** (recommended for a backend): assign the Page to the
-  system user with the `CREATE_CONTENT` task, then generate a never-expiring
-  token. A Page token derived from this is effectively non-expiring while the
-  system user keeps the role.
+  system user with the `CREATE_CONTENT` task, then generate a token with the
+  intended expiry policy. A token without a scheduled expiry can still be
+  invalidated by revocation, role or asset changes, app changes, or provider
+  enforcement; monitor connection health.
 - **OAuth user login**: the user authorizes, and the plugin reads the Page token
   from `/me/accounts`. Add this redirect URI:
 
@@ -70,16 +71,17 @@ platforms: {
 The adapter deliberately uses Meta's `file_url` ingestion because social source
 media is represented by a public URL. Meta fetches the bytes directly, avoiding
 an unnecessary large-file proxy through the Payload process. Local-file and
-resumable-session upload are outside the v1 source contract.
+resumable-session upload are outside the initial public source contract.
 
 ## Scheduling
 
 A `scheduledPublishTime` (or a `scheduledAt` in the source-publish payload)
 must be at least 10 minutes in the future, and at most 75 days out for feed
 posts or 6 months for videos. The plugin validates these bounds and records the
-platform-accepted post as `published` with a pending platform status and the
-future publish timestamp. Plugin-level `scheduledAt` remains queued until its
-Payload job executes.
+provider-accepted post as `scheduled` with a pending platform status. A
+reconciliation job confirms when Facebook reports it published and only then
+sets `publishedAt`. Plugin-level `scheduledAt` remains queued until its Payload
+job executes.
 
 ## Gotchas
 

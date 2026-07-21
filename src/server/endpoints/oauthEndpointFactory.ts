@@ -31,7 +31,7 @@ import {
  *
  * The callback is deliberately NOT admin-gated: cookie reliability is fragile
  * across the cross-origin redirect, so the state-cookie vs state-param match is
- * the authoritative CSRF gate (CLAUDE.md §2.18 #8).
+ * the authoritative CSRF gate.
  */
 export type OauthEndpointConfig = {
   /** Value appended to `?connected=` on the post-callback admin redirect. */
@@ -74,7 +74,7 @@ export const createOauthStartEndpoint = (
         )
       }
       const state = randomBytes(24).toString('hex')
-      const adapter = getPlatformAdapter(cfg.platform)
+      const adapter = getPlatformAdapter(cfg.platform, options)
       const url = adapter.buildAuthorizeUrl
         ? await adapter.buildAuthorizeUrl({ options, payload: req.payload, state })
         : ''
@@ -120,7 +120,7 @@ export const createOauthCallbackEndpoint = (
         throw new ForbiddenError('OAuth state mismatch')
       }
 
-      const adapter = getPlatformAdapter(cfg.platform)
+      const adapter = getPlatformAdapter(cfg.platform, options)
       if (!adapter.exchangeCallback) {
         throw new ValidationError(`${cfg.label} adapter does not implement exchangeCallback`)
       }
@@ -156,7 +156,7 @@ export const createOauthDisconnectEndpoint = (
     const log = createPluginLogger(req.payload?.logger, { op: `${cfg.platform}:disconnect` })
     try {
       await assertAccess(req, options, 'admin')
-      const adapter = getPlatformAdapter(cfg.platform)
+      const adapter = getPlatformAdapter(cfg.platform, options)
       const state = await adapter.isConnected({ options, payload: req.payload })
       if (state.managedByConfig) {
         throw new ConflictError(

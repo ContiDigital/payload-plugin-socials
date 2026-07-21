@@ -8,7 +8,11 @@ import type {
   SocialSourceContext,
 } from '../../../../types/index.js'
 
-import { PlatformApiError, ValidationError } from '../../../utilities/errors.js'
+import {
+  PlatformApiError,
+  PublicationPersistenceError,
+  ValidationError,
+} from '../../../utilities/errors.js'
 import { buildPublicationIdentity } from '../../../utilities/publicationIdentity.js'
 
 vi.mock('../../_meta/api.js', () => ({
@@ -159,6 +163,24 @@ describe('publishInstagramMedia — validation', () => {
 })
 
 describe('publishInstagramMedia — two-phase flow', () => {
+  it('captures the media id and fences retries when audit persistence fails', async () => {
+    setupFlow()
+    payload.create.mockRejectedValue(new Error('database unavailable'))
+
+    const publication = publishInstagramMedia({
+      ctx: ctx(),
+      input: { igUserId: 'ig_1', imageUrl: 'https://cdn.example.com/main.jpg' },
+      options,
+      payload: asPayload(payload),
+    })
+
+    await expect(publication).rejects.toBeInstanceOf(PublicationPersistenceError)
+    await expect(publication).rejects.toMatchObject({
+      outcome: 'unknown',
+      publishedRef: { externalId: 'media_1', platform: 'instagram' },
+    })
+  })
+
   it('publishes a single image: create, poll FINISHED, publish', async () => {
     setupFlow()
     const result = await publishInstagramMedia({

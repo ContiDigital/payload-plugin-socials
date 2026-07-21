@@ -5,7 +5,7 @@ import { INSTAGRAM_CAPTION_MAX_CHARS, INSTAGRAM_CAPTION_MAX_HASHTAGS } from '../
 /**
  * Instagram caption builder + limit-counting helpers.
  *
- * Hard limits (CLAUDE.md §4.4):
+ * Provider limits:
  *   - 2200 chars total
  *   - 30 hashtags
  *   - 20 @mentions

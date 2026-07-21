@@ -17,7 +17,7 @@ import {
  *   GET  {basePath}/{platform}/oauth/callback
  *   POST {basePath}/{platform}/disconnect
  *
- * Both platforms share the underlying Facebook Login dialog (CLAUDE.md §4.4)
+ * Both platforms share the underlying Facebook Login dialog
  * because IG Business publishing requires a Facebook Page link. Tokens are
  * stored separately per platform so each can be disconnected independently.
  * System-user deployments mount only `disconnect` (no OAuth wiring).

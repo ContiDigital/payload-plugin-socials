@@ -4,9 +4,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { NormalizedPluginOptions } from '../../../../types/index.js'
 
+vi.mock('../../../assets/safeRemoteImage.js', () => ({ fetchPinnedRemoteResponse: vi.fn() }))
 vi.mock('../../../utilities/requestPolicy.js', () => ({ policyFetch: vi.fn() }))
 vi.mock('../api.js', () => ({ pinterestJson: vi.fn() }))
 
+import { fetchPinnedRemoteResponse } from '../../../assets/safeRemoteImage.js'
 import { policyFetch } from '../../../utilities/requestPolicy.js'
 import { pinterestJson } from '../api.js'
 import { uploadPinterestVideoFromUrl } from '../videoUpload.js'
@@ -35,13 +37,13 @@ describe('uploadPinterestVideoFromUrl', () => {
         upload_url: 'https://pinterest-upload.example.com/',
       })
       .mockResolvedValueOnce({ media_id: 'media_1', status: 'succeeded' })
-    vi.mocked(policyFetch)
-      .mockResolvedValueOnce(
-        new Response(new Uint8Array([1, 2, 3]), {
-          headers: { 'Content-Length': '3', 'Content-Type': 'video/mp4' },
-        }),
-      )
-      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+    vi.mocked(fetchPinnedRemoteResponse).mockResolvedValueOnce({
+      finalUrl: 'https://cdn.example.com/video.mp4',
+      response: new Response(new Uint8Array([1, 2, 3]), {
+        headers: { 'Content-Length': '3', 'Content-Type': 'video/mp4' },
+      }),
+    })
+    vi.mocked(policyFetch).mockResolvedValueOnce(new Response(null, { status: 204 }))
 
     await expect(
       uploadPinterestVideoFromUrl({
@@ -58,7 +60,13 @@ describe('uploadPinterestVideoFromUrl', () => {
       '/v5/media',
       expect.objectContaining({ method: 'POST' }),
     )
-    const uploadCall = vi.mocked(policyFetch).mock.calls[1][0]
+    expect(fetchPinnedRemoteResponse).toHaveBeenCalledWith({
+      allowedHosts: ['cdn.example.com'],
+      label: 'Pinterest video source',
+      policy: { timeoutMs: 900_000, trustedHosts: [] },
+      url: 'https://cdn.example.com/video.mp4',
+    })
+    const uploadCall = vi.mocked(policyFetch).mock.calls[0][0]
     expect(uploadCall.input).toBe('https://pinterest-upload.example.com/')
     expect(uploadCall.init?.headers).toMatchObject({
       'Content-Length': expect.any(String),
@@ -91,11 +99,12 @@ describe('uploadPinterestVideoFromUrl', () => {
       upload_parameters: { key: 'uploads/video' },
       upload_url: 'https://pinterest-upload.example.com/',
     })
-    vi.mocked(policyFetch).mockResolvedValueOnce(
-      new Response(new Uint8Array([1]), {
+    vi.mocked(fetchPinnedRemoteResponse).mockResolvedValueOnce({
+      finalUrl: 'https://cdn.example.com/video.mp4',
+      response: new Response(new Uint8Array([1]), {
         headers: { 'Content-Type': 'video/mp4' },
       }),
-    )
+    })
     await expect(
       uploadPinterestVideoFromUrl({
         options,
@@ -138,7 +147,10 @@ describe('uploadPinterestVideoFromUrl', () => {
       upload_url: 'https://pinterest-upload.example.com/',
     }
     vi.mocked(pinterestJson).mockResolvedValue(registration)
-    vi.mocked(policyFetch).mockResolvedValueOnce(new Response('down', { status: 503 }))
+    vi.mocked(fetchPinnedRemoteResponse).mockResolvedValueOnce({
+      finalUrl: 'https://cdn.example.com/video.mp4',
+      response: new Response('down', { status: 503 }),
+    })
     await expect(
       uploadPinterestVideoFromUrl({
         options,
@@ -147,11 +159,12 @@ describe('uploadPinterestVideoFromUrl', () => {
       }),
     ).rejects.toMatchObject({ retryable: true })
 
-    vi.mocked(policyFetch).mockResolvedValueOnce(
-      new Response(new Uint8Array([1]), {
+    vi.mocked(fetchPinnedRemoteResponse).mockResolvedValueOnce({
+      finalUrl: 'https://cdn.example.com/video.mp4',
+      response: new Response(new Uint8Array([1]), {
         headers: { 'Content-Length': '1', 'Content-Type': 'text/plain' },
       }),
-    )
+    })
     await expect(
       uploadPinterestVideoFromUrl({
         options,
@@ -160,14 +173,15 @@ describe('uploadPinterestVideoFromUrl', () => {
       }),
     ).rejects.toThrow(/content type/)
 
-    vi.mocked(policyFetch).mockResolvedValueOnce(
-      new Response(new Uint8Array([1]), {
+    vi.mocked(fetchPinnedRemoteResponse).mockResolvedValueOnce({
+      finalUrl: 'https://cdn.example.com/video.mp4',
+      response: new Response(new Uint8Array([1]), {
         headers: {
           'Content-Length': String(2 * 1024 * 1024 * 1024 + 1),
           'Content-Type': 'video/mp4',
         },
       }),
-    )
+    })
     await expect(
       uploadPinterestVideoFromUrl({
         options,
@@ -184,13 +198,13 @@ describe('uploadPinterestVideoFromUrl', () => {
       upload_url: 'https://pinterest-upload.example.com/',
     }
     vi.mocked(pinterestJson).mockResolvedValueOnce(registration)
-    vi.mocked(policyFetch)
-      .mockResolvedValueOnce(
-        new Response(new Uint8Array([1]), {
-          headers: { 'Content-Length': '1', 'Content-Type': 'video/mp4' },
-        }),
-      )
-      .mockResolvedValueOnce(new Response('upload failed', { status: 500 }))
+    vi.mocked(fetchPinnedRemoteResponse).mockResolvedValueOnce({
+      finalUrl: 'https://cdn.example.com/video.mp4',
+      response: new Response(new Uint8Array([1]), {
+        headers: { 'Content-Length': '1', 'Content-Type': 'video/mp4' },
+      }),
+    })
+    vi.mocked(policyFetch).mockResolvedValueOnce(new Response('upload failed', { status: 500 }))
     await expect(
       uploadPinterestVideoFromUrl({
         options,
@@ -202,13 +216,13 @@ describe('uploadPinterestVideoFromUrl', () => {
     vi.mocked(pinterestJson)
       .mockResolvedValueOnce(registration)
       .mockResolvedValueOnce({ media_id: 'media_1', status: 'failed' })
-    vi.mocked(policyFetch)
-      .mockResolvedValueOnce(
-        new Response(new Uint8Array([1]), {
-          headers: { 'Content-Length': '1', 'Content-Type': 'video/mp4' },
-        }),
-      )
-      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+    vi.mocked(fetchPinnedRemoteResponse).mockResolvedValueOnce({
+      finalUrl: 'https://cdn.example.com/video.mp4',
+      response: new Response(new Uint8Array([1]), {
+        headers: { 'Content-Length': '1', 'Content-Type': 'video/mp4' },
+      }),
+    })
+    vi.mocked(policyFetch).mockResolvedValueOnce(new Response(null, { status: 204 }))
     await expect(
       uploadPinterestVideoFromUrl({
         options,
@@ -216,5 +230,34 @@ describe('uploadPinterestVideoFromUrl', () => {
         videoUrl: 'https://cdn.example.com/video.mp4',
       }),
     ).rejects.toThrow(/failed to process/)
+  })
+
+  it('rejects a source body that exceeds its declared length while streaming', async () => {
+    vi.mocked(pinterestJson).mockResolvedValueOnce({
+      media_id: 'media_1',
+      upload_parameters: { key: 'uploads/video' },
+      upload_url: 'https://pinterest-upload.example.com/',
+    })
+    vi.mocked(fetchPinnedRemoteResponse).mockResolvedValueOnce({
+      finalUrl: 'https://cdn.example.com/video.mp4',
+      response: new Response(new Uint8Array([1, 2]), {
+        headers: { 'Content-Length': '1', 'Content-Type': 'video/mp4' },
+      }),
+    })
+    vi.mocked(policyFetch).mockImplementationOnce(async ({ init }) => {
+      const reader = (init?.body as ReadableStream<Uint8Array>).getReader()
+      while (!(await reader.read()).done) {
+        // Drain the upload to exercise streamed length enforcement.
+      }
+      return new Response(null, { status: 204 })
+    })
+
+    await expect(
+      uploadPinterestVideoFromUrl({
+        options,
+        payload,
+        videoUrl: 'https://cdn.example.com/video.mp4',
+      }),
+    ).rejects.toThrow(/exceeded its declared Content-Length/)
   })
 })

@@ -7,13 +7,12 @@ import type {
   SocialImageFormat,
 } from '../../types/index.js'
 
-import { PLUGIN_SLUG } from '../../constants.js'
+import { MAX_SOURCE_IMAGE_BYTES, PLUGIN_SLUG } from '../../constants.js'
 import { ValidationError } from '../utilities/errors.js'
 import { sha256Hex } from '../utilities/hash.js'
 import { detectImageFormat } from './detectImageFormat.js'
 import { PLATFORM_IMAGE_CONSTRAINTS } from './imagePreflight.js'
-
-const MAX_SOURCE_BYTES = 25 * 1024 * 1024
+import { fetchRemoteImageBytes } from './safeRemoteImage.js'
 
 export type ResolvePlatformImageArgs = {
   declaredFormat?: SocialImageFormat
@@ -29,40 +28,27 @@ export type ResolvePlatformImageResult = {
   url: string
 }
 
-/**
- * Resolve the final image URL for a platform publish, applying format safety.
- *
- * Layers:
- *   1. If preflight is disabled, pass through unchanged.
- *   2. Detect format (from declared or via magic bytes).
- *   3. If the format is allowed for the platform, pass through.
- *   4. If autoConvert is enabled, transcode to JPEG via sharp and upload a
- *      rendition to the configured collection.
- *   5. Otherwise, throw an actionable ValidationError.
- */
 export const resolvePlatformImageUrl = async (
   args: ResolvePlatformImageArgs,
 ): Promise<ResolvePlatformImageResult> => {
   const { declaredFormat, imageUrl, options, payload, platform } = args
   const assets: NormalizedAssetsConfig = options.assets
 
-  // Layer 1: preflight disabled, pass through.
   if (!assets.preflight) {
     return { converted: false, format: declaredFormat, url: imageUrl }
   }
 
-  // Layer 2: determine format.
+  const remotePolicy = {
+    timeoutMs: assets.remoteFetchTimeoutMs,
+    trustedHosts: assets.trustedRemoteHosts,
+  }
   const format: SocialImageFormat | undefined =
-    declaredFormat ?? (await detectImageFormat(imageUrl))
+    declaredFormat ?? (await detectImageFormat(imageUrl, remotePolicy))
 
   if (!format) {
-    // Unknown format: pass through with a debug note. We cannot block unknown
-    // formats because some hosts use CDN URLs without file extensions and the
-    // server may not support Range requests.
-    return { converted: false, url: imageUrl }
+    throw new ValidationError('Remote image format could not be identified from its file signature')
   }
 
-  // Layer 3: check allowlist.
   const constraints = PLATFORM_IMAGE_CONSTRAINTS[platform]
   const allowed = constraints.formats as readonly string[]
 
@@ -70,7 +56,6 @@ export const resolvePlatformImageUrl = async (
     return { converted: false, format, url: imageUrl }
   }
 
-  // Layer 4: autoConvert.
   if (assets.autoConvert) {
     if (!assets.renditionCollection) {
       throw new ValidationError(
@@ -78,7 +63,6 @@ export const resolvePlatformImageUrl = async (
       )
     }
 
-    // Check for existing rendition with the same deterministic filename.
     const filename = buildRenditionFilename(imageUrl)
     const existing = await findExistingRendition(payload, assets.renditionCollection, filename)
     if (existing) {
@@ -86,11 +70,9 @@ export const resolvePlatformImageUrl = async (
       return { converted: true, format: 'jpeg', url: absoluteUrl }
     }
 
-    // Transcode.
-    const sourceBytes = await fetchSourceBytes(imageUrl)
+    const sourceBytes = await fetchSourceBytes(imageUrl, remotePolicy)
     const jpegBuffer = await transcodeToJpeg(sourceBytes, assets.jpegQuality)
 
-    // Upload via Payload.
     const created = (await payload.create({
       collection: assets.renditionCollection as never,
       data: {} as never,
@@ -107,7 +89,6 @@ export const resolvePlatformImageUrl = async (
     return { converted: true, format: 'jpeg', url: renditionUrl }
   }
 
-  // Layer 5: throw actionable error.
   throw new ValidationError(
     `${platform} does not accept ${format} images (allowed: ${allowed.join(', ')}). ` +
       `To fix this, either configure a JPEG imageSize with formatOptions on your upload collection, ` +
@@ -115,12 +96,8 @@ export const resolvePlatformImageUrl = async (
   )
 }
 
-// ---------------------------------------------------------------------------
-// Internal helpers
-// ---------------------------------------------------------------------------
-
 const buildRenditionFilename = (sourceUrl: string): string => {
-  const hash = sha256Hex(sourceUrl).slice(0, 8)
+  const hash = sha256Hex(sourceUrl).slice(0, 32)
   return `socials-rendition-${hash}.jpg`
 }
 
@@ -155,26 +132,21 @@ const absolutizeUrl = (url: string | undefined, payload: Payload): string => {
   return `${serverURL}${url.startsWith('/') ? '' : '/'}${url}`
 }
 
-const fetchSourceBytes = async (url: string): Promise<Buffer> => {
-  const response = await globalThis.fetch(url)
-  if (!response.ok) {
+const fetchSourceBytes = async (
+  url: string,
+  policy: { timeoutMs: number; trustedHosts: readonly string[] },
+): Promise<Buffer> => {
+  const result = await fetchRemoteImageBytes({
+    maxBytes: MAX_SOURCE_IMAGE_BYTES,
+    policy,
+    url,
+  })
+  if (result.contentType && !result.contentType.startsWith('image/')) {
     throw new ValidationError(
-      `Failed to fetch source image for transcoding: ${response.status} ${response.statusText}`,
+      `Remote image returned unsupported content type "${result.contentType}"`,
     )
   }
-  const contentLength = Number(response.headers.get('content-length') ?? 0)
-  if (contentLength > MAX_SOURCE_BYTES) {
-    throw new ValidationError(
-      `Source image is too large for transcoding (${Math.round(contentLength / 1024 / 1024)}MB, max 25MB)`,
-    )
-  }
-  const arrayBuf = await response.arrayBuffer()
-  if (arrayBuf.byteLength > MAX_SOURCE_BYTES) {
-    throw new ValidationError(
-      `Source image is too large for transcoding (${Math.round(arrayBuf.byteLength / 1024 / 1024)}MB, max 25MB)`,
-    )
-  }
-  return Buffer.from(arrayBuf)
+  return Buffer.from(result.bytes)
 }
 
 const transcodeToJpeg = async (input: Buffer, quality: number): Promise<Buffer> => {

@@ -16,17 +16,21 @@ import {
 } from '../../services/connectionService.js'
 import { PlatformApiError } from '../../utilities/errors.js'
 import { createPluginLogger } from '../../utilities/logger.js'
-import { isRetryableNetworkError, policyFetch } from '../../utilities/requestPolicy.js'
+import {
+  isRetryableNetworkError,
+  isSafeToRetryRequest,
+  policyFetch,
+} from '../../utilities/requestPolicy.js'
 
 /**
  * Shared HTTP client for the Meta Graph API surface — used by both the
  * Instagram and Facebook adapters because Meta exposes both products on the
  * same host (`graph.facebook.com`) with the same auth model.
  *
- * Auth precedence (matches CLAUDE.md §4.1):
+ * Auth precedence:
  *
- *   1. System user access token from plugin config (never expires; preferred
- *      for backend deployments). Either platform may have its own.
+ *   1. System user access token from plugin config (preferred for backend
+ *      deployments). Either platform may have its own.
  *   2. Long-lived user access token persisted in the `socials-connections`
  *      global (60-day expiry; refreshed via `fb_exchange_token`).
  *
@@ -172,7 +176,7 @@ const exchangeForLongLivedUserToken = async (
 
 /**
  * Refresh the stored user access token. Meta long-lived tokens DON'T have a
- * refresh-token concept (CLAUDE.md §4.1) — you re-exchange the existing
+ * refresh-token concept — the existing token is re-exchanged
  * long-lived token before it expires to extend the window.
  */
 const refreshUserAccessToken = async (
@@ -381,6 +385,7 @@ export const makeMetaRequest = async (
   const log = createPluginLogger(payload.logger, { path, platform })
   const rl = options.rateLimit
   const maxRetries = requestOptions.maxRetries ?? rl.maxRetries
+  const safeToRetry = isSafeToRetryRequest(requestOptions.init)
   let attempt = 0
   let didRefresh = false
 
@@ -407,7 +412,7 @@ export const makeMetaRequest = async (
         scope: `meta:${platform}`,
       })
     } catch (error) {
-      if (isRetryableNetworkError(error) && attempt < maxRetries) {
+      if (safeToRetry && isRetryableNetworkError(error) && attempt < maxRetries) {
         const delayMs = computeBackoffMs(
           attempt,
           rl.baseRetryDelayMs,
@@ -421,9 +426,10 @@ export const makeMetaRequest = async (
       }
       throw new PlatformApiError({
         message: `Meta ${path} failed before receiving a response`,
+        outcome: safeToRetry ? 'failed' : 'unknown',
         platform,
         raw: error,
-        retryable: isRetryableNetworkError(error),
+        retryable: safeToRetry && isRetryableNetworkError(error),
         statusCode: 502,
         upstreamCode: error instanceof Error ? error.name : 'network_error',
         upstreamMessage: error instanceof Error ? error.message : String(error),
@@ -473,7 +479,11 @@ export const makeMetaRequest = async (
       continue
     }
 
-    if (isRetryableMetaError(response.status, errorCode) && attempt < maxRetries) {
+    if (
+      (safeToRetry || response.status === 429) &&
+      isRetryableMetaError(response.status, errorCode) &&
+      attempt < maxRetries
+    ) {
       const delayMs = computeBackoffMs(
         attempt,
         rl.baseRetryDelayMs,
@@ -520,11 +530,17 @@ export const metaJson = async <T>(
   const embeddedError = envelope.error
   if (!response.ok) {
     const error = embeddedError
+    const safeToRetry = isSafeToRetryRequest(init)
+    const outcome =
+      !safeToRetry && response.status !== 429 && isRetryableMetaError(response.status, error?.code)
+        ? 'unknown'
+        : 'failed'
     throw new PlatformApiError({
       message: `Meta ${path} failed: ${response.status}${error?.message ? ` — ${error.message}` : ''}`,
+      outcome,
       platform,
       raw: { ...envelope, fbtrace_id: error?.fbtrace_id },
-      retryable: isRetryableMetaError(response.status, error?.code),
+      retryable: outcome === 'failed' && isRetryableMetaError(response.status, error?.code),
       statusCode: response.status,
       upstreamCode: error?.code ?? response.status,
       upstreamMessage: error?.message ?? text,

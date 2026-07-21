@@ -10,14 +10,13 @@ import { applyScheduledSync } from './plugin/applyScheduledSync.js'
 import { applyJobEnhancements } from './plugin/jobTasks.js'
 import { normalizePluginOptions } from './plugin/normalizeOptions.js'
 import { initPlatformRegistry } from './server/platforms/registry.js'
-import { registerSourceResolvers } from './server/sources/registry.js'
+import { validateSourceResolvers } from './server/sources/registry.js'
 
 /**
  * `payload-plugin-socials` — multi-platform social publishing for Payload CMS.
  *
  * Curried factory. The outer call takes user options; the inner call receives
- * the Payload `Config` and returns the augmented config. Mirrors the GMC
- * plugin's entrypoint shape exactly (see CLAUDE.md §1.2).
+ * the Payload `Config` and returns the augmented config.
  *
  * Apply pipeline order is load-bearing:
  *   1. normalize options + register source resolvers + init platform registry
@@ -37,9 +36,8 @@ export const payloadPluginSocials =
       return incomingConfig
     }
 
-    // Eager init so hooks + jobs + endpoints all resolve the registry
-    // synchronously. Mirrors the GMC `initMerchantService` pattern.
-    registerSourceResolvers(options.sources)
+    // Eager initialization keeps hooks, jobs, and endpoints on one option-scoped registry.
+    validateSourceResolvers(options.sources)
     initPlatformRegistry(options)
 
     let config = applyCollectionEnhancements(incomingConfig, options)
@@ -167,13 +165,19 @@ export type {
   PreviewResult,
   PublishArgs,
   PublishedRef,
+  SocialCopyFieldKey,
+  SocialCopyFieldTransforms,
+  SocialCopyTransform,
   SocialDraft,
   SocialDraftMedia,
+  SocialHashtagsTransform,
   SocialImage,
+  SocialImageFormat,
   SocialImageRole,
   SocialsAcquireRequestLease,
   SocialsAdminConfig,
   SocialsApiConfig,
+  SocialsAssetsConfig,
   SocialsAutoRunConfig,
   SocialsCoordinationConfig,
   SocialsCopyOverrides,
@@ -184,6 +188,7 @@ export type {
   SocialsRateLimitConfig,
   SocialsRequestLease,
   SocialsSchedulingConfig,
+  SocialsTransformations,
   SocialsWebhookConfig,
   SocialVideo,
   SourceContextResolver,

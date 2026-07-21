@@ -11,9 +11,7 @@ import { PLUGIN_SLUG, SOCIAL_POSTS_SLUG, SOCIAL_TEMPLATES_SLUG } from '../consta
  * collection listed in `options.admin.injectInto`, append a "Socials" tab
  * that mounts the multi-platform composer.
  *
- * The tab field uses the placeholder pattern documented in CLAUDE.md §1.6:
- * the actual UI component is referenced via the `payload-plugin-socials/client`
- * package path so Payload's bundler can locate it.
+ * Admin components use the public client export so Payload can build its import map.
  */
 
 const SOCIALS_PLACEHOLDER_NAME = 'socialsPlaceholder'
@@ -89,10 +87,27 @@ export const applyCollectionEnhancements = (
     config.collections = []
   }
 
-  // Add the plugin-owned collections. Idempotent — re-applying the plugin
-  // (HMR or multiple instances) does not duplicate the registration.
+  const authCollections = config.collections.filter((collection) => Boolean(collection.auth))
+  if (options.authCollection) {
+    const configuredAuth = config.collections.find(
+      (collection) => collection.slug === options.authCollection,
+    )
+    if (!configuredAuth?.auth) {
+      throw new Error(
+        `${PLUGIN_SLUG}: authCollection "${options.authCollection}" is not an auth-enabled collection`,
+      )
+    }
+  } else if (authCollections.length === 1) {
+    options.authCollection = authCollections[0].slug
+  } else if (authCollections.length > 1) {
+    throw new Error(
+      `${PLUGIN_SLUG}: multiple auth-enabled collections were found; set authCollection explicitly`,
+    )
+  }
+
+  // Re-applying the same plugin configuration during HMR does not duplicate collections.
   if (!config.collections.some((c) => c.slug === SOCIAL_POSTS_SLUG)) {
-    config.collections.push(buildSocialPostsCollection(options.authorize))
+    config.collections.push(buildSocialPostsCollection(options.authorize, options.authCollection))
   }
   if (!config.collections.some((c) => c.slug === SOCIAL_TEMPLATES_SLUG)) {
     config.collections.push(buildSocialTemplatesCollection(options))

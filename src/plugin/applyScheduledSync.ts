@@ -5,17 +5,16 @@ import type { NormalizedPluginOptions } from '../types/index.js'
 import {
   SOCIAL_CONNECTION_REFRESH_TASK_SLUG,
   SOCIAL_INSIGHTS_REFRESH_TASK_SLUG,
+  SOCIAL_POST_SWEEP_TASK_SLUG,
   SOCIALS_QUEUE_NAME,
 } from '../constants.js'
 import { createPluginLogger } from '../server/utilities/logger.js'
-import { SOCIAL_POST_SWEEP_TASK_SLUG } from './jobTaskDefinitions.js'
 
 /**
  * Optionally registers cron-driven `autoRun` entries for the plugin's
  * scheduling tasks on the host's Payload Jobs config.
  *
- * BYO-scheduler is the plugin's first-class contract (see CLAUDE.md §1.13 +
- * the SchedulingConfig docs in `types/index.ts`). Three integration modes:
+ * The host can choose among three scheduling modes:
  *
  *   1. **Native Payload Jobs autoRun** (this file). Host sets
  *      `scheduling.autoRun.cron` and the plugin registers an autoRun entry
@@ -34,14 +33,12 @@ import { SOCIAL_POST_SWEEP_TASK_SLUG } from './jobTaskDefinitions.js'
  * always available regardless of this module — they just exercise the
  * `jobQueue` helpers directly.
  *
- * Idempotent — re-applying the plugin (HMR / multiple plugin instances)
+ * Idempotent — re-applying the same plugin configuration during HMR
  * does not stack autoRun entries. Existing entries with a matching task
  * slug + queue are left untouched.
  *
- * The startup notice logs once per Payload instance via a `WeakSet`
- * keyed on the Payload object (matches the GMC pattern documented at
- * CLAUDE.md §1.13 "Per-payload runner WeakMap singleton" — same trick,
- * applied to the once-per-process startup log).
+ * A `WeakSet` keeps the startup notice once per Payload instance without
+ * retaining disposed instances.
  */
 
 const startupNoticeRegistry = new WeakSet<Payload>()
@@ -130,7 +127,7 @@ export const applyScheduledSync = (config: Config, options: NormalizedPluginOpti
     }
     // Payload's autoRun entries are loosely typed (varies across versions
     // of `@payloadcms/payload`). `as never` is the documented Payload-types
-    // laxity workaround (see CLAUDE.md §1.21).
+    // Payload's config type is narrower than the runtime autoRun shape.
     autoRunArray.push({ cron: entry.cron, queue: entry.queue } as never)
   }
 

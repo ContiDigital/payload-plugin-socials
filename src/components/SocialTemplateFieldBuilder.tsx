@@ -207,11 +207,7 @@ export const SocialTemplateFieldBuilder: React.FC<SocialTemplateFieldBuilderProp
   const { value: docSourceKind } = useField<string>({ path: 'sourceKind' })
   const { config } = useConfig()
 
-  // ---------- config.admin?.custom.socials ------------------------------------
-  //
-  // Fix 1: read from config.admin?.custom (serialized to browser by Payload)
-  // instead of config.custom (stripped by Payload 3.86 serverOnlyConfigProperties).
-
+  // Payload serializes plugin client configuration under admin.custom.
   const socials = asRecord(asRecord(config.admin?.custom)?.socials)
   const sourceKinds: SourceKindEntry[] = Array.isArray(socials?.sourceKinds)
     ? (socials.sourceKinds as unknown[]).flatMap((entry) => {
