@@ -1,12 +1,16 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { NormalizedPluginOptions } from '../../../types/index.js'
 
 import { resolvePlatformImageUrl } from '../resolvePlatformImage.js'
+import { fetchRemoteImageBytes } from '../safeRemoteImage.js'
 
 // Mock detectImageFormat at the module level
 vi.mock('../detectImageFormat.js', () => ({
   detectImageFormat: vi.fn(),
+}))
+vi.mock('../safeRemoteImage.js', () => ({
+  fetchRemoteImageBytes: vi.fn(),
 }))
 
 // Mock the sharp import used inside resolvePlatformImage
@@ -20,6 +24,7 @@ vi.mock('sharp', () => ({
 
 const { detectImageFormat } = await import('../detectImageFormat.js')
 const mockedDetect = vi.mocked(detectImageFormat)
+const mockedFetchRemoteImageBytes = vi.mocked(fetchRemoteImageBytes)
 
 const makeOptions = (
   overrides: Partial<NormalizedPluginOptions['assets']> = {},
@@ -29,7 +34,9 @@ const makeOptions = (
       autoConvert: false,
       jpegQuality: 82,
       preflight: true,
+      remoteFetchTimeoutMs: 15_000,
       renditionCollection: undefined,
+      trustedRemoteHosts: ['cdn.example.com'],
       ...overrides,
     },
   }) as unknown as NormalizedPluginOptions
@@ -46,19 +53,10 @@ const makePayload = (findDocs: Array<{ url: string }> = []) => {
 describe('resolvePlatformImageUrl', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    // By default, global fetch returns a successful response for source bytes
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue({
-        arrayBuffer: () => Promise.resolve(new ArrayBuffer(100)),
-        headers: new Headers({ 'content-length': '100' }),
-        ok: true,
-      }),
-    )
-  })
-
-  afterEach(() => {
-    vi.unstubAllGlobals()
+    mockedFetchRemoteImageBytes.mockResolvedValue({
+      bytes: new Uint8Array(100),
+      finalUrl: 'https://cdn.example.com/photo.webp',
+    })
   })
 
   it('passes through unchanged when preflight is disabled', async () => {
@@ -93,19 +91,17 @@ describe('resolvePlatformImageUrl', () => {
     })
   })
 
-  it('passes through unknown format (detection returns undefined)', async () => {
+  it('rejects an image whose format cannot be identified', async () => {
     mockedDetect.mockResolvedValue(undefined)
     const options = makeOptions()
-    const result = await resolvePlatformImageUrl({
-      imageUrl: 'https://cdn.example.com/unknown',
-      options,
-      payload: makePayload(),
-      platform: 'instagram',
-    })
-    expect(result).toEqual({
-      converted: false,
-      url: 'https://cdn.example.com/unknown',
-    })
+    await expect(
+      resolvePlatformImageUrl({
+        imageUrl: 'https://cdn.example.com/unknown',
+        options,
+        payload: makePayload(),
+        platform: 'instagram',
+      }),
+    ).rejects.toThrow('could not be identified')
   })
 
   it('detects format via magic bytes when declaredFormat is not provided', async () => {
@@ -155,7 +151,7 @@ describe('resolvePlatformImageUrl', () => {
       expect.objectContaining({
         collection: 'media',
         file: expect.objectContaining({
-          name: expect.stringMatching(/^socials-rendition-[a-f0-9]{8}\.jpg$/),
+          name: expect.stringMatching(/^socials-rendition-[a-f0-9]{32}\.jpg$/),
           mimetype: 'image/jpeg',
         }),
         overrideAccess: true,

@@ -7,6 +7,7 @@ import {
   PINTEREST_MEDIA_POLL_TIMEOUT_MS,
   PINTEREST_VIDEO_MAX_BYTES,
 } from '../../../constants.js'
+import { fetchPinnedRemoteResponse } from '../../assets/safeRemoteImage.js'
 import { PlatformApiError, ValidationError } from '../../utilities/errors.js'
 import { policyFetch } from '../../utilities/requestPolicy.js'
 import { pinterestJson } from './api.js'
@@ -49,6 +50,12 @@ const assertAllowedVideoUrl = (rawUrl: string, allowedHosts: readonly string[]):
   if (url.protocol !== 'https:') {
     throw new ValidationError('Pinterest videoUrl must use HTTPS')
   }
+  if (url.username || url.password) {
+    throw new ValidationError('Pinterest videoUrl must not contain credentials')
+  }
+  if (url.port && url.port !== '443') {
+    throw new ValidationError('Pinterest videoUrl must use the standard HTTPS port')
+  }
   if (!allowedHosts.includes(url.hostname.toLowerCase())) {
     throw new ValidationError(
       `Pinterest video host "${url.hostname}" is not in platforms.pinterest.allowedVideoHosts`,
@@ -58,35 +65,18 @@ const assertAllowedVideoUrl = (rawUrl: string, allowedHosts: readonly string[]):
 }
 
 const fetchVideoSource = async (
-  payload: Payload,
   options: NormalizedPluginOptions,
   rawUrl: string,
-  redirectsRemaining = 3,
 ): Promise<VideoSource> => {
-  const url = assertAllowedVideoUrl(rawUrl, options.platforms.pinterest.allowedVideoHosts)
-  const response = await policyFetch({
-    config: {
-      ...options.rateLimit,
-      requestTimeoutMs: options.platforms.pinterest.videoUploadTimeoutMs,
+  const { response } = await fetchPinnedRemoteResponse({
+    allowedHosts: options.platforms.pinterest.allowedVideoHosts,
+    label: 'Pinterest video source',
+    policy: {
+      timeoutMs: options.platforms.pinterest.videoUploadTimeoutMs,
+      trustedHosts: [],
     },
-    init: { redirect: 'manual' },
-    input: url,
-    payload,
-    scope: 'pinterest:video-source',
+    url: rawUrl,
   })
-  if (response.status >= 300 && response.status < 400) {
-    const location = response.headers.get('location')
-    if (!location || redirectsRemaining === 0) {
-      throw new ValidationError('Pinterest video source exceeded the redirect limit')
-    }
-    await response.body?.cancel()
-    return fetchVideoSource(
-      payload,
-      options,
-      new URL(location, url).toString(),
-      redirectsRemaining - 1,
-    )
-  }
   if (!response.ok || !response.body) {
     await response.body?.cancel()
     throw new PlatformApiError({
@@ -145,6 +135,7 @@ const buildMultipartUpload = (
   const suffix = encoder.encode(`\r\n--${boundary}--\r\n`)
   const reader = source.response.body.getReader()
   let prefixSent = false
+  let sourceBytesRead = 0
   let sourceDone = false
   const body = new ReadableStream<Uint8Array>({
     async cancel(reason) {
@@ -159,8 +150,23 @@ const buildMultipartUpload = (
       if (!sourceDone) {
         const chunk = await reader.read()
         if (!chunk.done) {
+          sourceBytesRead += chunk.value.byteLength
+          if (
+            sourceBytesRead > source.contentLength ||
+            sourceBytesRead > PINTEREST_VIDEO_MAX_BYTES
+          ) {
+            await reader.cancel()
+            throw new ValidationError(
+              'Pinterest video source body exceeded its declared Content-Length',
+            )
+          }
           controller.enqueue(chunk.value)
           return
+        }
+        if (sourceBytesRead !== source.contentLength) {
+          throw new ValidationError(
+            'Pinterest video source body did not match its declared Content-Length',
+          )
         }
         sourceDone = true
       }
@@ -202,7 +208,7 @@ const transferVideo = async (
   videoUrl: string,
   registration: Required<MediaRegistration>,
 ): Promise<void> => {
-  const source = await fetchVideoSource(payload, options, videoUrl)
+  const source = await fetchVideoSource(options, videoUrl)
   const multipart = buildMultipartUpload(source, registration.upload_parameters)
   type DuplexRequestInit = { duplex: 'half' } & RequestInit
   const init: DuplexRequestInit = {

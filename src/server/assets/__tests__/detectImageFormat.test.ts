@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 
+import type { PinnedHttpsRequest } from '../safeRemoteImage.js'
+
 import { detectImageFormat, identifyFormat } from '../detectImageFormat.js'
 
 // ---------------------------------------------------------------------------
@@ -76,54 +78,61 @@ describe('identifyFormat', () => {
 // ---------------------------------------------------------------------------
 
 describe('detectImageFormat', () => {
-  it('detects JPEG from a 206 partial content response', async () => {
-    const jpegBytes = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10])
-    const mockFetch = vi.fn().mockResolvedValue({
-      arrayBuffer: () => Promise.resolve(jpegBytes.buffer),
-      body: null,
-      headers: new Headers({ 'content-length': '6' }),
-      ok: true,
-      status: 206,
-    })
+  const policy = { timeoutMs: 1_000, trustedHosts: [] }
+  const lookupHostname = vi.fn().mockResolvedValue(['93.184.216.34'])
 
-    const result = await detectImageFormat('https://cdn.example.com/image.jpg', mockFetch)
+  it('detects an extensionless JPEG from a 206 partial content response', async () => {
+    const jpegBytes = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10])
+    const requestImpl = vi
+      .fn<PinnedHttpsRequest>()
+      .mockResolvedValue(new Response(jpegBytes, { status: 206 }))
+
+    const result = await detectImageFormat('https://cdn.example.com/assets/42', policy, {
+      lookupHostname,
+      requestImpl,
+    })
     expect(result).toBe('jpeg')
-    expect(mockFetch).toHaveBeenCalledWith('https://cdn.example.com/image.jpg', {
+    expect(requestImpl).toHaveBeenCalledWith({
+      address: { address: '93.184.216.34', family: 4 },
       headers: { Range: 'bytes=0-31' },
-      method: 'GET',
       signal: expect.any(AbortSignal),
+      timeoutMs: 1_000,
+      url: new URL('https://cdn.example.com/assets/42'),
     })
   })
 
   it('handles a full 200 response by reading one chunk and aborting', async () => {
     const pngBytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
-    const mockReader = {
-      read: vi.fn().mockResolvedValue({ done: false, value: pngBytes }),
-    }
-    const mockFetch = vi.fn().mockResolvedValue({
-      body: { getReader: () => mockReader },
-      headers: new Headers({ 'content-length': '1000000' }),
-      ok: true,
-      status: 200,
-    })
+    const body = new Uint8Array(64)
+    body.set(pngBytes)
+    const requestImpl = vi.fn<PinnedHttpsRequest>().mockResolvedValue(new Response(body))
 
-    const result = await detectImageFormat('https://cdn.example.com/image.png', mockFetch)
+    const result = await detectImageFormat('https://cdn.example.com/image.png', policy, {
+      lookupHostname,
+      requestImpl,
+    })
     expect(result).toBe('png')
   })
 
-  it('returns undefined on network error', async () => {
-    const mockFetch = vi.fn().mockRejectedValue(new Error('network failure'))
-    const result = await detectImageFormat('https://cdn.example.com/bad', mockFetch)
-    expect(result).toBeUndefined()
+  it('fails closed on network error', async () => {
+    const requestImpl = vi.fn<PinnedHttpsRequest>().mockRejectedValue(new Error('network failure'))
+    await expect(
+      detectImageFormat('https://cdn.example.com/bad', policy, {
+        lookupHostname,
+        requestImpl,
+      }),
+    ).rejects.toThrow('could not be fetched safely')
   })
 
-  it('returns undefined on non-ok response', async () => {
-    const mockFetch = vi.fn().mockResolvedValue({
-      headers: new Headers(),
-      ok: false,
-      status: 403,
-    })
-    const result = await detectImageFormat('https://cdn.example.com/forbidden', mockFetch)
-    expect(result).toBeUndefined()
+  it('fails closed on non-ok response', async () => {
+    const requestImpl = vi
+      .fn<PinnedHttpsRequest>()
+      .mockResolvedValue(new Response(null, { status: 403 }))
+    await expect(
+      detectImageFormat('https://cdn.example.com/forbidden', policy, {
+        lookupHostname,
+        requestImpl,
+      }),
+    ).rejects.toThrow('HTTP 403')
   })
 })

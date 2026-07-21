@@ -7,8 +7,7 @@ import { PINTEREST_MIN_IMAGE_WIDTH } from '../../constants.js'
  *
  * Pure logic over image metadata (dimensions, format, byte size). It does not
  * touch sharp or any binary — `transformImage.ts` executes the resolved spec.
- * Constraints are sourced from each platform's published media requirements
- * (CLAUDE.md Parts 3-5):
+ * Constraints are sourced from each platform's published media requirements:
  *
  *   Pinterest : >= 600px wide, 2:3 preferred, <= 20MB, jpeg/png/webp
  *   Instagram : jpeg only, 320-1440px wide, 4:5 to 1.91:1, <= 8MB
