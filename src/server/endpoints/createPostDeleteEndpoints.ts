@@ -7,7 +7,7 @@ import { INSTAGRAM_DELETE_UNSUPPORTED_MESSAGE } from '../platforms/instagram/ada
 import { getPlatformAdapter } from '../platforms/registry.js'
 import { assertAccess } from '../utilities/access.js'
 import { NotFoundError, ValidationError } from '../utilities/errors.js'
-import { errorResponse, getRouteParam, jsonResponse } from '../utilities/http.js'
+import { errorResponse, getRouteParam, jsonResponse, parseRequestBody } from '../utilities/http.js'
 
 /**
  * DELETE {basePath}/posts/:postId
@@ -30,7 +30,7 @@ import { errorResponse, getRouteParam, jsonResponse } from '../utilities/http.js
  *      message — Meta's Graph API does not expose a delete endpoint for
  *      published IG Business media. The adapter is never called.
  *   3. For other platforms: calls the platform adapter's `delete` method.
- *      404 / "not found" from the upstream platform is treated as success
+ *      a typed/status-coded upstream 404 is treated as success
  *      (deletion is idempotent).
  *   4. Updates the row to status `deleted` and records `meta.deletedAt` and
  *      `meta.deletedBy`. Never hard-deletes the row.
@@ -88,11 +88,7 @@ export const createPostDeleteEndpoints = (options: NormalizedPluginOptions): End
         const existingMeta =
           row.meta && typeof row.meta === 'object' ? (row.meta as Record<string, unknown>) : {}
 
-        // ── Fix 4: Cancel path for queued rows ──────────────────────────────
-        // A queued post has not yet been published. Cancelling it requires no
-        // upstream API call — we simply transition the row to 'cancelled' and
-        // stamp the cancellation metadata. The cancelled row stays re-claimable
-        // for republish-in-place via reservePublication.
+        // A queued row has no upstream post, so status is the cancellation fence.
         if (row.status === 'queued') {
           const cancelledMeta: Record<string, unknown> = {
             ...existingMeta,
@@ -108,17 +104,24 @@ export const createPostDeleteEndpoints = (options: NormalizedPluginOptions): End
             } as never,
             overrideAccess: true,
           })
+          if (typeof row.queuedJobId === 'string') {
+            try {
+              await req.payload.jobs.cancelByID({ id: row.queuedJobId as never })
+            } catch {
+              // The row status is the execution fence if the queued job already started.
+            }
+          }
           return jsonResponse({ ok: true, postId: row.id, status: 'cancelled' })
         }
 
         // Only published rows (or queued, handled above) can be acted on via
         // this endpoint.
-        if (row.status !== 'published') {
+        if (!['published', 'publishing', 'unknown'].includes(String(row.status))) {
           throw new ValidationError(
-            `Cannot delete a post with status "${String(row.status)}"; only published or queued posts may be deleted or cancelled`,
+            `Cannot delete a post with status "${String(row.status)}"; only published, publishing, unknown, or queued posts may be acted on`,
           )
         }
-        if (!row.externalId) {
+        if (!row.externalId && !localOnly) {
           throw new ValidationError(
             'Cannot delete a published post without an externalId (the post has no upstream reference)',
           )
@@ -131,7 +134,7 @@ export const createPostDeleteEndpoints = (options: NormalizedPluginOptions): End
 
         // Build the publishedRef from the row fields.
         const publishedRef: PublishedRef = {
-          externalId: row.externalId as string,
+          externalId: typeof row.externalId === 'string' ? row.externalId : '',
           externalUrl: typeof row.externalUrl === 'string' ? row.externalUrl : undefined,
           meta: existingMeta,
           platform,
@@ -145,13 +148,13 @@ export const createPostDeleteEndpoints = (options: NormalizedPluginOptions): End
           }
 
           // Other platforms: call the adapter's delete method.
-          // 404 / "not found" errors from upstream are treated as idempotent success.
-          const adapter = getPlatformAdapter(platform)
+          // A status-coded upstream 404 is treated as idempotent success.
+          const adapter = getPlatformAdapter(platform, options)
           if (typeof adapter.delete === 'function') {
             try {
               await adapter.delete({ options, payload: req.payload, publishedRef, req })
             } catch (deleteError) {
-              // If the upstream says the post is already gone (404 / "not found"),
+              // If the upstream says the post is already gone (HTTP 404),
               // treat it as success. Any other upstream error is fatal — we must NOT
               // mark the row deleted if the upstream deletion failed.
               const isAlreadyGone = isUpstreamNotFoundError(deleteError)
@@ -189,11 +192,79 @@ export const createPostDeleteEndpoints = (options: NormalizedPluginOptions): End
     method: 'delete',
     path: `${options.api.basePath}/posts/:postId`,
   },
+  {
+    handler: async (req) => {
+      try {
+        await assertAccess(req, options, 'publisher')
+        const postId = getRouteParam(req, 'postId')
+        if (!postId) {
+          throw new ValidationError('postId route parameter is required')
+        }
+        const body = await parseRequestBody(req)
+        const outcome = body.outcome
+        if (outcome !== 'published' && outcome !== 'not-published') {
+          throw new ValidationError('outcome must be "published" or "not-published"')
+        }
+        const row = (await req.payload.findByID({
+          id: postId as never,
+          collection: SOCIAL_POSTS_SLUG as never,
+          depth: 0,
+          overrideAccess: true,
+        })) as unknown as Record<string, unknown>
+        if (row.status !== 'unknown') {
+          throw new ValidationError('Only a post with unknown provider outcome can be resolved')
+        }
+        const externalId = typeof body.externalId === 'string' ? body.externalId.trim() : ''
+        if (outcome === 'published' && !externalId) {
+          throw new ValidationError('externalId is required when outcome is "published"')
+        }
+        const existingMeta =
+          row.meta && typeof row.meta === 'object' ? (row.meta as Record<string, unknown>) : {}
+        const actorId =
+          req.user && typeof (req.user as { id?: number | string }).id !== 'undefined'
+            ? (req.user as { id: number | string }).id
+            : undefined
+        await req.payload.update({
+          id: postId as never,
+          collection: SOCIAL_POSTS_SLUG as never,
+          data: {
+            ...(outcome === 'published'
+              ? {
+                  externalId,
+                  externalUrl:
+                    typeof body.externalUrl === 'string' ? body.externalUrl.trim() : undefined,
+                  lastError: null,
+                  platformPublicationStatus: 'published',
+                  publishedAt: new Date().toISOString(),
+                  status: 'published',
+                }
+              : {
+                  lastError: 'Operator confirmed that the provider did not create this post.',
+                  platformPublicationStatus: 'failed',
+                  status: 'failed',
+                }),
+            meta: {
+              ...existingMeta,
+              reconciledAt: new Date().toISOString(),
+              ...(actorId !== undefined ? { reconciledBy: actorId } : {}),
+              reconciledOutcome: outcome,
+            },
+          } as never,
+          overrideAccess: true,
+        })
+        return jsonResponse({ ok: true, outcome, postId })
+      } catch (error) {
+        return errorResponse(req, error)
+      }
+    },
+    method: 'post',
+    path: `${options.api.basePath}/posts/:postId/resolve`,
+  },
 ]
 
 /**
  * Returns true when the error indicates the upstream post is already gone
- * (HTTP 404 or a platform-specific "not found" error). This makes the
+ * through a typed HTTP/upstream status. This makes the
  * delete endpoint idempotent: calling DELETE on an already-deleted post
  * succeeds rather than surfacing a confusing upstream error.
  */
@@ -203,23 +274,8 @@ const isUpstreamNotFoundError = (error: unknown): boolean => {
   }
   const err = error as Record<string, unknown>
 
-  // PluginError / PlatformApiError carry statusCode.
   if (typeof err.statusCode === 'number' && err.statusCode === 404) {
     return true
   }
-  // Check the message for common "not found" signals from platform APIs.
-  if (typeof err.message === 'string') {
-    const msg = err.message.toLowerCase()
-    if (
-      msg.includes('404') ||
-      msg.includes('not found') ||
-      msg.includes('does not exist') ||
-      msg.includes('pin not found') ||
-      msg.includes('media not found') ||
-      msg.includes('localpost') // GBP returns "requested entity was not found"
-    ) {
-      return true
-    }
-  }
-  return false
+  return err.upstreamCode === 404 || err.upstreamCode === '404'
 }

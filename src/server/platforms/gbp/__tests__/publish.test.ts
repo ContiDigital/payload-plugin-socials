@@ -8,7 +8,11 @@ import type {
   SocialSourceContext,
 } from '../../../../types/index.js'
 
-import { PlatformApiError, ValidationError } from '../../../utilities/errors.js'
+import {
+  PlatformApiError,
+  PublicationPersistenceError,
+  ValidationError,
+} from '../../../utilities/errors.js'
 
 vi.mock('../api.js', () => ({
   GBP_HOSTS: { legacyV4: 'https://mybusiness.googleapis.com' },
@@ -17,7 +21,12 @@ vi.mock('../api.js', () => ({
 }))
 
 import { gbpJson, makeGbpRequest } from '../api.js'
-import { deleteGbpLocalPost, pollGbpLocalPostState, publishGbpLocalPost } from '../publish.js'
+import {
+  deleteGbpLocalPost,
+  pollGbpLocalPostState,
+  publishGbpLocalPost,
+  reconcileGbpLocalPostState,
+} from '../publish.js'
 
 const mockedGbpJson = vi.mocked(gbpJson)
 const mockedRequest = vi.mocked(makeGbpRequest)
@@ -194,6 +203,27 @@ describe('publishGbpLocalPost — location + topic validation', () => {
 })
 
 describe('publishGbpLocalPost — body assembly', () => {
+  it('captures the Local Post name and fences retries when audit persistence fails', async () => {
+    payload.create.mockRejectedValue(new Error('database unavailable'))
+
+    const publication = publishGbpLocalPost({
+      ctx: ctx(),
+      input: { locationResourceName: LOCATION, summary: 'Hello' },
+      options,
+      payload: asPayload(payload),
+    })
+
+    await expect(publication).rejects.toBeInstanceOf(PublicationPersistenceError)
+    await expect(publication).rejects.toMatchObject({
+      outcome: 'unknown',
+      publishedRef: {
+        externalId: 'accounts/123/locations/456/localPosts/p1',
+        platform: 'gbp',
+      },
+    })
+    expect(mockedGbpJson).toHaveBeenCalledOnce()
+  })
+
   it('publishes a STANDARD post with media and persists the LIVE state', async () => {
     const result = await publishGbpLocalPost({
       ctx: ctx(),
@@ -254,6 +284,32 @@ describe('publishGbpLocalPost — body assembly', () => {
     })
     expect(result.state).toBe('PROCESSING')
     expect(payload.create.mock.calls[0][0].data.platformPublicationStatus).toBe('publishing')
+    expect(payload.create.mock.calls[0][0].data.publishedAt).toBeUndefined()
+    expect(payload.create.mock.calls[0][0].data.nextRetryAt).toEqual(expect.any(String))
+  })
+
+  it('persists a REJECTED state before returning the provider error', async () => {
+    mockedGbpJson.mockResolvedValue({
+      name: 'accounts/123/locations/456/localPosts/rejected',
+      state: 'REJECTED',
+    })
+
+    await expect(
+      publishGbpLocalPost({
+        ctx: ctx(),
+        input: { locationResourceName: LOCATION, summary: 'Hi' },
+        options,
+        payload: asPayload(payload),
+      }),
+    ).rejects.toMatchObject({ statusCode: 422, upstreamCode: 'REJECTED' })
+    expect(payload.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          platformPublicationStatus: 'failed',
+          status: 'failed',
+        }),
+      }),
+    )
   })
 
   it('throws when the API returns no resource name', async () => {
@@ -316,6 +372,54 @@ describe('pollGbpLocalPostState', () => {
   })
 })
 
+describe('reconcileGbpLocalPostState', () => {
+  it('transitions a processing row to published when the provider reports LIVE', async () => {
+    mockedGbpJson.mockResolvedValue({ searchUrl: 'https://posts.gle/live', state: 'LIVE' })
+
+    const result = await reconcileGbpLocalPostState({
+      options,
+      payload: asPayload(payload),
+      postId: 'row_1',
+      postName: 'accounts/123/locations/456/localPosts/p1',
+    })
+
+    expect(result).toEqual({ pending: false, state: 'LIVE' })
+    expect(payload.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          externalUrl: 'https://posts.gle/live',
+          nextRetryAt: null,
+          platformPublicationStatus: 'published',
+          publishedAt: expect.any(String),
+          status: 'published',
+        }),
+      }),
+    )
+  })
+
+  it('keeps an unresolved provider state pending with another check scheduled', async () => {
+    mockedGbpJson.mockResolvedValue({ state: 'SCHEDULED' })
+
+    const result = await reconcileGbpLocalPostState({
+      options,
+      payload: asPayload(payload),
+      postId: 'row_1',
+      postName: 'accounts/123/locations/456/localPosts/p1',
+    })
+
+    expect(result).toEqual({ pending: true, state: 'SCHEDULED' })
+    expect(payload.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          nextRetryAt: expect.any(String),
+          platformPublicationStatus: 'publishing',
+          status: 'publishing',
+        }),
+      }),
+    )
+  })
+})
+
 describe('deleteGbpLocalPost', () => {
   const ref = (over: Partial<PublishedRef> = {}): PublishedRef => ({
     externalId: 'accounts/123/locations/456/localPosts/p1',
@@ -342,13 +446,11 @@ describe('deleteGbpLocalPost', () => {
     expect(mockedRequest).not.toHaveBeenCalled()
   })
 
-  it('deletes upstream and flips the local row to cancelled', async () => {
+  it('deletes upstream and leaves the endpoint to own the local transition', async () => {
     mockedRequest.mockResolvedValue({ ok: true, status: 200 } as unknown as Response)
     payload.find.mockResolvedValue({ docs: [{ id: 'row_1' }] })
     await deleteGbpLocalPost({ options, payload: asPayload(payload), publishedRef: ref() })
-    expect(payload.update).toHaveBeenCalledWith(
-      expect.objectContaining({ data: { status: 'cancelled' } }),
-    )
+    expect(payload.update).not.toHaveBeenCalled()
   })
 
   it('throws on a non-404 failure', async () => {

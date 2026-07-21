@@ -8,15 +8,17 @@ import type {
 
 import { GBP_SUMMARY_MAX_CHARS, SOCIAL_POSTS_SLUG } from '../../../constants.js'
 import { resolveConfiguredText } from '../../copy/resolveConfiguredCopy.js'
+import { persistPublicationAudit } from '../../services/publicationPersistence.js'
 import { PlatformApiError, ValidationError } from '../../utilities/errors.js'
 import { sha256Hex } from '../../utilities/hash.js'
+import { resolvePublicationIdempotencyKey } from '../../utilities/publicationIdentity.js'
 import { GBP_HOSTS, gbpJson, makeGbpRequest } from './api.js'
 import { buildDefaultGbpSummary } from './copy.js'
 
 /**
  * GBP LocalPost publish path.
  *
- * Supports all four documented topic types (CLAUDE.md §5.5):
+ * Supports all four Local Post topic types:
  *
  *   STANDARD : summary + optional CTA + optional media
  *   EVENT    : adds `event` { title, schedule { startDate/startTime, endDate/endTime } }
@@ -25,15 +27,11 @@ import { buildDefaultGbpSummary } from './copy.js'
  *   ALERT    : adds `alertType` (`COVID_19` is the only documented value)
  *
  * Idempotency key:
- *   sha256("gbp:" + sourceKind + ":" + sourceId + ":" + accountId + ":" + locationId + ":" + topicType)
+ *   sha256("gbp:" + sourceKind + ":" + sourceId + ":" + accountId + ":" + locationId + ":" + topicType + ":" + imageUrl)
  *
- * Notes from CLAUDE.md §5.9:
- *   - Per-location quota soft-caps around 1 post/day; bursts get queued.
- *   - Only one active OFFER per location is featured at a time.
- *   - Post-creation moderation runs async: state transitions PROCESSING → LIVE
- *     in seconds-to-minutes; REJECTED returns NO reason via API. The publish
- *     path returns the LIVE/PROCESSING/SCHEDULED state in `meta` so the
- *     admin UI can surface "manual check on Business Profile dashboard" hints.
+ * Post-creation moderation is asynchronous. The provider state is persisted
+ * and reconciliation keeps PROCESSING/SCHEDULED rows pending until LIVE or
+ * REJECTED is observed.
  */
 
 export const TOPIC_TYPES = ['STANDARD', 'EVENT', 'OFFER', 'ALERT'] as const
@@ -63,6 +61,8 @@ export type GbpPublishInput = {
     schedule: GbpEventSchedule
     title: string
   }
+  /** Exact legacy SHA-256 identity used when adopting an existing audit row. */
+  idempotencyKeyOverride?: string
   /** Optional public image URL Google fetches. */
   imageUrl?: string
   /** Optional override for the language code (BCP-47). Defaults to location's. */
@@ -75,6 +75,8 @@ export type GbpPublishInput = {
     redeemOnlineUrl?: string
     termsConditions?: string
   }
+  /** Caller-defined logical publication identity for intentional repeat campaigns. */
+  publicationKey?: string
   publishedByUserId?: number | string
   /** Body. Falls back to transformations → copyOverrides → default builder. */
   summary?: string
@@ -123,11 +125,17 @@ const validateLocationResource = (name: string): { accountId: string; locationId
 
 const buildIdempotencyKey = (
   ctx: SocialSourceContext,
+  input: GbpPublishInput,
   accountId: string,
   locationId: string,
   topicType: GbpTopicType,
+  primaryAssetUrl: string,
 ): string =>
-  sha256Hex(`gbp:${ctx.sourceKind}:${ctx.sourceId}:${accountId}:${locationId}:${topicType}`)
+  resolvePublicationIdempotencyKey({
+    defaultValue: `gbp:${ctx.sourceKind}:${ctx.sourceId}:${accountId}:${locationId}:${topicType}:${primaryAssetUrl}`,
+    input: input as unknown as Record<string, unknown>,
+    platform: 'gbp',
+  })
 
 /**
  * Pure derivation of the GBP idempotency identity — identical logic to
@@ -140,7 +148,14 @@ export const deriveGbpIdentity = (
   const { accountId, locationId } = validateLocationResource(input.locationResourceName)
   const topicType: GbpTopicType = input.topicType ?? 'STANDARD'
   return {
-    idempotencyKey: buildIdempotencyKey(ctx, accountId, locationId, topicType),
+    idempotencyKey: buildIdempotencyKey(
+      ctx,
+      input,
+      accountId,
+      locationId,
+      topicType,
+      input.imageUrl ?? '',
+    ),
     primaryAssetUrl: input.imageUrl ?? '',
   }
 }
@@ -244,7 +259,14 @@ export const publishGbpLocalPost = async (args: {
 
   validateInput(input, summary, topicType)
 
-  const idempotencyKey = buildIdempotencyKey(ctx, accountId, locationId, topicType)
+  const idempotencyKey = buildIdempotencyKey(
+    ctx,
+    input,
+    accountId,
+    locationId,
+    topicType,
+    input.imageUrl ?? '',
+  )
   const existing = await findExistingByIdempotencyKey(payload, idempotencyKey)
   if (existing && existing.status === 'published' && existing.externalId) {
     return {
@@ -299,6 +321,8 @@ export const publishGbpLocalPost = async (args: {
 
   const sourceHash = buildSourceHash(body)
   const state = response.state ?? 'PROCESSING'
+  const isLive = state === 'LIVE'
+  const isRejected = state === 'REJECTED'
   const baseFields = {
     attempts:
       (existing as unknown as { attempts?: number })?.attempts !== undefined
@@ -315,51 +339,70 @@ export const publishGbpLocalPost = async (args: {
     idempotencyKey,
     imageUrl: input.imageUrl,
     lastAttemptedAt: new Date().toISOString(),
-    lastError: null,
+    lastError: isRejected ? 'Google Business Profile rejected this Local Post.' : null,
     link: input.callToAction?.url ?? input.offer?.redeemOnlineUrl ?? ctx.link,
     meta: {
       raw: response,
       state,
       topicType,
     },
+    nextRetryAt: isLive || isRejected ? null : new Date(Date.now() + 60_000).toISOString(),
     platform: 'gbp' as const,
-    platformPublicationStatus: state === 'LIVE' ? 'published' : 'publishing',
-    publishedAt: new Date().toISOString(),
-    publishedBy: input.publishedByUserId,
+    platformPublicationStatus: isLive ? 'published' : isRejected ? 'failed' : 'publishing',
+    publishedAt: isLive ? new Date().toISOString() : undefined,
+    ...(options.authCollection ? { publishedBy: input.publishedByUserId } : {}),
     sourceHash,
     sourceId: ctx.sourceId,
     sourceKind: ctx.sourceKind,
-    status: 'published' as const,
+    status: isLive
+      ? ('published' as const)
+      : isRejected
+        ? ('failed' as const)
+        : ('publishing' as const),
     title: input.event?.title ?? ctx.baseTitle,
   }
 
-  let savedId: number | string
-  if (existing) {
-    const updated = (await payload.update({
-      id: existing.id as never,
-      collection: SOCIAL_POSTS_SLUG as never,
-      data: baseFields as never,
-      overrideAccess: true,
-    })) as unknown as { id: number | string }
-    savedId = updated.id
-  } else {
-    const created = (await payload.create({
-      collection: SOCIAL_POSTS_SLUG as never,
-      data: baseFields as never,
-      overrideAccess: true,
-    })) as unknown as { id: number | string }
-    savedId = created.id
+  const publishedRef: PublishedRef = {
+    externalId: response.name,
+    externalUrl: response.searchUrl,
+    meta: { accountId, locationId, state, topicType },
+    platform: 'gbp',
+  }
+  const savedId = await persistPublicationAudit({
+    persist: async () => {
+      if (existing) {
+        const updated = (await payload.update({
+          id: existing.id as never,
+          collection: SOCIAL_POSTS_SLUG as never,
+          data: baseFields as never,
+          overrideAccess: true,
+        })) as unknown as { id: number | string }
+        return updated.id
+      }
+      const created = (await payload.create({
+        collection: SOCIAL_POSTS_SLUG as never,
+        data: baseFields as never,
+        overrideAccess: true,
+      })) as unknown as { id: number | string }
+      return created.id
+    },
+    publishedRef,
+  })
+
+  if (isRejected) {
+    throw new PlatformApiError({
+      message: 'Google Business Profile rejected the Local Post',
+      platform: 'gbp',
+      raw: response,
+      statusCode: 422,
+      upstreamCode: 'REJECTED',
+    })
   }
 
   return {
     alreadyExisted: false,
     postId: savedId,
-    publishedRef: {
-      externalId: response.name,
-      externalUrl: response.searchUrl,
-      meta: { accountId, locationId, state, topicType },
-      platform: 'gbp',
-    },
+    publishedRef,
     state,
   }
 }
@@ -395,27 +438,6 @@ export const deleteGbpLocalPost = async (args: {
       `GBP localPost delete failed: ${response.status} ${await response.text().catch(() => '')}`,
     )
   }
-
-  // Flip local row to cancelled (best-effort).
-  const result = await payload.find({
-    collection: SOCIAL_POSTS_SLUG as never,
-    depth: 0,
-    limit: 1,
-    overrideAccess: true,
-    where: {
-      externalId: { equals: publishedRef.externalId },
-      platform: { equals: 'gbp' },
-    },
-  })
-  const doc = result.docs[0] as { id: number | string } | undefined
-  if (doc) {
-    await payload.update({
-      id: doc.id as never,
-      collection: SOCIAL_POSTS_SLUG as never,
-      data: { status: 'cancelled' } as never,
-      overrideAccess: true,
-    })
-  }
 }
 
 /**
@@ -423,8 +445,7 @@ export const deleteGbpLocalPost = async (args: {
  * the timeout). Returns the final state — typically LIVE or REJECTED.
  *
  * Plugin callers use this after publish to surface real moderation status
- * in the admin UI. CLAUDE.md §5.8 notes Google does NOT expose rejection
- * reasons via API — admins must check the GBP dashboard manually.
+ * in the admin UI. Google does not expose the moderation reason in this response.
  */
 export const pollGbpLocalPostState = async (args: {
   /** Poll interval in milliseconds. Default 5 seconds. */
@@ -451,4 +472,37 @@ export const pollGbpLocalPostState = async (args: {
     }
     await new Promise((resolve) => setTimeout(resolve, intervalMs))
   }
+}
+
+export const reconcileGbpLocalPostState = async (args: {
+  options: NormalizedPluginOptions
+  payload: Payload
+  postId: number | string
+  postName: string
+}): Promise<{ pending: boolean; state: string }> => {
+  const result = await pollGbpLocalPostState({
+    maxWaitMs: 0,
+    options: args.options,
+    payload: args.payload,
+    postName: args.postName,
+  })
+  const state = result.state
+  const live = state === 'LIVE'
+  const rejected = state === 'REJECTED'
+  const pending = !live && !rejected
+  await args.payload.update({
+    id: args.postId as never,
+    collection: SOCIAL_POSTS_SLUG as never,
+    data: {
+      externalUrl: result.searchUrl,
+      lastAttemptedAt: new Date().toISOString(),
+      lastError: rejected ? 'Google Business Profile rejected this Local Post.' : null,
+      platformPublicationStatus: live ? 'published' : rejected ? 'failed' : 'publishing',
+      ...(live ? { publishedAt: new Date().toISOString() } : {}),
+      nextRetryAt: pending ? new Date(Date.now() + 60_000).toISOString() : null,
+      status: live ? 'published' : rejected ? 'failed' : 'publishing',
+    } as never,
+    overrideAccess: true,
+  })
+  return { pending, state }
 }

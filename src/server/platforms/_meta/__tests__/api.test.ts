@@ -162,6 +162,15 @@ describe('makeMetaRequest', () => {
     expect(r.ok).toBe(true)
   })
 
+  it('does not replay a POST after a 5xx response', async () => {
+    queue = [res(500, { error: { code: 2 } }), res(200, { ok: 1 })]
+    const r = await makeMetaRequest(payload, buildOptions(), 'instagram', '/x', {
+      init: { method: 'POST' },
+    })
+    expect(r.status).toBe(500)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
   it('returns a non-retryable error response with a readable body', async () => {
     queue = [res(400, { error: { code: 100, message: 'bad param' } })]
     const r = await makeMetaRequest(payload, buildOptions(), 'instagram', '/x')
@@ -188,6 +197,13 @@ describe('metaJson', () => {
     expect((err as { statusCode: number }).statusCode).toBe(400)
     expect((err as { upstreamCode: number }).upstreamCode).toBe(100)
     expect((err as Error).message).toContain('Invalid parameter')
+  })
+
+  it('classifies a POST 5xx response as an unknown outcome', async () => {
+    queue = [res(500, { error: { code: 2, message: 'failed' } })]
+    await expect(
+      metaJson(payload, buildOptions(), 'instagram', '/x', { method: 'POST' }),
+    ).rejects.toMatchObject({ outcome: 'unknown', retryable: false })
   })
 
   it('rejects a 2xx response containing an embedded Graph error', async () => {

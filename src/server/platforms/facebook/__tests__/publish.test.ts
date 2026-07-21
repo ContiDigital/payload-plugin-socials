@@ -8,7 +8,7 @@ import type {
   SocialSourceContext,
 } from '../../../../types/index.js'
 
-import { ValidationError } from '../../../utilities/errors.js'
+import { PublicationPersistenceError, ValidationError } from '../../../utilities/errors.js'
 import { buildPublicationIdentity } from '../../../utilities/publicationIdentity.js'
 
 vi.mock('../../_meta/api.js', () => ({
@@ -21,7 +21,11 @@ vi.mock('../../../assets/resolvePlatformImage.js', () => ({
 
 import { resolvePlatformImageUrl } from '../../../assets/resolvePlatformImage.js'
 import { makeMetaRequest, metaJson } from '../../_meta/api.js'
-import { deleteFacebookPost, publishFacebookPost } from '../publish.js'
+import {
+  deleteFacebookPost,
+  publishFacebookPost,
+  reconcileFacebookScheduledPost,
+} from '../publish.js'
 
 const mockedMetaJson = vi.mocked(metaJson)
 const mockedRequest = vi.mocked(makeMetaRequest)
@@ -102,6 +106,25 @@ beforeEach(() => {
 })
 
 describe('publishFacebookPost — formats', () => {
+  it('captures the post id and fences retries when audit persistence fails', async () => {
+    setupPublish()
+    payload.create.mockRejectedValue(new Error('database unavailable'))
+
+    const publication = publishFacebookPost({
+      ctx: ctx(),
+      input: { format: 'LINK', pageId: 'p1' },
+      options,
+      payload: asPayload(payload),
+    })
+
+    await expect(publication).rejects.toBeInstanceOf(PublicationPersistenceError)
+    await expect(publication).rejects.toMatchObject({
+      outcome: 'unknown',
+      publishedRef: { externalId: 'p1_123', platform: 'facebook' },
+    })
+    expect(mockedRequest).toHaveBeenCalledOnce()
+  })
+
   it('publishes a LINK post to /feed using the Page token', async () => {
     setupPublish()
     const result = await publishFacebookPost({
@@ -189,9 +212,10 @@ describe('publishFacebookPost — scheduling', () => {
       options,
       payload: asPayload(payload),
     })
-    expect(payload.create.mock.calls[0][0].data.status).toBe('published')
+    expect(payload.create.mock.calls[0][0].data.status).toBe('scheduled')
     expect(payload.create.mock.calls[0][0].data.platformPublicationStatus).toBe('pending')
-    expect(payload.create.mock.calls[0][0].data.publishedAt).toBe(
+    expect(payload.create.mock.calls[0][0].data.publishedAt).toBeUndefined()
+    expect(payload.create.mock.calls[0][0].data.scheduledAt).toBe(
       new Date(Math.floor(Date.parse(when) / 1000) * 1000).toISOString(),
     )
     expect(requestParams('/feed').get('published')).toBe('false')
@@ -221,6 +245,63 @@ describe('publishFacebookPost — scheduling', () => {
         payload: asPayload(payload),
       }),
     ).rejects.toThrow(/ISO/)
+  })
+})
+
+describe('reconcileFacebookScheduledPost', () => {
+  beforeEach(() => {
+    mockedMetaJson.mockResolvedValue({ id: 'p1', access_token: 'PAGE_TOKEN' })
+  })
+
+  it('transitions a scheduled post to published when Facebook reports it live', async () => {
+    mockedRequest.mockResolvedValue(
+      jsonResponse({ is_published: true, permalink_url: 'https://facebook.example/post' }),
+    )
+
+    const result = await reconcileFacebookScheduledPost({
+      externalId: 'p1_123',
+      options,
+      pageId: 'p1',
+      payload: asPayload(payload),
+      postId: 'row_1',
+    })
+
+    expect(result).toEqual({ pending: false })
+    expect(payload.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          externalUrl: 'https://facebook.example/post',
+          nextRetryAt: null,
+          platformPublicationStatus: 'published',
+          publishedAt: expect.any(String),
+          status: 'published',
+        }),
+      }),
+    )
+  })
+
+  it('keeps a not-yet-live scheduled post pending', async () => {
+    mockedRequest.mockResolvedValue(jsonResponse({ is_published: false }))
+
+    const result = await reconcileFacebookScheduledPost({
+      externalId: 'p1_123',
+      options,
+      pageId: 'p1',
+      payload: asPayload(payload),
+      postId: 'row_1',
+      scheduledPublishTime: Math.floor(Date.now() / 1000) + 600,
+    })
+
+    expect(result).toEqual({ pending: true })
+    expect(payload.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          nextRetryAt: expect.any(String),
+          platformPublicationStatus: 'pending',
+          status: 'scheduled',
+        }),
+      }),
+    )
   })
 })
 
@@ -289,14 +370,24 @@ describe('deleteFacebookPost', () => {
     expect(mockedRequest).not.toHaveBeenCalled()
   })
 
-  it('deletes upstream with the Page token and flips the row to cancelled', async () => {
+  it('deletes upstream and leaves the endpoint to own the local transition', async () => {
     mockedMetaJson.mockResolvedValue({ id: 'p1', access_token: 'PAGE_TOKEN' })
     mockedRequest.mockResolvedValue(jsonResponse({ success: true }))
     payload.find.mockResolvedValue({ docs: [{ id: 'row_1' }] })
     await deleteFacebookPost({ options, payload: asPayload(payload), publishedRef: ref() })
-    expect(payload.update).toHaveBeenCalledWith(
-      expect.objectContaining({ data: { status: 'cancelled' } }),
-    )
+    expect(payload.update).not.toHaveBeenCalled()
+  })
+
+  it('uses stored Page metadata when deleting a bare video id', async () => {
+    mockedMetaJson.mockResolvedValue({ id: '42', access_token: 'PAGE_TOKEN' })
+    mockedRequest.mockResolvedValue(jsonResponse({ success: true }))
+    await deleteFacebookPost({
+      options,
+      payload: asPayload(payload),
+      publishedRef: ref({ externalId: 'video_opaque_id', meta: { pageId: '42' } }),
+    })
+    expect(mockedMetaJson.mock.calls[0]?.[3]).toContain('/42')
+    expect(mockedRequest.mock.calls[0]?.[3]).toContain('video_opaque_id')
   })
 
   it('throws on a non-404 failure', async () => {

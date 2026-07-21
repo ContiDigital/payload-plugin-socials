@@ -17,15 +17,17 @@ import {
 } from '../../../constants.js'
 import { resolvePlatformImageUrl } from '../../assets/resolvePlatformImage.js'
 import { resolveConfiguredText } from '../../copy/resolveConfiguredCopy.js'
+import { persistPublicationAudit } from '../../services/publicationPersistence.js'
 import { PlatformApiError, ValidationError } from '../../utilities/errors.js'
 import { sha256Hex } from '../../utilities/hash.js'
+import { resolvePublicationIdempotencyKey } from '../../utilities/publicationIdentity.js'
 import { metaJson } from '../_meta/api.js'
 import { buildDefaultInstagramCaption, countHashtags, countMentions } from './copy.js'
 
 /**
  * Instagram Business publish path.
  *
- * Two-phase flow (CLAUDE.md §4.4):
+ * Provider flow:
  *
  *   1. **Container create** — `POST /{ig-user-id}/media` with the media
  *      payload (image_url / video_url / children / etc.). Returns
@@ -69,6 +71,8 @@ export type InstagramPublishInput = {
   carouselChildren?: Array<{ imageUrl?: string; videoUrl?: string }>
   /** Reels-only: cover image url. */
   coverUrl?: string
+  /** Exact legacy SHA-256 identity used when adopting an existing audit row. */
+  idempotencyKeyOverride?: string
   /** IG Business user id. Required. */
   igUserId: string
   /** Single-image override. */
@@ -77,6 +81,8 @@ export type InstagramPublishInput = {
   locationId?: string
   /** What to publish. Default `IMAGE`. */
   mediaType?: InstagramMediaType
+  /** Caller-defined logical publication identity for intentional repeat campaigns. */
+  publicationKey?: string
   publishedByUserId?: number | string
   /** Reels-only: share to Feed (`share_to_feed`). Default false (Reels-tab only). */
   shareToFeed?: boolean
@@ -111,13 +117,16 @@ type SocialPostRow = {
 
 const buildIdempotencyKey = (
   ctx: SocialSourceContext,
+  input: InstagramPublishInput,
   igUserId: string,
   mediaType: InstagramMediaType,
   primaryAssetUrl: string,
 ): string =>
-  sha256Hex(
-    `instagram:${ctx.sourceKind}:${ctx.sourceId}:${igUserId}:${mediaType}:${primaryAssetUrl}`,
-  )
+  resolvePublicationIdempotencyKey({
+    defaultValue: `instagram:${ctx.sourceKind}:${ctx.sourceId}:${igUserId}:${mediaType}:${primaryAssetUrl}`,
+    input: input as unknown as Record<string, unknown>,
+    platform: 'instagram',
+  })
 
 const resolveCaption = (
   ctx: SocialSourceContext,
@@ -404,7 +413,7 @@ export const deriveInstagramIdentity = (
   const mediaType = input.mediaType ?? 'IMAGE'
   const primaryAssetUrl = resolvePrimaryAssetUrl(input)
   return {
-    idempotencyKey: buildIdempotencyKey(ctx, input.igUserId, mediaType, primaryAssetUrl),
+    idempotencyKey: buildIdempotencyKey(ctx, input, input.igUserId, mediaType, primaryAssetUrl),
     primaryAssetUrl,
   }
 }
@@ -441,7 +450,7 @@ export const publishInstagramMedia = async (args: {
     validateCaption(caption)
   }
 
-  const idempotencyKey = buildIdempotencyKey(ctx, input.igUserId, mediaType, primaryAssetUrl)
+  const idempotencyKey = buildIdempotencyKey(ctx, input, input.igUserId, mediaType, primaryAssetUrl)
   const existing = await findExistingByIdempotencyKey(payload, idempotencyKey)
   if (existing && existing.status === 'published' && existing.externalId) {
     return {
@@ -576,7 +585,7 @@ export const publishInstagramMedia = async (args: {
     platform: 'instagram' as const,
     platformPublicationStatus: 'published' as const,
     publishedAt: new Date().toISOString(),
-    publishedBy: input.publishedByUserId,
+    ...(options.authCollection ? { publishedBy: input.publishedByUserId } : {}),
     sourceHash,
     sourceId: ctx.sourceId,
     sourceKind: ctx.sourceKind,
@@ -584,33 +593,37 @@ export const publishInstagramMedia = async (args: {
     title: ctx.baseTitle,
   }
 
-  let savedId: number | string
-  if (existing) {
-    const updated = (await payload.update({
-      id: existing.id as never,
-      collection: SOCIAL_POSTS_SLUG as never,
-      data: baseFields as never,
-      overrideAccess: true,
-    })) as unknown as { id: number | string }
-    savedId = updated.id
-  } else {
-    const created = (await payload.create({
-      collection: SOCIAL_POSTS_SLUG as never,
-      data: baseFields as never,
-      overrideAccess: true,
-    })) as unknown as { id: number | string }
-    savedId = created.id
+  const publishedRef: PublishedRef = {
+    externalId: published.id,
+    externalUrl,
+    meta: { containerId, mediaType },
+    platform: 'instagram',
   }
+  const savedId = await persistPublicationAudit({
+    persist: async () => {
+      if (existing) {
+        const updated = (await payload.update({
+          id: existing.id as never,
+          collection: SOCIAL_POSTS_SLUG as never,
+          data: baseFields as never,
+          overrideAccess: true,
+        })) as unknown as { id: number | string }
+        return updated.id
+      }
+      const created = (await payload.create({
+        collection: SOCIAL_POSTS_SLUG as never,
+        data: baseFields as never,
+        overrideAccess: true,
+      })) as unknown as { id: number | string }
+      return created.id
+    },
+    publishedRef,
+  })
 
   return {
     alreadyExisted: false,
     postId: savedId,
-    publishedRef: {
-      externalId: published.id,
-      externalUrl,
-      meta: { containerId, mediaType },
-      platform: 'instagram',
-    },
+    publishedRef,
   }
 }
 

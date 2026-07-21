@@ -14,25 +14,24 @@ import {
 } from '../../services/connectionService.js'
 import { PlatformApiError } from '../../utilities/errors.js'
 import { createPluginLogger } from '../../utilities/logger.js'
-import { isRetryableNetworkError, policyFetch } from '../../utilities/requestPolicy.js'
+import {
+  isRetryableNetworkError,
+  isSafeToRetryRequest,
+  policyFetch,
+} from '../../utilities/requestPolicy.js'
 
 /**
- * Pinterest HTTP client. Mirrors Fine's `src/lib/pinterest/api.ts` with two
- * intentional upgrades over the original:
+ * Pinterest HTTP client with token caching and bounded retry policy.
  *
- *   1. **Access-token cache.** Fine's burned a refresh-token round-trip on
- *      every call; here we cache the access token in process memory keyed
+ *   1. **Access-token cache.** The access token is cached in process memory keyed
  *      by `(payload instance, environment)`, valid for `expires_in - 60s`.
  *      Falls back to a fresh refresh on cache miss or 401.
  *
- *   2. **Structured retry.** The original honoured `Retry-After` once on
- *      429/503. Here we honour it on any retryable status (408/425/429/5xx)
- *      and surface a `PlatformApiError` with `retryable: true` so callers
- *      can decide whether to push the work onto the jobs queue.
+ *   2. **Structured retry.** Safe methods honor retryable statuses; mutation
+ *      requests retry explicit throttling only. Ambiguous writes are surfaced
+ *      without replay.
  *
- * Both behaviors are byte-for-byte compatible with the Fine's pattern at
- * the wire level — same Authorization headers, same body shapes, same
- * Retry-After clamp (1..30s).
+ * Retry-After remains clamped to 1..30 seconds.
  */
 
 const PROD_BASE = 'https://api.pinterest.com'
@@ -254,14 +253,13 @@ const parseRetryAfter = (headerValue: null | string, fallbackSeconds = 5): numbe
 export type PinterestRequestOptions = {
   /** Override the base fetch init (headers, body, etc.). */
   init?: RequestInit
-  /** Max retry attempts on retryable failures. Default 1 (matches Fine's). */
+  /** Maximum retry attempts for failures eligible under the request policy. */
   maxRetries?: number
 }
 
 /**
  * Make an authenticated Pinterest API request. Handles token refresh on
- * 401 (one retry) AND honour-Retry-After on 408/425/429/5xx (configurable
- * retries; default 1 to match Fine's polite-retry behaviour).
+ * 401 token refresh plus request-policy-controlled retries.
  */
 export const makePinterestRequest = async (
   payload: Payload,
@@ -273,6 +271,7 @@ export const makePinterestRequest = async (
   const cfg = options.platforms.pinterest
   const apiBase = getPinterestApiBase(cfg.environment)
   const maxRetries = requestOptions.maxRetries ?? 1
+  const safeToRetry = isSafeToRetryRequest(requestOptions.init)
   let attempt = 0
   let didRefresh = false
 
@@ -295,7 +294,7 @@ export const makePinterestRequest = async (
         scope: 'pinterest',
       })
     } catch (error) {
-      if (isRetryableNetworkError(error) && attempt < maxRetries) {
+      if (safeToRetry && isRetryableNetworkError(error) && attempt < maxRetries) {
         const seconds = parseRetryAfter(null)
         log.warn(`Pinterest network failure; retrying in ${seconds}s`, { attempt })
         await sleep(seconds * 1000)
@@ -304,9 +303,10 @@ export const makePinterestRequest = async (
       }
       throw new PlatformApiError({
         message: 'Pinterest request failed before receiving a response',
+        outcome: safeToRetry ? 'failed' : 'unknown',
         platform: 'pinterest',
         raw: error,
-        retryable: isRetryableNetworkError(error),
+        retryable: safeToRetry && isRetryableNetworkError(error),
         statusCode: 502,
         upstreamCode: error instanceof Error ? error.name : 'network_error',
         upstreamMessage: error instanceof Error ? error.message : String(error),
@@ -324,7 +324,11 @@ export const makePinterestRequest = async (
       continue
     }
 
-    if (RETRYABLE_STATUS_CODES.has(response.status) && attempt < maxRetries) {
+    if (
+      (safeToRetry || response.status === 429) &&
+      RETRYABLE_STATUS_CODES.has(response.status) &&
+      attempt < maxRetries
+    ) {
       const seconds = parseRetryAfter(response.headers.get('retry-after'))
       log.warn(`Pinterest ${response.status}; honoring Retry-After=${seconds}s`)
       await sleep(seconds * 1000)
@@ -352,11 +356,17 @@ export const pinterestJson = async <T>(
     } catch {
       /* keep raw text */
     }
+    const safeToRetry = isSafeToRetryRequest(init)
+    const outcome =
+      !safeToRetry && response.status !== 429 && RETRYABLE_STATUS_CODES.has(response.status)
+        ? 'unknown'
+        : 'failed'
     throw new PlatformApiError({
       message: `Pinterest ${path} failed: ${response.status}`,
+      outcome,
       platform: 'pinterest',
       raw: upstream,
-      retryable: RETRYABLE_STATUS_CODES.has(response.status),
+      retryable: outcome === 'failed' && RETRYABLE_STATUS_CODES.has(response.status),
       statusCode: response.status,
       upstreamCode:
         typeof upstream === 'object' && upstream !== null && 'code' in upstream

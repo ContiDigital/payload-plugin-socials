@@ -26,6 +26,7 @@ const run = (endpoint: Endpoint, req: PayloadRequest) =>
   (endpoint.handler as (r: PayloadRequest) => Promise<Response>)(req)
 
 const getEndpoint = () => createPostDeleteEndpoints(options)[0]
+const getResolveEndpoint = () => createPostDeleteEndpoints(options)[1]
 
 /** Minimal published row — pinterest (non-Instagram) by default. */
 const publishedRow = {
@@ -154,6 +155,91 @@ describe('createPostDeleteEndpoints — endpoint shape', () => {
     expect(endpoint.method).toBe('delete')
     expect(endpoint.path).toBe('/socials/posts/:postId')
   })
+
+  it('mounts a POST endpoint for resolving unknown provider outcomes', () => {
+    const endpoint = getResolveEndpoint()
+    expect(endpoint.method).toBe('post')
+    expect(endpoint.path).toBe('/socials/posts/:postId/resolve')
+  })
+})
+
+describe('createPostDeleteEndpoints — unknown outcome resolution', () => {
+  const unknownRow = {
+    ...publishedRow,
+    externalId: undefined,
+    externalUrl: undefined,
+    meta: { requestOutcome: 'unknown' },
+    status: 'unknown',
+  }
+
+  it('records a provider-confirmed publication and reconciliation audit', async () => {
+    const findByID = vi.fn().mockResolvedValue(unknownRow)
+    const update = vi.fn().mockResolvedValue({ id: 'post_1' })
+    const req = makeReq(
+      { findByID, update },
+      { data: { externalId: 'pin_confirmed', outcome: 'published' }, user: { id: 77 } },
+    )
+
+    const res = await run(getResolveEndpoint(), req)
+
+    expect(res.status).toBe(200)
+    expect(update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          externalId: 'pin_confirmed',
+          lastError: null,
+          meta: expect.objectContaining({
+            reconciledAt: expect.any(String),
+            reconciledBy: 77,
+            reconciledOutcome: 'published',
+            requestOutcome: 'unknown',
+          }),
+          platformPublicationStatus: 'published',
+          publishedAt: expect.any(String),
+          status: 'published',
+        }),
+      }),
+    )
+  })
+
+  it('marks a provider-confirmed absence as failed and re-claimable', async () => {
+    const findByID = vi.fn().mockResolvedValue(unknownRow)
+    const update = vi.fn().mockResolvedValue({ id: 'post_1' })
+    const req = makeReq({ findByID, update }, { data: { outcome: 'not-published' } })
+
+    const res = await run(getResolveEndpoint(), req)
+
+    expect(res.status).toBe(200)
+    expect(update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          platformPublicationStatus: 'failed',
+          status: 'failed',
+        }),
+      }),
+    )
+  })
+
+  it('requires an external id when resolving as published', async () => {
+    const req = makeReq(
+      { findByID: vi.fn().mockResolvedValue(unknownRow) },
+      { data: { outcome: 'published' } },
+    )
+
+    const res = await run(getResolveEndpoint(), req)
+
+    expect(res.status).toBe(400)
+    expect(req.payload.update).not.toHaveBeenCalled()
+  })
+
+  it('refuses to rewrite a row whose outcome is already known', async () => {
+    const req = makeReq({}, { data: { externalId: 'pin_2', outcome: 'published' } })
+
+    const res = await run(getResolveEndpoint(), req)
+
+    expect(res.status).toBe(400)
+    expect(req.payload.update).not.toHaveBeenCalled()
+  })
 })
 
 // ---------------------------------------------------------------------------
@@ -169,7 +255,7 @@ describe('createPostDeleteEndpoints — happy path (non-Instagram)', () => {
     const body = await res.json()
     expect(body).toEqual({ ok: true, postId: 'post_1', status: 'deleted' })
 
-    expect(vi.mocked(getPlatformAdapter)).toHaveBeenCalledWith('pinterest')
+    expect(vi.mocked(getPlatformAdapter)).toHaveBeenCalledWith('pinterest', options)
     expect(adapterDelete).toHaveBeenCalledTimes(1)
     expect(adapterDelete).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -218,13 +304,14 @@ describe('createPostDeleteEndpoints — happy path (non-Instagram)', () => {
     )
   })
 
-  it('treats upstream "not found" message as success', async () => {
-    const notFoundErr = new Error('media not found upstream')
+  it('does not infer not-found from untyped provider message text', async () => {
+    const notFoundErr = Object.assign(new Error('media not found upstream'), { statusCode: 403 })
     mockAdapter(() => Promise.reject(notFoundErr))
-    const req = makeReq()
+    const update = vi.fn()
+    const req = makeReq({ update })
     const res = await run(getEndpoint(), req)
-    expect(res.status).toBe(200)
-    expect((await res.json()).ok).toBe(true)
+    expect(res.status).toBe(403)
+    expect(update).not.toHaveBeenCalled()
   })
 
   it('does NOT set deletedLocalOnly on a normal delete', async () => {
@@ -293,10 +380,10 @@ describe('createPostDeleteEndpoints — Instagram plain delete (unsupported)', (
 })
 
 // ---------------------------------------------------------------------------
-// Fix 4: Cancel path — queued rows
+// Queued-row cancellation
 // ---------------------------------------------------------------------------
 
-describe('createPostDeleteEndpoints — cancel queued post (Fix 4)', () => {
+describe('createPostDeleteEndpoints — cancel queued post', () => {
   it('cancels a queued post without calling the adapter', async () => {
     const findByID = vi.fn().mockResolvedValue(queuedRow)
     const update = vi.fn().mockResolvedValue({ id: 'queued_1' })

@@ -3,7 +3,11 @@ import type { Payload } from 'payload'
 import type { PlatformId, PublishedRef } from '../../types/index.js'
 
 import { SOCIAL_POSTS_SLUG } from '../../constants.js'
-import { ConflictError } from '../utilities/errors.js'
+import {
+  ConflictError,
+  getUnknownPublicationRef,
+  hasUnknownPublicationOutcome,
+} from '../utilities/errors.js'
 import { redactSecretString } from '../utilities/logger.js'
 
 type ReservationRow = {
@@ -38,7 +42,7 @@ export type PublicationReservation = {
  *
  * `deleted` rows are treated as re-claimable so that publishing the same
  * content after deletion overwrites the SAME row back to published, preserving
- * the audit trail as a single row per idempotency key (CLAUDE.md §2.18 #7).
+ * the audit trail as a single row per idempotency key.
  */
 const RECLAIMABLE_STATUSES = ['cancelled', 'deleted', 'draft', 'failed'] as const
 
@@ -115,6 +119,14 @@ export const failPublicationReservation = async (
   if (!reservation.claimed) {
     return
   }
+  if (hasUnknownPublicationOutcome(error)) {
+    await markPublicationOutcomeUnknown(
+      payload,
+      reservation.postId,
+      getUnknownPublicationRef(error),
+    )
+    return
+  }
   try {
     await payload.update({
       id: reservation.postId as never,
@@ -128,5 +140,50 @@ export const failPublicationReservation = async (
     })
   } catch {
     // Preserving the publish error is more important than the cleanup failure.
+  }
+}
+
+export const markPublicationOutcomeUnknown = async (
+  payload: Payload,
+  postId: number | string,
+  publishedRef?: PublishedRef,
+): Promise<void> => {
+  try {
+    const data: Record<string, unknown> = {
+      ...(publishedRef
+        ? { externalId: publishedRef.externalId, externalUrl: publishedRef.externalUrl }
+        : {}),
+      lastAttemptedAt: new Date().toISOString(),
+      lastError: publishedRef
+        ? 'The provider accepted this publication, but its complete audit record could not be saved. The provider ID was captured; reconcile the row before any retry.'
+        : 'The provider may have accepted this publication, but no definitive response was received. Reconcile it before retrying.',
+      platformPublicationStatus: 'unknown',
+      status: 'unknown',
+    }
+    if (publishedRef?.meta) {
+      try {
+        const current = (await payload.findByID({
+          id: postId as never,
+          collection: SOCIAL_POSTS_SLUG as never,
+          depth: 0,
+          overrideAccess: true,
+        })) as unknown as { meta?: unknown }
+        const currentMeta =
+          current.meta && typeof current.meta === 'object'
+            ? (current.meta as Record<string, unknown>)
+            : {}
+        data.meta = { ...currentMeta, ...publishedRef.meta }
+      } catch {
+        // Capturing the provider id remains sufficient to fence automatic retries.
+      }
+    }
+    await payload.update({
+      id: postId as never,
+      collection: SOCIAL_POSTS_SLUG as never,
+      data: data as never,
+      overrideAccess: true,
+    })
+  } catch {
+    // The original provider error remains authoritative when audit persistence fails.
   }
 }

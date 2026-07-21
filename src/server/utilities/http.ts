@@ -1,12 +1,10 @@
 import type { PayloadRequest } from 'payload'
 
-import { PluginError, ValidationError } from './errors.js'
+import { hasUnknownPublicationOutcome, PluginError, ValidationError } from './errors.js'
 import { createPluginLogger } from './logger.js'
 
 /**
- * HTTP plumbing shared by every endpoint factory. Mirrors the pattern from
- * the GMC plugin's `src/server/utilities/http.ts` — minus the bits that are
- * Merchant-Center-specific.
+ * HTTP plumbing shared by every endpoint factory.
  */
 
 const JSON_HEADERS = { 'Content-Type': 'application/json; charset=utf-8' } as const
@@ -62,7 +60,7 @@ export const errorResponse = (req: PayloadRequest, error: unknown): Response => 
     log.error('Request failed', details)
   }
 
-  const clientMessage = statusCode >= 500 ? 'Internal server error' : message
+  const clientMessage = publicErrorMessage(error)
   const extras: Record<string, unknown> = {}
   if (
     typeof error === 'object' &&
@@ -74,6 +72,20 @@ export const errorResponse = (req: PayloadRequest, error: unknown): Response => 
   }
 
   return jsonResponse({ error: clientMessage, ...extras }, statusCode)
+}
+
+export const publicErrorMessage = (error: unknown): string => {
+  if (hasUnknownPublicationOutcome(error)) {
+    return 'Provider outcome unknown; review the social post before retrying.'
+  }
+  const statusCode =
+    typeof error === 'object' && error !== null && 'statusCode' in error
+      ? Number((error as { statusCode: unknown }).statusCode) || 500
+      : 500
+  if (statusCode >= 500) {
+    return 'Internal server error'
+  }
+  return error instanceof Error ? error.message : 'Request failed'
 }
 
 /**

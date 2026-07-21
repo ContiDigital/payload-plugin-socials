@@ -1,3 +1,5 @@
+import type { PublishedRef } from '../../types/index.js'
+
 import { PLUGIN_SLUG } from '../../constants.js'
 
 /**
@@ -68,6 +70,7 @@ export class RateLimitedError extends PluginError {
  * pipeline can classify them uniformly.
  */
 export class PlatformApiError extends PluginError {
+  readonly outcome: 'failed' | 'unknown'
   readonly platform: string
   readonly raw?: unknown
   readonly retryable: boolean
@@ -76,6 +79,7 @@ export class PlatformApiError extends PluginError {
 
   constructor(args: {
     message: string
+    outcome?: 'failed' | 'unknown'
     platform: string
     raw?: unknown
     retryable?: boolean
@@ -85,6 +89,7 @@ export class PlatformApiError extends PluginError {
   }) {
     super(args.message, args.statusCode ?? 502)
     this.name = 'PlatformApiError'
+    this.outcome = args.outcome ?? 'failed'
     this.platform = args.platform
     this.upstreamCode = args.upstreamCode
     this.upstreamMessage = args.upstreamMessage
@@ -92,3 +97,26 @@ export class PlatformApiError extends PluginError {
     this.raw = args.raw
   }
 }
+
+export class PublicationPersistenceError extends PluginError {
+  readonly cause: unknown
+  readonly outcome = 'unknown'
+  readonly publishedRef: PublishedRef
+
+  constructor(publishedRef: PublishedRef, cause: unknown) {
+    super(
+      'The provider accepted the publication, but its local audit record could not be finalized.',
+      500,
+    )
+    this.name = 'PublicationPersistenceError'
+    this.cause = cause
+    this.publishedRef = publishedRef
+  }
+}
+
+export const hasUnknownPublicationOutcome = (error: unknown): boolean =>
+  error instanceof PublicationPersistenceError ||
+  (error instanceof PlatformApiError && error.outcome === 'unknown')
+
+export const getUnknownPublicationRef = (error: unknown): PublishedRef | undefined =>
+  error instanceof PublicationPersistenceError ? error.publishedRef : undefined

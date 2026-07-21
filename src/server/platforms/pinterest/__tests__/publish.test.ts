@@ -8,7 +8,7 @@ import type {
   SocialSourceContext,
 } from '../../../../types/index.js'
 
-import { ValidationError } from '../../../utilities/errors.js'
+import { PublicationPersistenceError, ValidationError } from '../../../utilities/errors.js'
 import { buildPublicationIdentity } from '../../../utilities/publicationIdentity.js'
 
 vi.mock('../api.js', () => ({
@@ -165,6 +165,37 @@ describe('publishPinterestPin — idempotency', () => {
 })
 
 describe('publishPinterestPin — create + body', () => {
+  it('captures the Pin id and fences retries when audit persistence fails', async () => {
+    mockedPinterestJson.mockResolvedValue({ id: 'pin_created' })
+    payload.create.mockRejectedValue(new Error('database unavailable'))
+
+    const publication = publishPinterestPin({
+      ctx: ctx(),
+      input: { boardId: 'board_1' },
+      options,
+      payload: asPayload(payload),
+    })
+
+    await expect(publication).rejects.toBeInstanceOf(PublicationPersistenceError)
+    await expect(publication).rejects.toMatchObject({
+      outcome: 'unknown',
+      publishedRef: { externalId: 'pin_created', platform: 'pinterest' },
+    })
+    expect(mockedPinterestJson).toHaveBeenCalledOnce()
+  })
+
+  it('rejects a successful create response without a Pin id', async () => {
+    mockedPinterestJson.mockResolvedValue({ link: 'https://example.com/outbound' })
+    await expect(
+      publishPinterestPin({
+        ctx: ctx(),
+        input: { boardId: 'b1' },
+        options,
+        payload: asPayload(payload),
+      }),
+    ).rejects.toThrow('did not include an id')
+  })
+
   it('creates the pin with an image_url media source and persists a published row', async () => {
     mockedPinterestJson.mockResolvedValue({ id: 'pin_1', link: 'https://pin/url/1' })
     const result = await publishPinterestPin({
@@ -297,13 +328,11 @@ describe('deletePinterestPin', () => {
     expect(mockedRequest).not.toHaveBeenCalled()
   })
 
-  it('deletes upstream and flips the local row to cancelled', async () => {
+  it('deletes upstream and leaves the endpoint to own the local transition', async () => {
     mockedRequest.mockResolvedValue({ ok: true, status: 204 } as unknown as Response)
     payload.find.mockResolvedValue({ docs: [{ id: 'row_1' }] })
     await deletePinterestPin({ options, payload: asPayload(payload), publishedRef: ref() })
-    expect(payload.update).toHaveBeenCalledWith(
-      expect.objectContaining({ data: { status: 'cancelled' } }),
-    )
+    expect(payload.update).not.toHaveBeenCalled()
   })
 
   it('treats a 404 from Pinterest as an idempotent success', async () => {

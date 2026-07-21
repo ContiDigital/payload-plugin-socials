@@ -6,6 +6,27 @@ import { sha256Hex } from './hash.js'
 const asString = (value: unknown, fallback = ''): string =>
   typeof value === 'string' ? value : typeof value === 'number' ? String(value) : fallback
 
+export const resolvePublicationIdempotencyKey = (args: {
+  defaultValue: string
+  input: Record<string, unknown>
+  platform: PlatformId
+}): string => {
+  const override = asString(args.input.idempotencyKeyOverride).trim().toLowerCase()
+  if (override) {
+    if (!/^[a-f0-9]{64}$/.test(override)) {
+      throw new ValidationError('idempotencyKeyOverride must be a 64-character SHA-256 hex value')
+    }
+    return override
+  }
+  const publicationKey = asString(args.input.publicationKey).trim()
+  if (publicationKey.length > 200) {
+    throw new ValidationError('publicationKey must be 200 characters or fewer')
+  }
+  return sha256Hex(
+    publicationKey ? `${args.platform}:publication:${publicationKey}` : args.defaultValue,
+  )
+}
+
 export const buildPublicationIdentity = (args: {
   ctx?: SocialSourceContext
   input: Record<string, unknown>
@@ -30,9 +51,11 @@ export const buildPublicationIdentity = (args: {
               : asString(input.link)
       return {
         destinationId: pageId,
-        idempotencyKey: sha256Hex(
-          `facebook:${sourceKind}:${sourceId}:${pageId}:${format}:${primary}`,
-        ),
+        idempotencyKey: resolvePublicationIdempotencyKey({
+          defaultValue: `facebook:${sourceKind}:${sourceId}:${pageId}:${format}:${primary}`,
+          input,
+          platform,
+        }),
         primaryAssetUrl: primary,
       }
     }
@@ -44,9 +67,11 @@ export const buildPublicationIdentity = (args: {
       const locationId = match?.[2] ?? ''
       return {
         destinationId: location,
-        idempotencyKey: sha256Hex(
-          `gbp:${sourceKind}:${sourceId}:${accountId}:${locationId}:${topic}`,
-        ),
+        idempotencyKey: resolvePublicationIdempotencyKey({
+          defaultValue: `gbp:${sourceKind}:${sourceId}:${accountId}:${locationId}:${topic}:${asString(input.imageUrl)}`,
+          input,
+          platform,
+        }),
         primaryAssetUrl: asString(input.imageUrl),
       }
     }
@@ -60,9 +85,11 @@ export const buildPublicationIdentity = (args: {
       const primary = asString(input.videoUrl ?? input.imageUrl) || carouselFirst
       return {
         destinationId: igUserId,
-        idempotencyKey: sha256Hex(
-          `instagram:${sourceKind}:${sourceId}:${igUserId}:${mediaType}:${primary}`,
-        ),
+        idempotencyKey: resolvePublicationIdempotencyKey({
+          defaultValue: `instagram:${sourceKind}:${sourceId}:${igUserId}:${mediaType}:${primary}`,
+          input,
+          platform,
+        }),
         primaryAssetUrl: primary,
       }
     }
@@ -76,7 +103,11 @@ export const buildPublicationIdentity = (args: {
         mediaType === 'VIDEO' ? videoUrl || asString(input.mediaId).trim() || '' : imageUrl
       return {
         destinationId: boardId,
-        idempotencyKey: sha256Hex(`pinterest:${sourceKind}:${sourceId}:${boardId}:${primary}`),
+        idempotencyKey: resolvePublicationIdempotencyKey({
+          defaultValue: `manual:${sourceKind}:${sourceId}:${boardId}:${primary}`,
+          input,
+          platform,
+        }),
         primaryAssetUrl: primary,
       }
     }
