@@ -1,5 +1,6 @@
 import type { Payload } from 'payload'
 
+import pino from 'pino'
 import { describe, expect, it, vi } from 'vitest'
 
 import { createPluginLogger, logAsyncOperationFailure } from '../logger.js'
@@ -13,6 +14,15 @@ const mockLogger = () => ({
 
 const asPayloadLogger = (l: unknown): Payload['logger'] => l as Payload['logger']
 
+const realPino = () => {
+  const lines: string[] = []
+  const logger = pino(
+    { level: 'debug', timestamp: false },
+    { write: (line: string) => lines.push(line) },
+  )
+  return { lines, logger: asPayloadLogger(logger) }
+}
+
 describe('createPluginLogger', () => {
   it('returns safe no-ops when no payload logger is supplied', () => {
     const log = createPluginLogger(null)
@@ -24,6 +34,55 @@ describe('createPluginLogger', () => {
     const logger = mockLogger()
     createPluginLogger(asPayloadLogger(logger)).info('hello world')
     expect(logger.info).toHaveBeenCalledWith('[Socials] hello world')
+  })
+
+  it('preserves the host logger as the method receiver', () => {
+    const calls: unknown[][] = []
+    const logger = {
+      debug: vi.fn(),
+      error: vi.fn(),
+      info(this: unknown, ...args: unknown[]) {
+        expect(this).toBe(logger)
+        calls.push(args)
+      },
+      warn: vi.fn(),
+    }
+
+    createPluginLogger(asPayloadLogger(logger)).info('receiver check', { safe: true })
+
+    expect(calls).toEqual([[{ safe: true }, '[Socials] receiver check']])
+  })
+
+  it('works with real Pino and emits prefixed, redacted structured output', () => {
+    const { lines, logger } = realPino()
+
+    expect(() =>
+      createPluginLogger(logger, { operation: 'pino-regression' }).info('connected', {
+        accessToken: 'pina_SECRET',
+        boardCount: 4,
+      }),
+    ).not.toThrow()
+
+    expect(lines).toHaveLength(1)
+    const entry = JSON.parse(lines[0] ?? '{}') as Record<string, unknown>
+    expect(entry.msg).toBe('[Socials] connected')
+    expect(entry.operation).toBe('pino-regression')
+    expect(entry.boardCount).toBe(4)
+    expect(entry.accessToken).toBe('[REDACTED]')
+    expect(lines[0]).not.toContain('pina_SECRET')
+  })
+
+  it('swallows host logging failures', () => {
+    const logger = asPayloadLogger({
+      debug: vi.fn(),
+      error: vi.fn(),
+      info: () => {
+        throw new Error('logging backend unavailable')
+      },
+      warn: vi.fn(),
+    })
+
+    expect(() => createPluginLogger(logger).info('business operation succeeded')).not.toThrow()
   })
 
   it('merges context and meta and passes them as the first pino argument', () => {
@@ -139,6 +198,18 @@ describe('logAsyncOperationFailure', () => {
     const [meta] = logger.error.mock.calls[0]
     expect(meta.error).toBe('kaboom')
     expect(meta.operation).toBe('sweep')
+  })
+
+  it('never throws when the host logger throws', () => {
+    const payload = {
+      logger: asPayloadLogger({
+        error: () => {
+          throw new Error('logging backend unavailable')
+        },
+      }),
+    } as unknown as Payload
+
+    expect(() => logAsyncOperationFailure(payload, 'sweep', new Error('kaboom'))).not.toThrow()
   })
 
   it('is safe when payload is null', () => {

@@ -1,5 +1,6 @@
 import type { Payload } from 'payload'
 
+import pino from 'pino'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { NormalizedPluginOptions } from '../../../types/index.js'
@@ -48,6 +49,52 @@ describe('connectionService — encrypted round trip', () => {
       accountLabel: 'Fine Gallery',
       refreshToken: 'pinr_SECRET',
       scopes: ['pins:read', 'pins:write'],
+    })
+  })
+
+  it('completes credential persistence and encrypted reads with real Pino logging', async () => {
+    const lines: string[] = []
+    payload.logger = pino(
+      { level: 'info', timestamp: false },
+      { write: (line: string) => lines.push(line) },
+    ) as unknown as Payload['logger']
+
+    await expect(
+      saveCredentials(payload, options, 'pinterest', {
+        accessToken: 'pina_REAL_PINO',
+        refreshToken: 'pinr_REAL_PINO',
+        scopes: ['boards:read'],
+      }),
+    ).resolves.toBeUndefined()
+
+    await expect(getCredentials(payload, options, 'pinterest')).resolves.toMatchObject({
+      accessToken: 'pina_REAL_PINO',
+      refreshToken: 'pinr_REAL_PINO',
+      scopes: ['boards:read'],
+    })
+    expect(lines).toHaveLength(1)
+    expect(lines[0]).toContain('[Socials] Credentials persisted')
+    expect(JSON.stringify(store)).not.toContain('pina_REAL_PINO')
+    expect(JSON.stringify(store)).not.toContain('pinr_REAL_PINO')
+  })
+
+  it('keeps a successful credential write successful when the host logger throws', async () => {
+    payload.logger = {
+      info: () => {
+        throw new Error('logging backend unavailable')
+      },
+    } as unknown as Payload['logger']
+
+    await expect(
+      saveCredentials(payload, options, 'pinterest', {
+        accessToken: 'pina_LOG_FAILURE',
+        refreshToken: 'pinr_LOG_FAILURE',
+      }),
+    ).resolves.toBeUndefined()
+
+    await expect(getCredentials(payload, options, 'pinterest')).resolves.toMatchObject({
+      accessToken: 'pina_LOG_FAILURE',
+      refreshToken: 'pinr_LOG_FAILURE',
     })
   })
 

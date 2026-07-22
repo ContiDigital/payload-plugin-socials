@@ -1,5 +1,6 @@
 import type { PayloadRequest } from 'payload'
 
+import pino from 'pino'
 import { describe, expect, it, vi } from 'vitest'
 
 import { PluginError, RateLimitedError, ValidationError } from '../errors.js'
@@ -75,6 +76,38 @@ describe('errorResponse', () => {
     expect(res.status).toBe(500)
     expect((await res.json()).error).toBe('Internal server error')
     expect(error).toHaveBeenCalledTimes(1)
+  })
+
+  it('returns the original safe response when logging through real Pino', async () => {
+    const lines: string[] = []
+    const logger = pino(
+      { level: 'error', timestamp: false },
+      { write: (line: string) => lines.push(line) },
+    )
+    const req = fakeReq({ payload: { logger } })
+
+    const res = errorResponse(req, new PluginError('failure', 500))
+
+    expect(res.status).toBe(500)
+    expect(await res.json()).toEqual({ error: 'Internal server error' })
+    expect(lines).toHaveLength(1)
+  })
+
+  it('does not let a host logger failure mask the original error response', async () => {
+    const req = fakeReq({
+      payload: {
+        logger: {
+          error: () => {
+            throw new Error('logging backend unavailable')
+          },
+        },
+      },
+    })
+
+    const res = errorResponse(req, new PluginError('provider failed', 502))
+
+    expect(res.status).toBe(502)
+    expect(await res.json()).toEqual({ error: 'Internal server error' })
   })
 
   it('includes retryAfterSeconds when the error carries it', async () => {

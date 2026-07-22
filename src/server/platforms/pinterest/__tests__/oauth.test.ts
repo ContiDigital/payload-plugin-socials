@@ -13,10 +13,13 @@ import { recordConnectionError, saveCredentials } from '../../../services/connec
 import {
   buildAuthorizeUrl,
   exchangeCodeForTokens,
-  parseGrantedScopes,
   STATE_COOKIE_NAME,
   STATE_COOKIE_TTL_SECONDS,
 } from '../oauth.js'
+import {
+  parsePinterestTokenResponseScopes,
+  serializePinterestAuthorizationScopes,
+} from '../scopes.js'
 
 const options = {
   platforms: {
@@ -85,7 +88,7 @@ describe('pinterest oauth — exchangeCodeForTokens', () => {
           expires_in: 2_592_000,
           refresh_token: 'pinr_RT',
           refresh_token_expires_in: 5_184_000,
-          scope: 'pins:read,pins:write,user_accounts:read',
+          scope: 'pins:read pins:write user_accounts:read',
           token_type: 'bearer',
         }),
       )
@@ -163,15 +166,25 @@ describe('pinterest oauth — exchangeCodeForTokens', () => {
       )
       .mockResolvedValueOnce(okJson({ id: 'acct', username: 'finesgallery' }))
     await exchangeCodeForTokens({ code: 'c', options, payload, req })
-    expect(saveCredentials).toHaveBeenCalled()
+    expect(saveCredentials).toHaveBeenCalledWith(
+      payload,
+      options,
+      'pinterest',
+      expect.objectContaining({ scopes: undefined }),
+    )
   })
 
-  it('parseGrantedScopes handles comma, space, mixed, and absent forms', () => {
-    expect(parseGrantedScopes('a:read,b:write')).toEqual(['a:read', 'b:write'])
-    expect(parseGrantedScopes('a:read b:write')).toEqual(['a:read', 'b:write'])
-    expect(parseGrantedScopes('a:read, b:write   c:read')).toEqual(['a:read', 'b:write', 'c:read'])
-    expect(parseGrantedScopes('')).toEqual([])
-    expect(parseGrantedScopes(undefined)).toEqual([])
+  it('keeps outbound serialization distinct from inbound token-response parsing', () => {
+    expect(serializePinterestAuthorizationScopes(['a:read', 'b:write'])).toBe('a:read,b:write')
+    expect(parsePinterestTokenResponseScopes('a:read b:write')).toEqual(['a:read', 'b:write'])
+    expect(parsePinterestTokenResponseScopes('a:read,b:write')).toEqual(['a:read', 'b:write'])
+    expect(parsePinterestTokenResponseScopes('a:read, b:write   c:read')).toEqual([
+      'a:read',
+      'b:write',
+      'c:read',
+    ])
+    expect(parsePinterestTokenResponseScopes('')).toEqual([])
+    expect(parsePinterestTokenResponseScopes(undefined)).toEqual([])
   })
 
   it('still succeeds when the best-effort account fetch fails', async () => {
@@ -181,7 +194,7 @@ describe('pinterest oauth — exchangeCodeForTokens', () => {
           access_token: 'AT',
           expires_in: 100,
           refresh_token: 'RT',
-          scope: 'pins:read,pins:write,user_accounts:read',
+          scope: 'pins:read pins:write user_accounts:read',
           token_type: 'bearer',
         }),
       )

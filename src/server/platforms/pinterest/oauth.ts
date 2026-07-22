@@ -6,6 +6,10 @@ import { recordConnectionError, saveCredentials } from '../../services/connectio
 import { PlatformApiError } from '../../utilities/errors.js'
 import { policyFetch } from '../../utilities/requestPolicy.js'
 import { getPinterestApiBase } from './api.js'
+import {
+  parsePinterestTokenResponseScopes,
+  serializePinterestAuthorizationScopes,
+} from './scopes.js'
 
 /**
  * Pinterest OAuth 2.0 — Authorization Code grant with continuous refresh.
@@ -45,7 +49,7 @@ export const buildAuthorizeUrl = (
     redirect_uri: cfg.redirectUri,
     refresh_on: 'true',
     response_type: 'code',
-    scope: cfg.scopes.join(','),
+    scope: serializePinterestAuthorizationScopes(cfg.scopes),
     state: input.state,
   })
   return `${authorizeBase}?${params.toString()}`
@@ -57,7 +61,7 @@ type PinterestTokenResponse = {
   refresh_token?: string
   refresh_token_expires_at?: number
   refresh_token_expires_in?: number
-  scope: string
+  scope?: string
   token_type: 'bearer'
 }
 
@@ -77,19 +81,6 @@ export type CallbackResult = {
 }
 
 const REQUIRED_SCOPES_FALLBACK = ['pins:read', 'pins:write', 'user_accounts:read'] as const
-
-/**
- * Split the token response's `scope` string into scopes. Pinterest's authorize
- * request uses comma-separated scopes, but the token response echoes them
- * space-separated (per OAuth 2.0 / RFC 6749), and some responses omit the field
- * entirely. Split on either delimiter so the grant is read correctly whichever
- * form Pinterest returns; an absent field yields an empty list.
- */
-export const parseGrantedScopes = (scope: string | undefined): string[] =>
-  (scope ?? '')
-    .split(/[\s,]+/)
-    .map((s) => s.trim())
-    .filter(Boolean)
 
 export const exchangeCodeForTokens = async (args: {
   code: string
@@ -138,7 +129,7 @@ export const exchangeCodeForTokens = async (args: {
   }
 
   const data = (await tokenResponse.json()) as PinterestTokenResponse
-  const grantedScopes = parseGrantedScopes(data.scope)
+  const grantedScopes = parsePinterestTokenResponseScopes(data.scope)
 
   // Hard-fail when required scopes are demonstrably absent — otherwise the
   // publish path silently 403s later. But ONLY when Pinterest actually returned
@@ -198,7 +189,7 @@ export const exchangeCodeForTokens = async (args: {
     },
     refreshToken: data.refresh_token,
     refreshTokenExpiresAt,
-    scopes: grantedScopes,
+    scopes: data.scope === undefined ? undefined : grantedScopes,
   })
 
   return {
