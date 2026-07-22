@@ -69,11 +69,15 @@ export const redactSecretString = (value: string): string =>
 
 const noop: LogMethod = () => {}
 
-const bindOrNoop = (method: unknown): LogMethod => {
+const resolveLogMethod = (logger: PayloadLogger, level: LogLevel): LogMethod => {
+  if (!logger) {
+    return noop
+  }
+  const method = (logger as Record<LogLevel, unknown>)[level]
   if (typeof method !== 'function') {
     return noop
   }
-  return method.bind(undefined) as LogMethod
+  return method.bind(logger) as LogMethod
 }
 
 const redact = (input: unknown, depth = 0): unknown => {
@@ -113,14 +117,18 @@ export const createPluginLogger = (
   }
 
   const wrap = (level: LogLevel): PluginLogger[LogLevel] => {
-    const method = bindOrNoop((payloadLogger as Record<LogLevel, unknown>)[level])
+    const method = resolveLogMethod(payloadLogger, level)
     return (message: string, meta?: Record<string, unknown>) => {
-      const merged = context || meta ? { ...context, ...meta } : undefined
-      const safeMessage = `${LOG_PREFIX} ${redactSecretString(message)}`
-      if (merged) {
-        method(redact(merged), safeMessage)
-      } else {
-        method(safeMessage)
+      try {
+        const merged = context || meta ? { ...context, ...meta } : undefined
+        const safeMessage = `${LOG_PREFIX} ${redactSecretString(message)}`
+        if (merged) {
+          method(redact(merged), safeMessage)
+        } else {
+          method(safeMessage)
+        }
+      } catch {
+        // Host logging failures must never change the business operation outcome.
       }
     }
   }
