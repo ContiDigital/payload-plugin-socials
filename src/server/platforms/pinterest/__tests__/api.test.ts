@@ -43,7 +43,7 @@ const res = (body: unknown, status = 200, headers: Record<string, string> = {}):
 const tokenBody = (over: Record<string, unknown> = {}) => ({
   access_token: 'AT',
   expires_in: 3600,
-  scope: 'pins:read,pins:write',
+  scope: 'pins:read pins:write',
   token_type: 'bearer',
   ...over,
 })
@@ -109,6 +109,16 @@ describe('getAccessToken (refresh + cache)', () => {
     const saved = mockedSaveCredentials.mock.calls[0][3] as Record<string, unknown>
     expect(saved.accessToken).toBe('AT')
     expect(saved.refreshToken).toBe('pinr_rotated')
+    expect(saved.scopes).toEqual(['pins:read', 'pins:write'])
+  })
+
+  it('does not overwrite scope metadata when the refresh response omits scope', async () => {
+    stubFetch([res({ ok: true })], { scope: undefined })
+
+    await getAccessToken(payload, options)
+
+    const saved = mockedSaveCredentials.mock.calls[0][3] as Record<string, unknown>
+    expect(saved.scopes).toBeUndefined()
   })
 
   it('returns the cached token on a second call without re-hitting the token endpoint', async () => {

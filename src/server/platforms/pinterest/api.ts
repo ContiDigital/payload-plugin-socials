@@ -19,6 +19,7 @@ import {
   isSafeToRetryRequest,
   policyFetch,
 } from '../../utilities/requestPolicy.js'
+import { parsePinterestTokenResponseScopes } from './scopes.js'
 
 /**
  * Pinterest HTTP client with token caching and bounded retry policy.
@@ -96,7 +97,7 @@ type PinterestTokenResponse = {
   refresh_token?: string
   refresh_token_expires_at?: number
   refresh_token_expires_in?: number
-  scope: string
+  scope?: string
   token_type: 'bearer'
 }
 
@@ -176,12 +177,7 @@ const refreshPinterestAccessTokenUnlocked = async (
         : data.refresh_token_expires_in !== undefined
           ? new Date(Date.now() + data.refresh_token_expires_in * 1000).toISOString()
           : undefined,
-    scopes: data.scope
-      ? data.scope
-          .split(',')
-          .map((s) => s.trim())
-          .filter(Boolean)
-      : undefined,
+    scopes: data.scope === undefined ? undefined : parsePinterestTokenResponseScopes(data.scope),
     updateAccount: false,
   })
 
