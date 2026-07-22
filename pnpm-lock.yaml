@@ -82,6 +82,9 @@ importers:
       payload:
         specifier: 3.86.0
         version: 3.86.0(graphql@16.14.2)(typescript@5.9.3)
+      pino:
+        specifier: 9.14.0
+        version: 9.14.0
       prettier:
         specifier: 3.9.5
         version: 3.9.5

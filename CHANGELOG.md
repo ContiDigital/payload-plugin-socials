@@ -4,6 +4,18 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.9.2] - 2026-07-22
+
+### Fixed
+
+- Preserve Payload/Pino as the receiver of logger methods and contain host logger failures so successful credential persistence, publication, scheduler, retry, and error-response operations cannot be converted into application failures by logging.
+- Separate Pinterest authorization-scope serialization from token-response parsing, parse response scopes consistently during authorization-code exchange and refresh, and preserve stored scope metadata when Pinterest omits the response field.
+- Cover the production Pinterest board-discovery sequence through token refresh, encrypted credential persistence, real Pino logging, access-token caching, and repeated board requests.
+
+### Notes
+
+- This patch has no plugin-owned schema changes and requires no host migration.
+
 ## [0.9.1] - 2026-07-20
 
 ### Added
@@ -59,6 +71,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 - Private prerelease containing the initial four adapters, admin composer, encrypted connection storage, source resolver registry, templates, scheduling, insights, and audit collection.
 
-[Unreleased]: https://github.com/ContiDigital/payload-plugin-socials/compare/v0.9.1...HEAD
+[Unreleased]: https://github.com/ContiDigital/payload-plugin-socials/compare/v0.9.2...HEAD
+[0.9.2]: https://github.com/ContiDigital/payload-plugin-socials/compare/v0.9.1...v0.9.2
 [0.9.1]: https://github.com/ContiDigital/payload-plugin-socials/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/ContiDigital/payload-plugin-socials/releases/tag/v0.9.0
