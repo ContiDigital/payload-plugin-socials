@@ -69,7 +69,25 @@ permissions, so a public app needs **App Review** plus **Business
 Verification** before it can act on accounts outside your own testers. Plan a
 few business days to a few weeks for review.
 
-## 4. Configure the plugin
+## 4. Publish the app (Development mode hides your posts)
+
+Identical trap to [Facebook](./facebook.md#4-publish-the-app-development-mode-hides-your-posts),
+and worth restating because Instagram makes it harder to notice: while the Meta
+app is in **Development mode**, container creation and `media_publish` succeed
+and return real media IDs — but the published media is visible **only to
+accounts with a role on the app**. Anyone else sees nothing (no error, no
+placeholder; the post simply is not there for them).
+
+In the App Dashboard, complete each use case's testing requirements until they
+read **"Testing complete,"** then click **Publish** (use-case business apps
+have no Development/Live toggle — Publish is the transition). Verify visibility
+from an account with no role on the app before concluding anything about a
+publishing bug. Posts created during development mode may stay restricted after
+publishing; since Meta exposes no API deletion for Instagram, remove any stuck
+test posts in the Instagram app and reconcile with
+`DELETE /api/socials/posts/{postId}?localOnly=true`.
+
+## 5. Configure the plugin
 
 ```ts
 platforms: {

@@ -45,7 +45,30 @@ pages_show_list, pages_read_engagement, pages_manage_posts
 Review** plus **Business Verification** to publish to Pages it does not own
 through testers.
 
-## 4. Configure the plugin
+## 4. Publish the app (Development mode hides your posts)
+
+This is the single most confusing failure mode in the entire Meta setup, so it
+gets its own step. While your Meta app is in **Development mode**:
+
+- The plugin's publishes **succeed**. Graph returns a post ID, the post reports
+  `is_published: true` with privacy `EVERYONE`, and attached photos land on the
+  Page.
+- But the post is visible **only to accounts with a role on the app or Page**.
+  Every other viewer — including the post's own permalink opened from another
+  account — gets a "this content isn't available" error.
+
+Nothing is wrong with the post, the token, or the plugin; Meta gates public
+visibility at the app level until the app is published. In the current App
+Dashboard there is no Development/Live toggle for use-case-based business apps:
+complete the testing requirements listed on each use case (Facebook page
+management, Instagram) until they read **"Testing complete,"** then click
+**Publish**. Existing development-mode posts may or may not become publicly
+visible after publishing — verify from a non-role account, and republish if a
+post stays restricted.
+
+Do this before judging any visibility problem, and before a production launch.
+
+## 5. Configure the plugin
 
 ```ts
 platforms: {
