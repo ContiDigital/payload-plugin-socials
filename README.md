@@ -76,6 +76,7 @@ export default buildConfig({
               typeof asset === 'object' && asset?.url
                 ? [{ role: index === 0 ? 'main' : 'detail', url: asset.url }]
                 : [],
+            ),
             metadata: { sku: product.sku },
           }
         },
@@ -234,7 +235,7 @@ type SocialSourceContext = {
     format?: 'avif' | 'bmp' | 'gif' | 'jpeg' | 'png' | 'tiff' | 'webp'
     alt?: string
   }>
-  videos?: Array<{ url: string; posterUrl?: string }>
+  videos?: Array<{ url: string; coverImageUrl?: string }>
   modelLabel?: string | null
   metadata?: Record<string, unknown>
 }

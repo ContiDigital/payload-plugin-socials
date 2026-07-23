@@ -16,7 +16,7 @@ and connecting it to the plugin. For publication behavior, see
 1. Go to the [Pinterest developer portal](https://developers.pinterest.com/)
    and create a new app.
 2. Copy the **App ID** (client id) and **App secret** (client secret) into your
-   environment as `PINTEREST_CLIENT_ID` and `PINTEREST_CLIENT_SECRET`.
+   environment as `PINTEREST_APP_ID` and `PINTEREST_APP_SECRET`.
 
 ## 2. Set the redirect URI
 
@@ -63,8 +63,8 @@ provider rotates it. Re-check Pinterest's current [authentication documentation]
 platforms: {
   pinterest: {
     enabled: true,
-    clientId: process.env.PINTEREST_CLIENT_ID!,
-    clientSecret: process.env.PINTEREST_CLIENT_SECRET!,
+    clientId: process.env.PINTEREST_APP_ID!,
+    clientSecret: process.env.PINTEREST_APP_SECRET!,
     redirectUri: `${process.env.PUBLIC_URL}/api/socials/pinterest/oauth/callback`,
     environment: 'production', // or 'sandbox' to hit Pinterest's sandbox host
     allowedVideoHosts: ['cdn.example.com'],
