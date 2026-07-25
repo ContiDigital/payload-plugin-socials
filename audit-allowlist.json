@@ -1,0 +1,9 @@
+{
+  "advisories": [
+    {
+      "id": "GHSA-mh99-v99m-4gvg",
+      "package": "brace-expansion",
+      "reason": "Development-only ESLint/minimatch 3.x paths require brace-expansion 1.x; forcing the patched 5.x major breaks minimatch's module contract. No caller-controlled glob patterns reach this tooling in production."
+    }
+  ]
+}

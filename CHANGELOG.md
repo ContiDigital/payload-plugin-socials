@@ -26,6 +26,11 @@ All notable changes to this project are documented here. The format follows [Kee
 - Shared image-format validation and retry-delay helpers replace adapter-local duplicates; the unused standalone Instagram delete export is removed.
 - The clean script now removes `dist` and both TypeScript build-info files portably instead of relying on shell brace expansion, preventing stale build artifacts from entering a release.
 
+### Security
+
+- The optional `sharp` peer now requires `^0.35.0`, and the development image pipeline runs against `0.35.3`, excluding libvips builds affected by the 2026 inherited Sharp advisories.
+- Updated Next.js and pinned patched compatible transitive versions of PostCSS, fast-uri, brace-expansion, Mongoose, and Sharp. CI now audits the complete dependency graph at high severity instead of checking only published runtime dependencies; the sole incompatible dev-tooling-only brace-expansion advisory is explicitly documented in `audit-allowlist.json`.
+
 ### Notes
 
 - No plugin-owned schema changes; no host migration required.
