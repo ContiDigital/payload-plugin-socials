@@ -38,12 +38,13 @@ const buildAccessGate = (authorize: AuthorizeFn | undefined) => {
 export const buildSocialPostsCollection = (
   authorize?: AuthorizeFn,
   authCollection?: CollectionSlug,
+  schemaOnly = false,
 ): CollectionConfig => ({
   slug: SOCIAL_POSTS_SLUG,
   access: {
     create: () => false, // plugin-internal only; created via service layer
     delete: () => false,
-    read: buildAccessGate(authorize),
+    read: schemaOnly ? () => false : buildAccessGate(authorize),
     update: () => false,
   },
   admin: {
@@ -57,7 +58,7 @@ export const buildSocialPostsCollection = (
       'lastError',
     ],
     group: 'Socials',
-    hidden: ({ user }) => !user,
+    hidden: schemaOnly ? true : ({ user }) => !user,
     useAsTitle: 'title',
   },
   fields: [

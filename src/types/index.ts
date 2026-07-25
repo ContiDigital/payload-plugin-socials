@@ -629,50 +629,66 @@ export type SocialsAssetsConfig = {
 // Scheduling
 //
 // The plugin defines task DEFINITIONS (TaskConfig for Payload's Jobs system)
-// but does NOT own scheduling cadence — every host triggers work the way
-// their infra supports:
+// but does NOT own scheduling cadence or run a worker. Like the sibling
+// Merchant Center plugin, the HOST owns the trigger. Three modes, freely
+// mixable:
 //
-//   - **Native Payload Jobs autoRun**: host sets `scheduling.autoRun.cron`
-//     and the plugin registers an `autoRun` entry under the socials queue
-//     during `applyScheduledSync`. Payload's built-in scheduler fires it.
+//   - **Native Payload Jobs**: set `scheduling.autoRun.cron` (and optionally
+//     the insights/connection crons). The plugin attaches Payload task-level
+//     `schedule` entries to its sweep/insights/connection tasks. You must run
+//     a Payload Jobs worker that handles schedules and drains the queue
+//     (configure your OWN `jobs.autoRun` in the Payload config, or call
+//     `payload.jobs.handleSchedules()` + `payload.jobs.run()` on a cron). The
+//     plugin never writes to your `jobs.autoRun` array.
 //
 //   - **External cron (AWS EventBridge / Vercel cron / GitHub Actions / etc.)**:
-//     host hits the plugin's internal HTTP endpoints (`/socials/internal/jobs/sweep`,
+//     hit the plugin's internal HTTP endpoints (`/socials/internal/jobs/sweep`,
 //     `/socials/internal/jobs/run`, etc.) with the `scheduling.internalApiKey`.
-//     The endpoint performs the sweep + drain inline.
+//     The endpoint performs the sweep + drain inline. No Payload worker needed.
+//     This is what Fine's Gallery runs in production.
 //
-//   - **Long-running worker process**: host imports `runQueuedSocialsJobs(payload)`
-//     and `sweepDueSocialPosts(payload)` from `payload-plugin-socials` and
-//     calls them in a loop. Useful for self-hosted ECS deployments.
+//   - **Long-running worker process**: import
+//     `runQueuedSocialsJobs(payload, normalizedOptions)` and
+//     `sweepDueSocialPosts(payload, normalizedOptions)` from
+//     `payload-plugin-socials` and
+//     call them in a loop. Useful for self-hosted ECS deployments.
 //
-//   - **Hybrid**: nothing precludes mixing — e.g. autoRun for the sweep,
-//     external cron from a backup region as a safety net, plus an admin
-//     "Sweep now" button that hits `/internal/jobs/sweep` for incident response.
+// Scheduled *publishes* (`scheduledAt` on a source publish) are enqueued with
+// `waitUntil` the moment they are scheduled; any of the three modes drains them.
+// The periodic insights/connection/sweep tasks only fire under the native mode
+// (via task `schedule`) or when you call the internal endpoints / helpers.
 // ---------------------------------------------------------------------------
 
 export type SocialsAutoRunConfig = {
-  /** Cron for the connection refresh task. Default: not registered. */
+  /**
+   * Cron for the connection-refresh task. Attached as a Payload task
+   * `schedule`; requires a running Jobs worker. Default: not scheduled.
+   */
   connectionRefreshCron?: string
   /**
-   * Cron string Payload's built-in scheduler uses to fire the sweep task.
-   * Example: '*‌/5 * * * *' for every 5 minutes.
-   *
-   * The plugin defaults to NOT registering an autoRun entry — set this
-   * when you want the plugin to take ownership of the cadence. Otherwise
-   * trigger via the internal HTTP endpoints from your external scheduler.
+   * Cron for the sweep task, which scans `social-posts` for `queued` rows
+   * whose `scheduledAt` has elapsed and queues their publish. Attached as a
+   * Payload task `schedule` — you must run a Jobs worker that handles
+   * schedules and drains the queue. Optional: set only the refresh crons if
+   * you drive the sweep via the internal endpoints instead. Example:
+   * '*‌/5 * * * *' for every 5 minutes.
    */
-  cron: string
-  /** Cron for the insights refresh task. Default: not registered. */
-  insightsRefreshCron?: string
+  cron?: string
   /**
-   * Optional Payload `Queue` name when the host wants to isolate socials
-   * jobs onto a dedicated queue. Defaults to the plugin's own constant.
+   * Cron for the insights-refresh task. Attached as a Payload task
+   * `schedule`; requires a running Jobs worker. Default: not scheduled.
    */
-  queue?: string
+  insightsRefreshCron?: string
 }
 
 export type SocialsSchedulingConfig = {
-  /** When set, plugin registers an autoRun entry under the socials queue. */
+  /**
+   * When set, the plugin attaches Payload task-level `schedule` entries to its
+   * sweep/insights/connection tasks. You must run a Payload Jobs worker that
+   * handles schedules and drains the queue. The plugin never writes to your
+   * `jobs.autoRun`. Omit entirely to drive scheduling via the internal HTTP
+   * endpoints or the exported worker helpers instead.
+   */
   autoRun?: SocialsAutoRunConfig
   /**
    * Refresh access tokens whose expiry is within this many seconds.
@@ -693,6 +709,11 @@ export type SocialsSchedulingConfig = {
    * When unset, those endpoints fail closed with a clear error message.
    */
   internalApiKey?: string
+  /**
+   * Payload queue used by every plugin-owned task, regardless of how jobs are
+   * triggered. Defaults to `socials`.
+   */
+  queue?: string
   /**
    * Maximum posts the sweep helper pulls per invocation. Default 100.
    * Bound this so a single sweep doesn't tie up the worker forever.
@@ -853,14 +874,14 @@ export type NormalizedPluginOptions = {
 export type NormalizedSchedulingConfig = {
   autoRun?: {
     connectionRefreshCron?: string
-    cron: string
+    cron?: string
     insightsRefreshCron?: string
-    queue: string
   }
   connectionRefreshWindowSeconds: number
   drainBatchSize: number
   insightsRefreshWindowSeconds: number
   internalApiKey?: string
+  queue: string
   sweepBatchSize: number
 }
 

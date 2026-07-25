@@ -2,11 +2,7 @@ import type { Payload } from 'payload'
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import type {
-  NormalizedPluginOptions,
-  PublishedRef,
-  SocialSourceContext,
-} from '../../../../types/index.js'
+import type { NormalizedPluginOptions, SocialSourceContext } from '../../../../types/index.js'
 
 import {
   PlatformApiError,
@@ -24,11 +20,10 @@ vi.mock('../../../assets/resolvePlatformImage.js', () => ({
 }))
 
 import { resolvePlatformImageUrl } from '../../../assets/resolvePlatformImage.js'
-import { makeMetaRequest, metaJson } from '../../_meta/api.js'
-import { deleteInstagramMedia, publishInstagramMedia } from '../publish.js'
+import { metaJson } from '../../_meta/api.js'
+import { publishInstagramMedia } from '../publish.js'
 
 const mockedMetaJson = vi.mocked(metaJson)
-const mockedRequest = vi.mocked(makeMetaRequest)
 const mockedResolve = vi.mocked(resolvePlatformImageUrl)
 
 const options = {
@@ -297,66 +292,6 @@ describe('publishInstagramMedia — idempotency + status errors', () => {
         payload: asPayload(payload),
       }),
     ).rejects.toBeInstanceOf(PlatformApiError)
-  })
-})
-
-/**
- * deleteInstagramMedia: Meta's Graph API has no delete endpoint for published
- * IG Business media. The function throws synchronously with an actionable
- * message for ANY call — no network request is made.
- */
-describe('deleteInstagramMedia', () => {
-  const ref = (over: Partial<PublishedRef> = {}): PublishedRef => ({
-    externalId: 'media_1',
-    platform: 'instagram',
-    ...over,
-  })
-
-  it('throws immediately with the unsupported message for a valid instagram ref', () => {
-    expect(() =>
-      deleteInstagramMedia({ options, payload: asPayload(payload), publishedRef: ref() }),
-    ).toThrow(/Instagram does not support/)
-  })
-
-  it('throws a ValidationError', () => {
-    expect(() =>
-      deleteInstagramMedia({ options, payload: asPayload(payload), publishedRef: ref() }),
-    ).toThrow(ValidationError)
-  })
-
-  it('makes no network request (no fetch, no makeMetaRequest, no metaJson)', () => {
-    expect(() =>
-      deleteInstagramMedia({ options, payload: asPayload(payload), publishedRef: ref() }),
-    ).toThrow()
-    expect(mockedRequest).not.toHaveBeenCalled()
-    expect(mockedMetaJson).not.toHaveBeenCalled()
-  })
-
-  it('throws even for a publishedRef from another platform', () => {
-    expect(() =>
-      deleteInstagramMedia({
-        options,
-        payload: asPayload(payload),
-        publishedRef: ref({ platform: 'pinterest' }),
-      }),
-    ).toThrow(ValidationError)
-  })
-
-  it('throws even when externalId is absent', () => {
-    expect(() =>
-      deleteInstagramMedia({
-        options,
-        payload: asPayload(payload),
-        publishedRef: ref({ externalId: undefined }),
-      }),
-    ).toThrow()
-    expect(mockedRequest).not.toHaveBeenCalled()
-  })
-
-  it('message contains the localOnly reconcile instruction', () => {
-    expect(() =>
-      deleteInstagramMedia({ options, payload: asPayload(payload), publishedRef: ref() }),
-    ).toThrow(/localOnly=true/)
   })
 })
 

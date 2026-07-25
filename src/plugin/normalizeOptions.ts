@@ -55,14 +55,18 @@ const normalizeScheduling = (
       THIRTY_DAYS_SECONDS,
     ),
     internalApiKey: config?.internalApiKey?.trim() || undefined,
+    queue: normalizeNonEmptyString(config?.queue, SOCIALS_QUEUE_NAME),
     sweepBatchSize: normalizePositiveInteger(config?.sweepBatchSize, 100),
   }
-  if (config?.autoRun?.cron) {
+  // Register the autoRun block when ANY cron is present — each of the three
+  // crons attaches an independent Payload task `schedule`, so setting only the
+  // refresh crons (without a sweep cron) must not silently drop the whole block.
+  const auto = config?.autoRun
+  if (auto && (auto.cron || auto.insightsRefreshCron || auto.connectionRefreshCron)) {
     out.autoRun = {
-      connectionRefreshCron: config.autoRun.connectionRefreshCron,
-      cron: config.autoRun.cron,
-      insightsRefreshCron: config.autoRun.insightsRefreshCron,
-      queue: config.autoRun.queue ?? SOCIALS_QUEUE_NAME,
+      connectionRefreshCron: auto.connectionRefreshCron,
+      cron: auto.cron,
+      insightsRefreshCron: auto.insightsRefreshCron,
     }
   }
   return out
@@ -273,6 +277,15 @@ const normalizePinterest = (
       `${PLUGIN_SLUG}: platforms.pinterest requires clientId, clientSecret, and redirectUri when enabled`,
     )
   }
+  if (
+    config.environment !== undefined &&
+    config.environment !== 'production' &&
+    config.environment !== 'sandbox'
+  ) {
+    throw new Error(
+      `${PLUGIN_SLUG}: platforms.pinterest.environment must be "production" or "sandbox"`,
+    )
+  }
   return {
     allowedVideoHosts: Object.freeze(
       (config.allowedVideoHosts ?? []).map((host) => host.trim().toLowerCase()).filter(Boolean),
@@ -373,17 +386,18 @@ const normalizeGbp = (config: GbpPluginConfig | undefined): NormalizedGbpConfig 
 export const normalizePluginOptions = (
   options: PayloadPluginSocialsConfig,
 ): NormalizedPluginOptions => {
-  // Validate required fields up-front. Disabled path returns a stub so tests
-  // can build the plugin without supplying credentials.
+  if (!options.sources || Object.keys(options.sources).length === 0) {
+    throw new Error(`${PLUGIN_SLUG}: sources must be a non-empty object mapping kind → resolver`)
+  }
+  // Disabled mode bypasses secrets and runtime credentials, but schema-driving
+  // source kinds remain mandatory so toggling the plugin cannot mutate the
+  // social-templates sourceKind select.
   if (options.disabled) {
     return buildNormalizedOptions(options, { disabled: true })
   }
 
   if (typeof options.authorize !== 'function') {
     throw new Error(`${PLUGIN_SLUG}: authorize must be a function`)
-  }
-  if (!options.sources || Object.keys(options.sources).length === 0) {
-    throw new Error(`${PLUGIN_SLUG}: sources must be a non-empty object mapping kind → resolver`)
   }
   if (!options.platforms || Object.keys(options.platforms).length === 0) {
     throw new Error(`${PLUGIN_SLUG}: platforms must declare at least one entry`)

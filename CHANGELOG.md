@@ -4,16 +4,43 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.9.3] - 2026-07-23
+
+### Changed
+
+- **Scheduling now follows the operator-owned model.** The plugin no longer writes to your `jobs.autoRun` array. When `scheduling.autoRun` crons are set, the plugin attaches Payload task-level `schedule` entries to its sweep/insights/connection tasks; you run a Payload Jobs worker that handles schedules and drains the queue (or use the internal endpoints / worker helpers). The previous behavior registered `autoRun` entries that only drained the queue and never enqueued the periodic tasks, so insights-refresh, connection-refresh, and the sweep silently never ran under that mode.
+- `scheduling.autoRun.cron` is now optional; set only the refresh crons if you drive the sweep another way. Providing any one cron registers the block (previously the whole block was dropped unless the sweep cron was present).
+- The task queue is now configured as `scheduling.queue`, independently of native task crons. The former `scheduling.autoRun.queue` nesting has been removed.
+- A Payload config may contain only one plugin instance; applying a second now fails during config construction instead of creating first-wins/last-wins task registry behavior.
+- The standalone multi-channel composer is split from the source-record composer, and its publish success/error orchestration is covered in the three-browser Playwright suite.
+
+### Fixed
+
+- Facebook stores the canonical post permalink returned by the Graph API, falling back to the redirect-safe bare `/{post_id}` URL when the lookup fails (never the `/{page_id}/posts/{post_id}` form, which 404s on new-experience Pages). Scheduled posts receive the canonical URL during reconciliation.
+- Google Business Profile derives its idempotency key from the original image URL, so `assets.autoConvert` can no longer split a single publication into two `social-posts` rows.
+- When `disabled`, the plugin retains hidden, deny-all, hook-free collection/global schemas so a host `migrate:create` run cannot generate a destructive drop; runtime endpoints, tasks, and admin surfaces remain absent. Schema-driving `sources` are still required.
+- Host-collection Socials tab injection is idempotent and rejects a host field named `socials` with a clear collision error.
+- Pinterest rejects an unknown `environment` value rather than silently routing a typo to production.
+- Provider delete failures raise a sanitized platform error carrying the true upstream status instead of a 400 with the raw upstream body.
+- Log redaction also masks bare provider token shapes (`pina_`, `pinr_`, `ya29.`, `EAA…`) that appear outside secret-named keys.
+- Shared image-format validation and retry-delay helpers replace adapter-local duplicates; the unused standalone Instagram delete export is removed.
+- The clean script now removes `dist` and both TypeScript build-info files portably instead of relying on shell brace expansion, preventing stale build artifacts from entering a release.
+
+### Notes
+
+- No plugin-owned schema changes; no host migration required.
+- JavaScript source maps are no longer included in the package tarball.
+
 ## [0.9.2] - 2026-07-22
 
 ### Fixed
 
 - Preserve Payload/Pino as the receiver of logger methods and contain host logger failures so successful credential persistence, publication, scheduler, retry, and error-response operations cannot be converted into application failures by logging.
 - Separate Pinterest authorization-scope serialization from token-response parsing, parse response scopes consistently during authorization-code exchange and refresh, and preserve stored scope metadata when Pinterest omits the response field.
-- Cover the production Pinterest board-discovery sequence through token refresh, encrypted credential persistence, real Pino logging, access-token caching, and repeated board requests.
 
 ### Notes
 
+- Added a production board-discovery regression test (token refresh → encrypted persistence → real Pino logging → token caching → repeated board requests).
 - This patch has no plugin-owned schema changes and requires no host migration.
 
 ## [0.9.1] - 2026-07-20
@@ -71,7 +98,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 - Private prerelease containing the initial four adapters, admin composer, encrypted connection storage, source resolver registry, templates, scheduling, insights, and audit collection.
 
-[Unreleased]: https://github.com/ContiDigital/payload-plugin-socials/compare/v0.9.2...HEAD
+[Unreleased]: https://github.com/ContiDigital/payload-plugin-socials/compare/v0.9.3...HEAD
+[0.9.3]: https://github.com/ContiDigital/payload-plugin-socials/compare/v0.9.2...v0.9.3
 [0.9.2]: https://github.com/ContiDigital/payload-plugin-socials/compare/v0.9.1...v0.9.2
 [0.9.1]: https://github.com/ContiDigital/payload-plugin-socials/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/ContiDigital/payload-plugin-socials/releases/tag/v0.9.0

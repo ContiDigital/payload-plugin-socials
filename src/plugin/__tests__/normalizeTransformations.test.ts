@@ -139,7 +139,10 @@ describe('normalizePluginOptions — transformations', () => {
   })
 
   it('returns {} for transformations on the disabled path', () => {
-    const n = normalizePluginOptions({ disabled: true } as PayloadPluginSocialsConfig)
+    const n = normalizePluginOptions({
+      disabled: true,
+      sources: base().sources,
+    } as PayloadPluginSocialsConfig)
     expect(n.transformations).toEqual({})
     expect(Object.isFrozen(n.transformations)).toBe(true)
   })

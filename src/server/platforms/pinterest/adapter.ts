@@ -7,7 +7,6 @@ import type {
   PreviewResult,
   PublishArgs,
   PublishedRef,
-  SocialImageFormat,
   ValidationResult,
 } from '../../../types/index.js'
 
@@ -17,7 +16,7 @@ import {
   PINTEREST_MIN_IMAGE_WIDTH,
   PINTEREST_TITLE_MAX,
 } from '../../../constants.js'
-import { PLATFORM_IMAGE_CONSTRAINTS } from '../../assets/imagePreflight.js'
+import { getImageFormatValidationIssue } from '../../assets/validateImageFormat.js'
 import { getCredentials, recordConnectionError } from '../../services/connectionService.js'
 import { ValidationError } from '../../utilities/errors.js'
 import { refreshPinterestAccessToken } from './api.js'
@@ -44,32 +43,6 @@ const CAPABILITIES: PlatformCapabilities = {
   serviceAccount: false,
   stories: false,
   video: true,
-}
-
-/**
- * Check whether a declared format is disallowed for this platform.
- */
-const checkFormatIssue = (
-  format: SocialImageFormat | undefined,
-  options: NormalizedPluginOptions,
-): string | undefined => {
-  if (!format) {
-    return undefined
-  }
-  if (!options.assets.preflight) {
-    return undefined
-  }
-  const allowed = PLATFORM_IMAGE_CONSTRAINTS.pinterest.formats as readonly string[]
-  if (allowed.includes(format)) {
-    return undefined
-  }
-  if (options.assets.autoConvert) {
-    return undefined
-  }
-  return (
-    `Image format "${format}" is not accepted by Pinterest (allowed: ${allowed.join(', ')}). ` +
-    `Configure a JPEG imageSize on your upload collection or enable assets.autoConvert.`
-  )
 }
 
 export const createPinterestAdapter = (
@@ -190,7 +163,12 @@ export const createPinterestAdapter = (
       // Image format pre-publish check.
       if (mediaType === 'IMAGE') {
         const imgFormat = primary?.format
-        const formatIssue = checkFormatIssue(imgFormat, args.options)
+        const formatIssue = getImageFormatValidationIssue(
+          imgFormat,
+          args.options,
+          'pinterest',
+          'Pinterest',
+        )
         if (formatIssue) {
           issues.push({ field: 'imageUrl', message: formatIssue, severity: 'error' })
         }

@@ -66,10 +66,49 @@ pages_show_list, pages_read_engagement
 
 `instagram_content_publish` and `instagram_basic` are **Advanced Access**
 permissions, so a public app needs **App Review** plus **Business
-Verification** before it can act on accounts outside your own testers. Plan a
-few business days to a few weeks for review.
+Verification** before it can act on accounts owned by non-role users. Plan a
+few business days to a few weeks for review. Access approval and Live mode are
+separate gates: approval does not make Development-mode test media public.
 
-## 4. Configure the plugin
+## 4. Development mode is not public publishing
+
+> **Important:** A new Meta app starts in **Development mode**. Instagram
+> container creation and `media_publish` can both succeed and return IDs while
+> the resulting test media remains visible only to app-role users, such as
+> administrators, developers, and testers. API success alone is not the
+> public-launch criterion.
+
+Meta's
+[App Modes documentation](https://developers.facebook.com/documentation/development/build-and-test/app-modes)
+states that Development-mode test data is limited to role users and can become
+visible to non-role users after the app switches to **Live**.
+
+Before changing modes, remove any Instagram canaries that must remain private.
+This integration cannot delete published Instagram media upstream, so remove
+the media in the Instagram app and reconcile its local audit row with:
+
+```
+DELETE /api/socials/posts/{postId}?localOnly=true
+```
+
+Then:
+
+1. Complete the current App Review, Business Verification, and permission
+   access requirements for Instagram publishing.
+2. Switch the app/use case from **Development** to **Live** in the Meta App
+   Dashboard.
+3. Validate the runtime token again, including
+   `instagram_content_publish`, the linked Page/Instagram account assignments,
+   and the system user's `CREATE_CONTENT` task.
+4. Publish a fresh canary and inspect it while logged out or from an account
+   with no role on the app, Meta Business, Facebook Page, or Instagram account.
+5. If only role users can see it, investigate app mode, permission access, and
+   granular asset assignments before diagnosing the plugin transport.
+
+The Facebook guide has the corresponding
+[Page-publishing checklist](./facebook.md#4-development-mode-is-not-public-publishing).
+
+## 5. Configure the plugin
 
 ```ts
 platforms: {

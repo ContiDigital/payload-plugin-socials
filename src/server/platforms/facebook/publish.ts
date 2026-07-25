@@ -1,5 +1,6 @@
 import type { Payload, PayloadRequest } from 'payload'
 
+import type { PostStatus } from '../../../constants.js'
 import type {
   NormalizedPluginOptions,
   PublishedRef,
@@ -12,6 +13,7 @@ import { resolveConfiguredText } from '../../copy/resolveConfiguredCopy.js'
 import { persistPublicationAudit } from '../../services/publicationPersistence.js'
 import { PlatformApiError, ValidationError } from '../../utilities/errors.js'
 import { sha256Hex } from '../../utilities/hash.js'
+import { createPluginLogger } from '../../utilities/logger.js'
 import { resolvePublicationIdempotencyKey } from '../../utilities/publicationIdentity.js'
 import { makeMetaRequest } from '../_meta/api.js'
 import { buildDefaultFacebookMessage } from './copy.js'
@@ -87,7 +89,7 @@ type SocialPostRow = {
   externalId?: null | string
   externalUrl?: null | string
   id: number | string
-  status: 'cancelled' | 'draft' | 'failed' | 'published' | 'publishing' | 'queued'
+  status: PostStatus
 }
 
 const SCHEDULE_MIN_OFFSET_MS = 10 * 60 * 1000
@@ -159,15 +161,49 @@ const findExistingByIdempotencyKey = async (
   return (result.docs[0] as SocialPostRow | undefined) ?? null
 }
 
-const buildPermalink = (postId: string, pageId: string, format: FacebookFormat): string => {
-  // /{page_id}_{post_id} format. Facebook also resolves /{post_id} alone.
-  const [page, post] = postId.split('_')
+/**
+ * Redirect-safe fallback permalink when the canonical lookup fails. The bare
+ * /{post_id} form redirects correctly on both classic and new-experience
+ * Pages; the /{page_id}/posts/{post_id} form must never be constructed (the
+ * public-URL page id differs from the API page id on new-experience Pages).
+ */
+const buildFallbackPermalink = (externalId: string, format: FacebookFormat): string => {
+  const [page, post] = externalId.split('_')
   if (page && post) {
-    return `https://www.facebook.com/${page}/posts/${post}`
+    return `https://www.facebook.com/${post}`
   }
   return format === 'VIDEO'
-    ? `https://www.facebook.com/${pageId}/videos/${postId}`
-    : `https://www.facebook.com/${postId}`
+    ? `https://www.facebook.com/watch/?v=${externalId}`
+    : `https://www.facebook.com/${externalId}`
+}
+
+/**
+ * Best-effort fetch of the canonical `permalink_url` for a just-published post.
+ * Returns `undefined` on any failure; the caller falls back to
+ * `buildFallbackPermalink`.
+ */
+const fetchFacebookPermalinkUrl = async (
+  payload: Payload,
+  options: NormalizedPluginOptions,
+  pageAccessToken: string,
+  externalId: string,
+): Promise<string | undefined> => {
+  try {
+    const response = await makeMetaRequest(
+      payload,
+      options,
+      'facebook',
+      `/${encodeURIComponent(externalId)}?fields=permalink_url`,
+      { accessToken: pageAccessToken },
+    )
+    if (!response.ok) {
+      return undefined
+    }
+    const result = (await response.json()) as { permalink_url?: string }
+    return result.permalink_url?.trim() || undefined
+  } catch {
+    return undefined
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -565,7 +601,23 @@ export const publishFacebookPost = async (args: {
     })
   }
 
-  const externalUrl = buildPermalink(externalId, input.pageId, format)
+  let externalUrl: string | undefined
+  if (!scheduledSeconds) {
+    externalUrl = await fetchFacebookPermalinkUrl(payload, options, pageAccessToken, externalId)
+    if (!externalUrl) {
+      // Fall back to the bare /{post_id} form: it redirects to the canonical
+      // URL on both classic and new-experience Pages (unlike the
+      // /{page_id}/posts/{post_id} form, which 404s on the latter). A working
+      // redirect beats an absent link, and immediate posts have no
+      // reconciliation pass to backfill the canonical URL later.
+      createPluginLogger(payload.logger, {
+        externalId,
+        op: 'facebook-publish-permalink',
+        platform: 'facebook',
+      }).warn('Facebook canonical permalink unavailable; storing the bare post URL')
+      externalUrl = buildFallbackPermalink(externalId, format)
+    }
+  }
   // sourceHash uses the ORIGINAL primaryAssetUrl, not any converted URL.
   const sourceHash = sha256Hex(
     JSON.stringify({ format, message, pageId: input.pageId, primaryAssetUrl }),
@@ -716,8 +768,14 @@ export const deleteFacebookPost = async (args: {
     { accessToken: pageAccessToken, init: { method: 'DELETE' } },
   )
   if (!response.ok && response.status !== 404) {
-    throw new ValidationError(
-      `Facebook post delete failed: ${response.status} ${await response.text().catch(() => '')}`,
-    )
+    const rawBody = await response.text().catch(() => '')
+    throw new PlatformApiError({
+      message: `Facebook post delete failed (${response.status})`,
+      platform: 'facebook',
+      raw: rawBody,
+      retryable: response.status >= 500 || response.status === 429,
+      statusCode: response.status,
+      upstreamCode: response.status,
+    })
   }
 }

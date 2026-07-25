@@ -79,3 +79,60 @@ describe('applyCollectionEnhancements — auth collection resolution', () => {
     expect(publishedByField(config)).toBeUndefined()
   })
 })
+
+describe('applyCollectionEnhancements — schemaOnly + idempotency', () => {
+  const withSocialsTab = (): CollectionConfig => ({
+    slug: 'products',
+    fields: [{ type: 'tabs', tabs: [{ fields: [], label: 'General' }] }],
+  })
+
+  it('schemaOnly registers plugin collections but injects no host tab', () => {
+    const options = normalizePluginOptions(
+      baseOptions({ admin: { injectInto: [{ collection: 'products', sourceKind: 'product' }] } }),
+    )
+    const products = withSocialsTab()
+    const config = { collections: [products] } as Config
+
+    applyCollectionEnhancements(config, options, { schemaOnly: true })
+
+    // Plugin collections registered...
+    expect(config.collections?.some((c) => c.slug === SOCIAL_POSTS_SLUG)).toBe(true)
+    // ...but no Socials tab injected into the host collection.
+    const tabs = products.fields[0] as { tabs: Array<{ fields: Array<{ name?: string }> }> }
+    expect(tabs.tabs.every((t) => !t.fields.some((f) => f.name === 'socials'))).toBe(true)
+  })
+
+  it('does not stack a second Socials tab when applied twice', () => {
+    const options = normalizePluginOptions(
+      baseOptions({ admin: { injectInto: [{ collection: 'products', sourceKind: 'product' }] } }),
+    )
+    const products = withSocialsTab()
+    const config = { collections: [products] } as Config
+
+    applyCollectionEnhancements(config, options)
+    applyCollectionEnhancements(config, options)
+
+    const tabs = products.fields[0] as { tabs: Array<{ fields: Array<{ name?: string }> }> }
+    const socialsTabs = tabs.tabs.filter((t) => t.fields.some((f) => f.name === 'socials'))
+    expect(socialsTabs).toHaveLength(1)
+  })
+
+  it('rejects a host field collision instead of mistaking it for the plugin tab', () => {
+    const options = normalizePluginOptions(
+      baseOptions({ admin: { injectInto: [{ collection: 'products', sourceKind: 'product' }] } }),
+    )
+    const products: CollectionConfig = {
+      slug: 'products',
+      fields: [
+        {
+          type: 'tabs',
+          tabs: [{ fields: [{ name: 'socials', type: 'text' }], label: 'General' }],
+        },
+      ],
+    }
+
+    expect(() =>
+      applyCollectionEnhancements({ collections: [products] } as Config, options),
+    ).toThrow(/already has a top-level field named "socials"/)
+  })
+})

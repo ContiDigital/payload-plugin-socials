@@ -90,10 +90,13 @@ const buildPlatformTab = (label: string, name: string, scopesDbName: string) => 
   label,
 })
 
-export const buildSocialsConnectionsGlobal = (authorize?: AuthorizeFn): GlobalConfig => ({
+export const buildSocialsConnectionsGlobal = (
+  authorize?: AuthorizeFn,
+  schemaOnly = false,
+): GlobalConfig => ({
   slug: SOCIALS_CONNECTIONS_GLOBAL_SLUG,
   access: {
-    read: buildAdminGate(authorize),
+    read: schemaOnly ? () => false : buildAdminGate(authorize),
     update: () => false,
   },
   admin: {

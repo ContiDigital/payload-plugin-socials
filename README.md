@@ -4,7 +4,7 @@ Multi-platform organic social publishing for [Payload CMS](https://payloadcms.co
 
 Compose, preview, template, schedule, publish, reconcile, and measure posts across Pinterest, Instagram Business, Facebook Pages, and Google Business Profile. The plugin provides real API adapters, encrypted credential storage, idempotency controls, a durable audit trail, and Payload-native admin surfaces. It does not provide a copy-and-paste fallback or embed application-specific catalog logic.
 
-The Pinterest path is derived from a production integration. Facebook, Instagram, and Google Business Profile are implemented with contract-tested adapters but should be canary-tested with each host's approved platform applications before production use.
+**Running in production at [Fine's Gallery](https://www.finesgallery.com).** This plugin was built for, and extracted from, Fine's Gallery, a luxury bronze and marble retailer with nearly 1M annual users, where it is the social publishing control center.
 
 ## What it adds
 
@@ -33,16 +33,22 @@ pnpm add payload-plugin-socials
 
 ## Platform readiness
 
-| Platform                | Implementation                                                                                         | Release guidance                                                                                            |
-| ----------------------- | ------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------- |
-| Pinterest               | OAuth, board discovery/CRUD, image and video Pins, insights, delete                                    | Production-used; run a sandbox or controlled-account canary for host credentials                            |
-| Facebook Pages          | System-user or OAuth credentials; link, photo, multi-photo, video, native scheduling, insights, delete | Production-used; validate Page permissions and one controlled post                                          |
-| Instagram Business      | System-user or OAuth credentials; image, Reels, Stories, Carousel, insights                            | Production-used; deletion is not exposed by Meta and requires local reconciliation after removal in the app |
-| Google Business Profile | OAuth or service account; account/location discovery; Standard, Event, Offer, Alert; insights, delete  | API-complete; requires Google Basic API Access and a host-owned live canary                                 |
+| Platform                | Implementation                                                                                         | Release guidance                                                                                                           |
+| ----------------------- | ------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------- |
+| Pinterest               | OAuth, board discovery/CRUD, image and video Pins, insights, delete                                    | **Live in production at Fine's Gallery**; run a controlled canary with your own credentials                                |
+| Facebook Pages          | System-user or OAuth credentials; link, photo, multi-photo, video, native scheduling, insights, delete | **Live in production at Fine's Gallery**; Meta app must be Live for public visibility, then verify with a non-role account |
+| Instagram Business      | System-user or OAuth credentials; image, Reels, Stories, Carousel, insights                            | **Live in production at Fine's Gallery**; Meta app must be Live; remove upstream media in-app and reconcile locally        |
+| Google Business Profile | OAuth or service account; account/location discovery; Standard, Event, Offer, Alert; insights, delete  | Experimental: API-complete and contract-tested, but requires Google Basic API Access and has not yet run a live canary     |
 
 Provider approval, quotas, and policy compliance remain the host's responsibility. See the platform guides before enabling an adapter.
 
+> **Meta Development mode is role-only.** Facebook or Instagram publishing can return a successful object ID while the test content is visible only to app-role users such as administrators, developers, and testers. Public publishing requires the app/use case to be **Live** with the required permission access. Remove unwanted test posts before switching modes, then validate a canary from a logged-out or non-role account. See [Meta App Modes](https://developers.facebook.com/documentation/development/build-and-test/app-modes) and the [installation guide](./docs/installation.md#meta-development-mode-is-not-public-publishing).
+
 ## Minimal configuration
+
+This example maps an illustrative `content` collection to an `entry` source
+kind. Replace the collection, fields, and source-kind string with concepts from
+your own schema; source kinds are host-defined.
 
 ```ts
 import { buildConfig } from 'payload'
@@ -62,25 +68,26 @@ export default buildConfig({
       },
 
       sources: {
-        product: async ({ payload, id }) => {
-          const product = await payload.findByID({ collection: 'products', id, depth: 1 })
+        entry: async ({ payload, id }) => {
+          const entry = await payload.findByID({ collection: 'content', id, depth: 1 })
           return {
-            sourceId: String(product.id),
-            sourceKind: 'product',
-            baseTitle: product.title,
-            baseDescription: product.description ?? '',
-            link: `${process.env.PUBLIC_URL}/products/${product.slug}`,
-            images: (product.gallery ?? []).flatMap((asset, index) =>
+            sourceId: String(entry.id),
+            sourceKind: 'entry',
+            baseTitle: entry.title,
+            baseDescription: entry.summary ?? '',
+            link: `${process.env.PUBLIC_URL}/content/${entry.slug}`,
+            images: [entry.hero, ...(entry.media ?? [])].flatMap((asset, index) =>
               typeof asset === 'object' && asset?.url
                 ? [{ role: index === 0 ? 'main' : 'detail', url: asset.url }]
                 : [],
-            metadata: { sku: product.sku },
+            ),
+            metadata: { audience: entry.audience, tags: entry.tags },
           }
         },
       },
 
       admin: {
-        injectInto: [{ collection: 'products', sourceKind: 'product' }],
+        injectInto: [{ collection: 'content', sourceKind: 'entry' }],
         mode: 'both',
       },
 
@@ -131,7 +138,9 @@ payloadPluginSocials({
       clientSecret?: string
       redirectUri?: string
       environment?: 'production' | 'sandbox'
-      allowedVideoHosts?: string[]
+      scopes?: string[] // defaults to the plugin's required scope set
+      allowedVideoHosts?: string[] // required to publish video Pins
+      videoUploadTimeoutMs?: number
     }
     facebook?: {
       enabled: boolean
@@ -139,7 +148,8 @@ payloadPluginSocials({
       appSecret?: string
       redirectUri?: string
       systemUserAccessToken?: string
-      apiVersion?: `v${number}.${number}`
+      apiVersion?: string // e.g. 'v25.0'
+      scopes?: string[]
     }
     instagram?: {
       enabled: boolean
@@ -147,7 +157,8 @@ payloadPluginSocials({
       appSecret?: string
       redirectUri?: string
       systemUserAccessToken?: string
-      apiVersion?: `v${number}.${number}`
+      apiVersion?: string // e.g. 'v25.0'
+      scopes?: string[]
     }
     gbp?: {
       enabled: boolean
@@ -183,11 +194,11 @@ payloadPluginSocials({
   }
   scheduling?: {
     internalApiKey?: string
+    queue?: string
     autoRun?: {
-      cron: string
+      cron?: string
       insightsRefreshCron?: string
       connectionRefreshCron?: string
-      queue?: string
     }
     sweepBatchSize?: number
     drainBatchSize?: number
@@ -205,7 +216,9 @@ payloadPluginSocials({
 
 If a host has multiple auth-enabled collections, `authCollection` is required so the optional `publishedBy` relationship has an unambiguous target. A host with no auth collection may omit it; request authorization still remains mandatory.
 
-Version `0.9.x` supports one `payloadPluginSocials(...)` instance per Payload config. Combine all enabled platforms and source resolvers in that instance. The plugin-owned collection, global, endpoint, and task slugs are intentionally fixed, and task runtime options are associated with the Payload instance; applying two plugin instances to one Payload config would create conflicting ownership.
+Version `0.9.x` supports one `payloadPluginSocials(...)` instance per Payload config and throws during config construction if a second instance is applied. Combine all enabled platforms and source resolvers in that instance.
+
+With `disabled: true`, the plugin keeps its two collections and connection global in the schema, but hides them, denies access, removes hooks, and registers no endpoints, tasks, or admin surfaces. Keep the same `sources` keys and `authCollection` as enabled mode so migrations remain stable; encryption and platform credentials may be omitted.
 
 ## Source resolvers
 
@@ -232,9 +245,11 @@ type SocialSourceContext = {
     format?: 'avif' | 'bmp' | 'gif' | 'jpeg' | 'png' | 'tiff' | 'webp'
     alt?: string
   }>
-  videos?: Array<{ url: string; posterUrl?: string }>
+  videos?: Array<{ url: string; coverImageUrl?: string }>
   modelLabel?: string | null
   metadata?: Record<string, unknown>
+  // Optional per-platform hints the default copy builders read.
+  hints?: { pinterestSegments?: string[]; instagramHashtags?: string[] }
 }
 ```
 
@@ -254,8 +269,8 @@ Transform strings use the safe `{{ path | filter }}` renderer. Supported filters
 
 ```ts
 transformations: {
-  product: {
-    pinterestTitle: '{{ title }} | {{ metadata.material }}',
+  entry: {
+    pinterestTitle: '{{ title }} | {{ metadata.audience | default:Featured }}',
     instagramCaption: '{{ title }}\n\n{{ description | truncate:2000 }}',
   },
   '*': { facebookMessage: '{{ title }}\n\n{{ description | truncate:400 }}' },
@@ -281,11 +296,37 @@ or `{ "outcome": "not-published" }`. This prevents retry logic from creating dup
 
 ## Scheduling
 
-The plugin defines jobs; the host supplies cadence and workers. Any of these modes is valid:
+The plugin defines the jobs and their tasks; **the host owns the trigger and runs the workers** (the same contract as the sibling Merchant Center plugin). The plugin never writes to your `jobs.autoRun`. Choose any of these, and mix freely:
 
-- Payload Jobs `autoRun` configured through `scheduling.autoRun`.
-- An external scheduler that calls `POST /api/socials/internal/jobs/sweep` with `X-Socials-API-Key`.
-- A host worker that calls `sweepDueSocialPosts(payload, normalizedOptions)` and `runQueuedSocialsJobs(payload, normalizedOptions)`.
+- **Native Payload Jobs.** Set `scheduling.autoRun` crons — the plugin attaches Payload task-level `schedule` entries to its sweep/insights/connection tasks. Run a Payload Jobs worker that handles schedules and drains the queue: configure your own `jobs.autoRun` in the Payload config, or call `payload.jobs.handleSchedules()` + `payload.jobs.run()` on a cron.
+- **External cron.** Have EventBridge, Vercel cron, a GitHub Action, or plain cron `POST /api/socials/internal/jobs/sweep` (and `/insights/refresh`, `/connections/refresh`) with the `X-Socials-API-Key`. No Payload worker required. This is what Fine's Gallery runs in production.
+- **Long-running worker.** Call `sweepDueSocialPosts(payload, normalizedOptions)` and `runQueuedSocialsJobs(payload, normalizedOptions)` in a loop.
+
+Scheduled _publishes_ (`scheduledAt` on a source publish) are enqueued with `waitUntil` immediately and drained by any of the above. The periodic insights/connection/sweep tasks fire under the native mode (via task `schedule`) or when you call the internal endpoints / helpers.
+
+The queue name is independent of cron configuration. If you select a custom queue, use it in both places:
+
+```ts
+export default buildConfig({
+  jobs: {
+    // Host-owned worker cadence. This drains the queue and handles task schedules.
+    autoRun: [{ cron: '* * * * *', queue: 'operator-socials' }],
+  },
+  plugins: [
+    payloadPluginSocials({
+      // ...credentials, platforms, sources, authorize...
+      scheduling: {
+        queue: 'operator-socials',
+        autoRun: {
+          cron: '*/5 * * * *',
+          insightsRefreshCron: '0 * * * *',
+          connectionRefreshCron: '0 3 * * *',
+        },
+      },
+    }),
+  ],
+})
+```
 
 Scheduling uses a per-revision token, rechecks the due time in the task, and cancels superseded Payload jobs when possible. The token and status checks remain the correctness fence if cancellation races with a worker.
 

@@ -10,6 +10,7 @@ import {
 import { fetchPinnedRemoteResponse } from '../../assets/safeRemoteImage.js'
 import { PlatformApiError, ValidationError } from '../../utilities/errors.js'
 import { policyFetch } from '../../utilities/requestPolicy.js'
+import { sleep } from '../../utilities/sleep.js'
 import { pinterestJson } from './api.js'
 
 type MediaRegistration = {
@@ -36,9 +37,6 @@ const VIDEO_CONTENT_TYPES = new Set([
   'video/quicktime',
   'video/x-m4v',
 ])
-
-const sleep = (milliseconds: number): Promise<void> =>
-  new Promise((resolve) => setTimeout(resolve, milliseconds))
 
 const assertAllowedVideoUrl = (rawUrl: string, allowedHosts: readonly string[]): URL => {
   let url: URL

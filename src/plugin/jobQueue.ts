@@ -74,7 +74,7 @@ export const runQueuedSocialsJobs = async (
   }
 
   const limit = options.scheduling.drainBatchSize
-  const queue = options.scheduling.autoRun?.queue ?? SOCIALS_QUEUE_NAME
+  const queue = options.scheduling.queue
 
   const promise = payload.jobs
     .run({ limit, queue, req })

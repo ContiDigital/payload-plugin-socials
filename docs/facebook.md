@@ -41,11 +41,44 @@ reach the Page:
 pages_show_list, pages_read_engagement, pages_manage_posts
 ```
 
-`pages_manage_posts` is **Advanced Access**, so a public app needs **App
-Review** plus **Business Verification** to publish to Pages it does not own
-through testers.
+`pages_manage_posts` requires **Advanced Access** when the app serves Pages
+outside its own role-user/business test set. A public or multi-tenant app
+therefore needs **App Review** and the Business Verification Meta requests for
+that use case. Access approval and Live mode are separate gates: approval does
+not make a Development-mode test post public.
 
-## 4. Configure the plugin
+## 4. Development mode is not public publishing
+
+> **Important:** A new Meta app starts in **Development mode**. In that mode,
+> the Graph API can accept a Page publish and return a real post ID, but Meta
+> classifies the resulting post as test data that only app-role users, such as
+> administrators, developers, and testers, can see. A successful API response
+> is not proof of public visibility.
+
+Meta documents this behavior in
+[App Modes](https://developers.facebook.com/documentation/development/build-and-test/app-modes):
+Development-mode data, including test posts, is limited to role users and can
+become visible to non-role users after the app switches to **Live**.
+
+Before switching to Live, delete any test Page posts you do not want exposed.
+Then:
+
+1. Complete the current App Review, Business Verification, and permission
+   access requirements shown for the Page-management use case.
+2. Switch the app/use case from **Development** to **Live** in the Meta App
+   Dashboard.
+3. Validate the runtime token again, including `pages_manage_posts`, its
+   granular Page assignment, and the system user's `CREATE_CONTENT` task.
+4. Publish a fresh canary and open its canonical permalink while logged out or
+   from an account with no role on the app, Meta Business, or Page.
+5. Treat a role-only canary as an app-mode, permission-access, or asset
+   assignment problem before diagnosing the plugin transport.
+
+For a single-business backend, the assets may remain limited to the business
+that owns the app. A multi-tenant/public integration also needs the applicable
+Advanced Access approval before non-role businesses can authorize and publish.
+
+## 5. Configure the plugin
 
 ```ts
 platforms: {

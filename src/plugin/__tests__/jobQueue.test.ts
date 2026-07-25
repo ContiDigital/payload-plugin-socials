@@ -20,7 +20,7 @@ import {
 } from '../jobQueue.js'
 
 const options = {
-  scheduling: { drainBatchSize: 100, sweepBatchSize: 50 },
+  scheduling: { drainBatchSize: 100, queue: SOCIALS_QUEUE_NAME, sweepBatchSize: 50 },
 } as unknown as NormalizedPluginOptions
 
 interface MockPayload {

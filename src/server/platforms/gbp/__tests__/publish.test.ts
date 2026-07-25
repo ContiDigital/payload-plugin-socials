@@ -20,9 +20,17 @@ vi.mock('../api.js', () => ({
   makeGbpRequest: vi.fn(),
 }))
 
+vi.mock('../../../assets/resolvePlatformImage.js', () => ({
+  resolvePlatformImageUrl: vi.fn(),
+}))
+
+import { resolvePlatformImageUrl } from '../../../assets/resolvePlatformImage.js'
 import { gbpJson, makeGbpRequest } from '../api.js'
+
+const mockedResolve = vi.mocked(resolvePlatformImageUrl)
 import {
   deleteGbpLocalPost,
+  deriveGbpIdentity,
   pollGbpLocalPostState,
   publishGbpLocalPost,
   reconcileGbpLocalPostState,
@@ -68,6 +76,11 @@ const publishBody = (): Record<string, unknown> =>
 
 beforeEach(() => {
   vi.clearAllMocks()
+  // Default: pass image URLs through unchanged (no conversion). The idempotency
+  // key must derive from the original URL regardless of this.
+  mockedResolve.mockImplementation(({ imageUrl }) =>
+    Promise.resolve({ converted: false, url: imageUrl }),
+  )
   payload = {
     create: vi.fn().mockResolvedValue({ id: 'row_new' }),
     find: vi.fn().mockResolvedValue({ docs: [] }),
@@ -238,6 +251,35 @@ describe('publishGbpLocalPost — body assembly', () => {
     expect(body.summary).toBe('Hello')
     expect(body.media).toEqual([{ mediaFormat: 'PHOTO', sourceUrl: 'https://cdn/x.jpg' }])
     expect(payload.create.mock.calls[0][0].data.platformPublicationStatus).toBe('published')
+  })
+
+  it('derives the idempotency key from the ORIGINAL image URL when autoConvert rewrites it', async () => {
+    // autoConvert rewrites the outbound URL...
+    mockedResolve.mockResolvedValue({
+      converted: true,
+      format: 'jpeg',
+      url: 'https://cdn/x-converted.jpg',
+    })
+    await publishGbpLocalPost({
+      ctx: ctx(),
+      input: { imageUrl: 'https://cdn/x.jpg', locationResourceName: LOCATION, summary: 'Hello' },
+      options,
+      payload: asPayload(payload),
+    })
+    // ...the API body carries the CONVERTED URL...
+    expect(publishBody().media).toEqual([
+      { mediaFormat: 'PHOTO', sourceUrl: 'https://cdn/x-converted.jpg' },
+    ])
+    // ...but the persisted idempotency key equals the one derived from the
+    // ORIGINAL input (what the reservation layer computes), so conversion cannot
+    // split them into two rows.
+    const persistedKey = String(payload.create.mock.calls[0][0].data.idempotencyKey)
+    const originalKey = deriveGbpIdentity(ctx(), {
+      imageUrl: 'https://cdn/x.jpg',
+      locationResourceName: LOCATION,
+      summary: 'Hello',
+    }).idempotencyKey
+    expect(persistedKey).toBe(originalKey)
   })
 
   it('includes the event block for an EVENT post', async () => {
@@ -461,6 +503,6 @@ describe('deleteGbpLocalPost', () => {
     } as unknown as Response)
     await expect(
       deleteGbpLocalPost({ options, payload: asPayload(payload), publishedRef: ref() }),
-    ).rejects.toBeInstanceOf(ValidationError)
+    ).rejects.toBeInstanceOf(PlatformApiError)
   })
 })

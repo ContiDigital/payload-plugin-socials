@@ -43,11 +43,21 @@ describe('normalizePluginOptions — required-field validation', () => {
 })
 
 describe('normalizePluginOptions — disabled bypass', () => {
-  it('returns a valid stub without any credentials', () => {
-    const result = normalizePluginOptions({ disabled: true } as PayloadPluginSocialsConfig)
+  it('returns a valid stub without credentials while preserving schema-driving sources', () => {
+    const result = normalizePluginOptions({
+      disabled: true,
+      sources: base().sources,
+    } as PayloadPluginSocialsConfig)
     expect(result.disabled).toBe(true)
     expect(Buffer.isBuffer(result.encryptionKey)).toBe(true)
     expect(result.encryptionKey).toHaveLength(32)
+    expect(Object.keys(result.sources)).toEqual(['product'])
+  })
+
+  it('still requires source kinds because they shape the templates schema', () => {
+    expect(() =>
+      normalizePluginOptions({ disabled: true, sources: {} } as PayloadPluginSocialsConfig),
+    ).toThrow(/sources/)
   })
 })
 
@@ -81,6 +91,7 @@ describe('normalizePluginOptions — defaults', () => {
     expect(n.scheduling.drainBatchSize).toBe(100)
     expect(n.scheduling.connectionRefreshWindowSeconds).toBe(86_400)
     expect(n.scheduling.insightsRefreshWindowSeconds).toBe(30 * 86_400)
+    expect(n.scheduling.queue).toBe('socials')
     expect(n.scheduling.autoRun).toBeUndefined()
   })
 
@@ -142,9 +153,28 @@ describe('normalizePluginOptions — primitive normalizers', () => {
     expect(n.rateLimit.jitterFactor).toBe(1)
   })
 
-  it('registers an autoRun entry only when a cron is supplied, defaulting the queue', () => {
+  it('registers the autoRun block when a cron is supplied', () => {
     const n = normalizePluginOptions(withOpts({ scheduling: { autoRun: { cron: '7 * * * *' } } }))
-    expect(n.scheduling.autoRun).toMatchObject({ cron: '7 * * * *', queue: 'socials' })
+    expect(n.scheduling.autoRun).toEqual({ cron: '7 * * * *' })
+  })
+
+  it('registers the autoRun block when only a refresh cron is supplied (no sweep cron)', () => {
+    const n = normalizePluginOptions(
+      withOpts({ scheduling: { autoRun: { insightsRefreshCron: '0 9 * * *' } } }),
+    )
+    expect(n.scheduling.autoRun).toEqual({ insightsRefreshCron: '0 9 * * *' })
+    expect(n.scheduling.autoRun?.cron).toBeUndefined()
+  })
+
+  it('preserves a custom queue even when no native task cron is configured', () => {
+    const n = normalizePluginOptions(withOpts({ scheduling: { queue: '  operator-socials  ' } }))
+    expect(n.scheduling.queue).toBe('operator-socials')
+    expect(n.scheduling.autoRun).toBeUndefined()
+  })
+
+  it('falls back to the plugin queue for a blank queue name', () => {
+    const n = normalizePluginOptions(withOpts({ scheduling: { queue: '  ' } }))
+    expect(n.scheduling.queue).toBe('socials')
   })
 
   it('honours testMode', () => {
@@ -255,6 +285,24 @@ describe('normalizePluginOptions — platform credential validation', () => {
     expect(n.platforms.pinterest.environment).toBe('sandbox')
     expect(n.platforms.pinterest.scopes).toEqual(['pins:read'])
     expect(Object.isFrozen(n.platforms.pinterest.scopes)).toBe(true)
+  })
+
+  it('rejects an unknown Pinterest environment instead of publishing to production', () => {
+    expect(() =>
+      normalizePluginOptions(
+        withOpts({
+          platforms: {
+            pinterest: {
+              clientId: 'id',
+              clientSecret: 'secret',
+              enabled: true,
+              environment: 'sandobx' as never,
+              redirectUri: 'https://example.com/callback',
+            },
+          },
+        }),
+      ),
+    ).toThrow(/environment/)
   })
 
   it('throws when Instagram is enabled without either OAuth creds or a system token', () => {

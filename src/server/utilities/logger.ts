@@ -57,6 +57,11 @@ const shouldRedactKey = (key: string): boolean => {
 
 export const redactSecretString = (value: string): string =>
   value
+    // Provider token shapes, even when they appear bare (in an array element or
+    // under a non-secret key): Pinterest `pina_`/`pinr_`, Google `ya29.`, Meta
+    // `EAA…` (length-guarded so it never eats ordinary words).
+    .replace(/\b(?:pina_|pinr_|ya29\.)[\w.-]+/gi, '[REDACTED]')
+    .replace(/\bEAA[A-Za-z0-9]{20,}/g, '[REDACTED]')
     .replace(/\b(Bearer|Basic)\s+[^\s,;]+/gi, '$1 [REDACTED]')
     .replace(
       /((?:access_token|refresh_token|client_secret|app_secret|appsecret_proof|api_key|private_key|encryption_key|password|authorization|cookie|set-cookie)=)[^&\s]+/gi,

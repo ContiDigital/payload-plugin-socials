@@ -1,5 +1,6 @@
 import type { Payload, PayloadRequest } from 'payload'
 
+import type { PostStatus } from '../../../constants.js'
 import type {
   NormalizedPluginOptions,
   PublishedRef,
@@ -80,7 +81,7 @@ type SocialPostRow = {
   externalUrl?: null | string
   id: number | string
   idempotencyKey: string
-  status: 'cancelled' | 'draft' | 'failed' | 'published' | 'publishing' | 'queued'
+  status: PostStatus
 }
 
 const buildIdempotencyKey = (
@@ -460,8 +461,13 @@ export const deletePinterestPin = async (args: {
 
   // 204 success or 404 already-gone are both idempotent successes.
   if (!response.ok && response.status !== 404) {
-    throw new ValidationError(
-      `Pinterest pin delete failed: ${response.status} ${await response.text().catch(() => '')}`,
-    )
+    throw new PlatformApiError({
+      message: `Pinterest pin delete failed (${response.status})`,
+      platform: 'pinterest',
+      raw: await response.text().catch(() => ''),
+      retryable: response.status >= 500 || response.status === 429,
+      statusCode: response.status,
+      upstreamCode: response.status,
+    })
   }
 }

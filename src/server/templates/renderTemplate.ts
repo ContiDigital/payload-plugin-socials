@@ -104,10 +104,11 @@ export const renderTemplate = (template: string, scope: Record<string, unknown>)
 
 /**
  * Build the variable scope a template renders against from a
- * `SocialSourceContext`. Exposes friendly top-level aliases (`title`,
- * `material`, `category`, ...) plus the raw `metadata` object so authors can
- * reach host-specific fields via `{{ metadata.anything }}`. The `extra` map
- * lets callers layer in per-publish values (e.g. a board name or an offer code).
+ * `SocialSourceContext`. Exposes the universal context fields (`title`,
+ * `description`, `link`, `modelLabel`, `sourceId`, `sourceKind`) plus the raw
+ * `metadata` object so authors reach host-specific fields via
+ * `{{ metadata.anything }}`. The `extra` map lets callers layer in per-publish
+ * values (e.g. a board name or an offer code).
  */
 export const buildTemplateScope = (
   ctx: SocialSourceContext,
