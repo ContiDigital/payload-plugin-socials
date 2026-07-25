@@ -105,7 +105,7 @@
     "@types/react-dom": "19.2.3",
     "@vitest/coverage-v8": "4.1.10",
     "copyfiles": "2.4.1",
-    "cross-env": "^7.0.3",
+    "cross-env": "^10.1.0",
     "eslint": "^9.39.5",
     "graphql": "^16.14.2",
     "next": "16.2.11",
