@@ -152,8 +152,7 @@
     "pnpm": "^9 || ^10"
   },
   "publishConfig": {
-    "access": "public",
-    "provenance": true
+    "access": "public"
   },
   "pnpm": {
     "onlyBuiltDependencies": [

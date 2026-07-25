@@ -61,7 +61,45 @@ Record the result before tagging:
 Public visibility must be checked from a logged-out or non-role account. This
 is especially important for Meta, where Development mode content is role-only.
 
-## 3. Tag and create the GitHub release
+## 3. One-time npm bootstrap (owner action)
+
+Skip this section once the package exists on npm.
+
+npm requires an existing package before its trusted publisher can be
+configured. Do not consume the real release version during bootstrap. Instead,
+from a temporary detached worktree at the verified release commit:
+
+1. Make the GitHub repository public.
+2. Change the temporary worktree version to `0.0.0-bootstrap.0`, update its
+   lockfile, commit that version-only change, and create the annotated tag
+   `v0.0.0-bootstrap.0`. Do not merge the bootstrap commit into `main`.
+3. Run the complete preflight from that clean, tagged bootstrap commit.
+4. Create a narrowly scoped npm granular access token, require 2FA on the npm
+   account, authenticate from the owner workstation, and run
+   `npm publish --access public --tag bootstrap`.
+5. Push the bootstrap tag so the published artifact has durable source
+   provenance.
+6. In npm, configure the trusted publisher for organization `ContiDigital`,
+   repository `payload-plugin-socials`, workflow `release.yml`, and GitHub
+   environment `npm`.
+7. Remove the local credential and delete the bootstrap token. It must not be
+   retained as a repository secret.
+
+The non-`latest` `bootstrap` dist-tag reserves the package without consuming
+`0.9.3`. Return to the unchanged release commit before continuing. The
+bootstrap commit is preserved only by its tag; the release branch and package
+version stay `0.9.3`.
+
+## 4. Backfill tags, tag the release, and create the GitHub release
+
+The repository has annotated historical tags for the prior public releases.
+After this hardening PR merges, push them once and verify their targets:
+
+```bash
+git rev-list -n 1 v0.9.1 # 57a7e36ff38c1e400fafe3128e1d3ce22d9e1331
+git rev-list -n 1 v0.9.2 # 3b6d5170d39659ba3181a9b8c8199d7e47fb61f3
+git push origin v0.9.1 v0.9.2
+```
 
 Create an annotated tag on the exact verified commit and push it explicitly:
 
@@ -74,23 +112,7 @@ Create the GitHub release from that tag and use the matching CHANGELOG section
 as its notes. Publishing the GitHub release triggers `.github/workflows/release.yml`,
 which re-runs the full release and browser gates before npm trusted publishing.
 
-## 4. One-time npm bootstrap (owner action)
-
-The package name must exist before npm permits trusted-publisher configuration.
-For the first publication only:
-
-1. Make the GitHub repository public.
-2. Create a narrowly scoped npm granular access token for this package, require
-   2FA on the npm account, and authenticate from a clean owner workstation.
-3. Check out the annotated release tag, re-run the preflight, and run
-   `npm publish --access public`.
-4. Remove the local npm token immediately.
-5. In npm, configure the trusted publisher for organization `ContiDigital`,
-   repository `payload-plugin-socials`, workflow `release.yml`, and GitHub
-   environment `npm`.
-6. Delete the bootstrap token. It must not be retained as a repository secret.
-
-The bootstrap is an owner action, not a CI path. After it is complete, all
-subsequent versions are published only by creating a GitHub release from the
-matching annotated tag; npm exchanges the workflow's OIDC identity and attaches
+The bootstrap is an owner action, not a CI path. After it is complete, every
+real version is published only by creating a GitHub release from the matching
+annotated tag; npm exchanges the workflow's OIDC identity and attaches
 provenance automatically.

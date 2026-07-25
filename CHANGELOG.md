@@ -19,6 +19,7 @@ All notable changes to this project are documented here. The format follows [Kee
 - The standalone multi-channel composer is split from the source-record composer, and its publish success/error orchestration is covered in the three-browser Playwright suite.
 - Payload admin peers now require React and React DOM 19, matching the supported Payload 3 runtime.
 - Public copy guidance now documents the optional commerce-style metadata convention used by Pinterest defaults and the provider-conditional availability of GBP Alert posts.
+- npm provenance now comes from the steady-state trusted-publishing workflow rather than a package-level flag that prevents the one-time token bootstrap. The owner runbook reserves the package with a tagged, non-`latest` bootstrap prerelease before the real release workflow runs.
 
 ### Fixed
 
@@ -114,5 +115,5 @@ All notable changes to this project are documented here. The format follows [Kee
 [Unreleased]: https://github.com/ContiDigital/payload-plugin-socials/compare/v0.9.3...HEAD
 [0.9.3]: https://github.com/ContiDigital/payload-plugin-socials/compare/v0.9.2...v0.9.3
 [0.9.2]: https://github.com/ContiDigital/payload-plugin-socials/compare/v0.9.1...v0.9.2
-[0.9.1]: https://github.com/ContiDigital/payload-plugin-socials/compare/v0.9.0...v0.9.1
-[0.9.0]: https://github.com/ContiDigital/payload-plugin-socials/releases/tag/v0.9.0
+[0.9.1]: https://github.com/ContiDigital/payload-plugin-socials/compare/d41a1c7d0fb88346e6dfb0c10ea3480d768042e4...v0.9.1
+[0.9.0]: https://github.com/ContiDigital/payload-plugin-socials/commit/d41a1c7d0fb88346e6dfb0c10ea3480d768042e4
