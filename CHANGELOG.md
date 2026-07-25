@@ -30,7 +30,7 @@ All notable changes to this project are documented here. The format follows [Kee
 - Pinterest rejects an unknown `environment` value rather than silently routing a typo to production.
 - Provider delete failures raise a sanitized platform error carrying the true upstream status instead of a 400 with the raw upstream body.
 - Log redaction also masks bare provider token shapes (`pina_`, `pinr_`, `ya29.`, `EAA…`) that appear outside secret-named keys.
-- Facebook insights use Meta's post media-view replacements instead of the impressions/reach/3-second-view metrics retired in June 2026. Facebook and Instagram now retry Graph code-100 failures per metric, preserve valid partial results, and record rejected names in `unavailableMetrics`.
+- Facebook insights use Meta's post media-view replacements instead of the impressions/reach/3-second-view metrics retired in June 2026. Facebook and Instagram now retry invalid-metric Graph code-100 failures per metric, preserve valid partial results, and record rejected names in `unavailableMetrics`; missing-object and permission-loss responses are rethrown instead of becoming empty snapshots.
 - Shared image-format validation and retry-delay helpers replace adapter-local duplicates; the unused standalone Instagram delete export is removed.
 - The clean script now removes `dist` and both TypeScript build-info files portably instead of relying on shell brace expansion, preventing stale build artifacts from entering a release.
 - Injected source composers no longer assume a `product` source kind. A missing or blank `sourceKind` now renders a configuration error before access or source requests can run.

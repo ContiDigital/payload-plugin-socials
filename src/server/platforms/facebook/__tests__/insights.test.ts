@@ -131,6 +131,35 @@ describe('getFacebookInsightsForRef', () => {
     expect(metaJson).toHaveBeenCalledTimes(1 + EXPECTED_METRICS.length)
   })
 
+  it('rethrows missing-post code-100 errors without per-metric fallback', async () => {
+    for (const graphError of [
+      { error_subcode: 33, message: 'Unsupported get request' },
+      { message: 'Object does not exist or cannot be loaded due to missing permissions' },
+    ]) {
+      const missingPostError = new PlatformApiError({
+        message: 'Meta insights failed',
+        platform: 'facebook',
+        raw: { error: { code: 100, ...graphError } },
+        statusCode: 400,
+        upstreamCode: 100,
+      })
+      vi.mocked(metaJson).mockReset().mockRejectedValue(missingPostError)
+
+      await expect(
+        getFacebookInsightsForRef({
+          options,
+          payload,
+          publishedRef: {
+            externalId: 'page_123_deleted_post',
+            meta: { pageId: 'page_123' },
+            platform: 'facebook',
+          },
+        }),
+      ).rejects.toBe(missingPostError)
+      expect(metaJson).toHaveBeenCalledTimes(1)
+    }
+  })
+
   it('falls back to the compound external id when row metadata is absent', async () => {
     vi.mocked(metaJson).mockResolvedValue({ data: [] })
     await getFacebookInsightsForRef({

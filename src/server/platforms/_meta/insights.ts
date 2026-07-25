@@ -9,8 +9,23 @@ type InsightsResponse<TMetric extends InsightMetric> = {
   paging?: Record<string, unknown>
 }
 
+const isMissingObjectError = (error: PlatformApiError): boolean => {
+  const graphError =
+    error.raw && typeof error.raw === 'object'
+      ? (error.raw as { error?: Record<string, unknown> }).error
+      : undefined
+  const subcode = graphError?.error_subcode
+  const message =
+    typeof graphError?.message === 'string'
+      ? graphError.message
+      : (error.upstreamMessage ?? error.message)
+  return subcode === 33 || subcode === '33' || message.toLowerCase().includes('does not exist')
+}
+
 const isUnavailableMetricError = (error: unknown): boolean =>
-  error instanceof PlatformApiError && (error.upstreamCode === 100 || error.upstreamCode === '100')
+  error instanceof PlatformApiError &&
+  (error.upstreamCode === 100 || error.upstreamCode === '100') &&
+  !isMissingObjectError(error)
 
 export const fetchMetaInsightsWithFallback = async <TMetric extends InsightMetric>(args: {
   fetch: (metrics: readonly string[]) => Promise<InsightsResponse<TMetric>>
