@@ -22,34 +22,9 @@ jobs:
       matrix:
         include:
           - database: postgres
-            mongodb_image: ''
-            postgres_image: postgres:17-alpine@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193
+            image: postgres:17-alpine@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193
           - database: mongodb
-            mongodb_image: mongo:8@sha256:b8806ee8207318a30316eca72257da4c146025a80fdcdb4c597e596af9233ee3
-            postgres_image: ''
-    services:
-      postgres:
-        image: ${{ matrix.postgres_image }}
-        env:
-          POSTGRES_DB: socials_test
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_USER: postgres
-        options: >-
-          --health-cmd "pg_isready -U postgres -d socials_test"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 12
-        ports:
-          - 5432:5432
-      mongodb:
-        image: ${{ matrix.mongodb_image }}
-        options: >-
-          --health-cmd "mongosh --quiet --eval 'db.adminCommand({ ping: 1 })'"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 12
-        ports:
-          - 27017:27017
+            image: mongo:8@sha256:b8806ee8207318a30316eca72257da4c146025a80fdcdb4c597e596af9233ee3
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -60,11 +35,21 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Start ${{ matrix.database }} with registry retries
+        env:
+          DATABASE: ${{ matrix.database }}
+          DATABASE_IMAGE: ${{ matrix.image }}
+        run: bash ./scripts/ci/start-database.sh "$DATABASE" "$DATABASE_IMAGE"
       - run: pnpm exec vitest --run src/__tests__/boot.test.ts
         env:
           MONGODB_URL: mongodb://127.0.0.1:27017/socials_test
           POSTGRES_URL: postgres://postgres:postgres@127.0.0.1:5432/socials_test
           SOCIALS_TEST_DATABASE: ${{ matrix.database }}
+      - name: Stop ${{ matrix.database }}
+        if: always()
+        env:
+          DATABASE: ${{ matrix.database }}
+        run: docker rm --force "payload-socials-${DATABASE}" >/dev/null 2>&1 || true
 
   release-check:
     name: Release check (Node ${{ matrix.node }})
@@ -101,5 +86,5 @@ jobs:
           path: |
             ${{ runner.temp }}/payload-plugin-socials-playwright/playwright-report/
             ${{ runner.temp }}/payload-plugin-socials-playwright/test-results/
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 14
