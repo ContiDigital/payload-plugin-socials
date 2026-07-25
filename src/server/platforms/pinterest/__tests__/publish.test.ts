@@ -8,7 +8,11 @@ import type {
   SocialSourceContext,
 } from '../../../../types/index.js'
 
-import { PublicationPersistenceError, ValidationError } from '../../../utilities/errors.js'
+import {
+  PlatformApiError,
+  PublicationPersistenceError,
+  ValidationError,
+} from '../../../utilities/errors.js'
 import { buildPublicationIdentity } from '../../../utilities/publicationIdentity.js'
 
 vi.mock('../api.js', () => ({
@@ -351,7 +355,7 @@ describe('deletePinterestPin', () => {
     } as unknown as Response)
     await expect(
       deletePinterestPin({ options, payload: asPayload(payload), publishedRef: ref() }),
-    ).rejects.toBeInstanceOf(ValidationError)
+    ).rejects.toBeInstanceOf(PlatformApiError)
   })
 })
 

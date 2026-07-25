@@ -93,6 +93,7 @@ const makeOptions = (
       connectionRefreshWindowSeconds: 86400,
       drainBatchSize: 100,
       insightsRefreshWindowSeconds: 2592000,
+      queue: 'socials',
       sweepBatchSize: 100,
     },
     sources: {},

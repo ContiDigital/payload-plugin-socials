@@ -35,20 +35,59 @@ const buildSocialsTab = (label: string, sourceKind: string): TabsField['tabs'][n
   label,
 })
 
+const isPluginSocialsField = (field: Field): boolean => {
+  if (!('name' in field) || field.name !== 'socials' || field.type !== 'ui') {
+    return false
+  }
+  const component = field.admin?.components?.Field
+  return (
+    typeof component === 'object' &&
+    component !== null &&
+    component.path === `${PLUGIN_SLUG}/client` &&
+    component.exportName === 'SocialPublishPanelClient'
+  )
+}
+
+const findTopLevelSocialsFields = (collection: CollectionConfig): Field[] => {
+  const matches: Field[] = []
+  for (const field of collection.fields) {
+    if (field.type === 'tabs') {
+      for (const tab of field.tabs) {
+        if ('fields' in tab) {
+          matches.push(
+            ...tab.fields.filter((tabField) => 'name' in tabField && tabField.name === 'socials'),
+          )
+        }
+      }
+    } else if ('name' in field && field.name === 'socials') {
+      matches.push(field)
+    }
+  }
+  return matches
+}
+
 const injectTabIntoCollection = (
   collection: CollectionConfig,
   label: string,
   sourceKind: string,
   position: 'append' | 'before-last' | number,
 ): void => {
-  const tabsIndex = collection.fields.findIndex(
-    (f): f is TabsField => 'type' in f && f.type === 'tabs',
-  )
+  const existingSocialsFields = findTopLevelSocialsFields(collection)
+  if (existingSocialsFields.some(isPluginSocialsField)) {
+    return
+  }
+  if (existingSocialsFields.length > 0) {
+    throw new Error(
+      `${PLUGIN_SLUG}: collection "${collection.slug}" already has a top-level field named ` +
+        '"socials"; rename it before enabling automatic Socials tab injection.',
+    )
+  }
+
+  const tabs = collection.fields.find((f): f is TabsField => 'type' in f && f.type === 'tabs')
 
   const newTab = buildSocialsTab(label, sourceKind)
 
-  if (tabsIndex !== -1) {
-    const tabs = collection.fields[tabsIndex] as TabsField
+  if (tabs) {
     // Look for a placeholder tab the host may have dropped in for manual placement.
     const placeholderIndex = tabs.tabs.findIndex(
       (tab) =>
@@ -82,6 +121,7 @@ const injectTabIntoCollection = (
 export const applyCollectionEnhancements = (
   config: Config,
   options: NormalizedPluginOptions,
+  { schemaOnly = false }: { schemaOnly?: boolean } = {},
 ): Config => {
   if (!config.collections) {
     config.collections = []
@@ -107,10 +147,18 @@ export const applyCollectionEnhancements = (
 
   // Re-applying the same plugin configuration during HMR does not duplicate collections.
   if (!config.collections.some((c) => c.slug === SOCIAL_POSTS_SLUG)) {
-    config.collections.push(buildSocialPostsCollection(options.authorize, options.authCollection))
+    config.collections.push(
+      buildSocialPostsCollection(options.authorize, options.authCollection, schemaOnly),
+    )
   }
   if (!config.collections.some((c) => c.slug === SOCIAL_TEMPLATES_SLUG)) {
-    config.collections.push(buildSocialTemplatesCollection(options))
+    config.collections.push(buildSocialTemplatesCollection(options, schemaOnly))
+  }
+
+  // schemaOnly: register the plugin-owned collections (so host migrations keep
+  // the tables) but skip runtime admin wiring. Used by the `disabled` path.
+  if (schemaOnly) {
+    return config
   }
 
   // Inject Socials tab into each host collection.

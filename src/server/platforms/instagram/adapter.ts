@@ -7,12 +7,11 @@ import type {
   PreviewResult,
   PublishArgs,
   PublishedRef,
-  SocialImageFormat,
   ValidationResult,
 } from '../../../types/index.js'
 
 import { INSTAGRAM_CAPTION_MAX_CHARS, INSTAGRAM_CAPTION_MAX_HASHTAGS } from '../../../constants.js'
-import { PLATFORM_IMAGE_CONSTRAINTS } from '../../assets/imagePreflight.js'
+import { getImageFormatValidationIssue } from '../../assets/validateImageFormat.js'
 import { resolveConfiguredText } from '../../copy/resolveConfiguredCopy.js'
 import { getCredentials, recordConnectionError } from '../../services/connectionService.js'
 import { ValidationError } from '../../utilities/errors.js'
@@ -40,33 +39,6 @@ const CAPABILITIES: PlatformCapabilities = {
   serviceAccount: true,
   stories: true,
   video: true,
-}
-
-/**
- * Check whether a declared format is disallowed for this platform.
- * Used in validate() to surface a pre-publish error when autoConvert is off.
- */
-const checkFormatIssue = (
-  format: SocialImageFormat | undefined,
-  options: NormalizedPluginOptions,
-): string | undefined => {
-  if (!format) {
-    return undefined
-  }
-  if (!options.assets.preflight) {
-    return undefined
-  }
-  const allowed = PLATFORM_IMAGE_CONSTRAINTS.instagram.formats as readonly string[]
-  if (allowed.includes(format)) {
-    return undefined
-  }
-  if (options.assets.autoConvert) {
-    return undefined
-  }
-  return (
-    `Image format "${format}" is not accepted by Instagram (allowed: ${allowed.join(', ')}). ` +
-    `Configure a JPEG imageSize on your upload collection or enable assets.autoConvert.`
-  )
 }
 
 /**
@@ -217,7 +189,12 @@ export const createInstagramAdapter = (
       // Image format pre-publish check (only surfaces when autoConvert is off).
       if (mediaType === 'IMAGE' && input?.imageUrl) {
         const imgMeta = ctx.images.find((img) => img.url === input.imageUrl)
-        const formatIssue = checkFormatIssue(imgMeta?.format, args.options)
+        const formatIssue = getImageFormatValidationIssue(
+          imgMeta?.format,
+          args.options,
+          'instagram',
+          'Instagram',
+        )
         if (formatIssue) {
           issues.push({ field: 'imageUrl', message: formatIssue, severity: 'error' })
         }

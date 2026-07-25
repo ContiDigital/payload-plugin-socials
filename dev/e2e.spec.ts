@@ -10,11 +10,82 @@ test('renders the social control center and product composer accessibly', async 
   await page.getByRole('button', { name: 'Login' }).click()
   await expect(page).toHaveTitle(/Dashboard/)
 
+  let composeAttempts = 0
+  await page.route('**/api/socials/pinterest/boards', async (route) => {
+    await route.fulfill({
+      body: JSON.stringify({ boards: [{ id: 'board-e2e', name: 'E2E board' }] }),
+      contentType: 'application/json',
+      status: 200,
+    })
+  })
+  await page.route('**/api/socials/compose/publish', async (route) => {
+    composeAttempts += 1
+    const body = route.request().postDataJSON() as {
+      content: { title: string }
+      targets: Array<{ input: { boardId?: string }; platform: string }>
+    }
+    expect(body.content.title).toBe('E2E launch')
+    expect(body.targets).toEqual([
+      expect.objectContaining({
+        input: expect.objectContaining({ boardId: 'board-e2e' }),
+        platform: 'pinterest',
+      }),
+    ])
+    if (composeAttempts === 1) {
+      await route.fulfill({
+        body: JSON.stringify({
+          anyPublished: true,
+          results: [
+            {
+              ok: true,
+              platform: 'pinterest',
+              publishedRef: {
+                externalId: 'pin-e2e',
+                externalUrl: 'https://www.pinterest.com/pin/pin-e2e',
+                platform: 'pinterest',
+              },
+            },
+          ],
+        }),
+        contentType: 'application/json',
+        status: 200,
+      })
+      return
+    }
+    await route.fulfill({
+      body: JSON.stringify({ error: 'Pinterest unavailable' }),
+      contentType: 'application/json',
+      status: 502,
+    })
+  })
+
   await page.goto('/admin/socials', { waitUntil: 'domcontentloaded' })
   await expect(page.getByRole('heading', { level: 1, name: 'Socials' })).toBeVisible()
   await expect(
     page.getByRole('tablist', { name: 'Socials view' }).getByRole('tab', { name: 'Connections' }),
   ).toBeVisible()
+
+  const standaloneComposer = page
+    .locator('.socials-composer')
+    .filter({ has: page.getByRole('heading', { level: 2, name: 'Standalone composer' }) })
+  await expect(standaloneComposer).toBeVisible()
+  await standaloneComposer.getByLabel('Post title').fill('E2E launch')
+  await standaloneComposer.getByLabel('Pinterest').check()
+  await standaloneComposer.getByLabel('Pinterest destination').selectOption('board-e2e')
+  const publishSelected = standaloneComposer.getByRole('button', {
+    name: 'Publish to selected channels',
+  })
+  await expect(publishSelected).toBeEnabled()
+  await publishSelected.click()
+  await expect(standaloneComposer.locator('.socials-composer__success')).toContainText('Published')
+  await expect(standaloneComposer.getByRole('link', { name: 'View' })).toHaveAttribute(
+    'href',
+    'https://www.pinterest.com/pin/pin-e2e',
+  )
+
+  await publishSelected.click()
+  await expect(page.getByText('Pinterest unavailable')).toBeVisible()
+  expect(composeAttempts).toBe(2)
 
   const created = await page.request.post('/api/products', {
     data: { title: 'E2E product' },

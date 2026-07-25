@@ -120,6 +120,7 @@ const builderField = (
 
 export const buildSocialTemplatesCollection = (
   options: NormalizedPluginOptions,
+  schemaOnly = false,
 ): CollectionConfig => {
   const gate = buildGate(options.authorize)
   const sourceKinds = Object.keys(options.sources)
@@ -127,17 +128,17 @@ export const buildSocialTemplatesCollection = (
   return {
     slug: SOCIAL_TEMPLATES_SLUG,
     access: {
-      create: gate,
-      delete: gate,
-      read: gate,
-      update: gate,
+      create: schemaOnly ? () => false : gate,
+      delete: schemaOnly ? () => false : gate,
+      read: schemaOnly ? () => false : gate,
+      update: schemaOnly ? () => false : gate,
     },
     admin: {
       defaultColumns: ['name', 'sourceKind', 'isDefault', 'enabled'],
       description:
         'Reusable post templates. Each template is bound to a collection (source kind) and its placeholders are filled per source record at compose time.',
       group: 'Socials',
-      hidden: ({ user }) => !user,
+      hidden: schemaOnly ? true : ({ user }) => !user,
       useAsTitle: 'name',
     },
     fields: [
@@ -236,9 +237,7 @@ export const buildSocialTemplatesCollection = (
         ],
       },
     ],
-    hooks: {
-      beforeChange: [buildSingleDefaultHook()],
-    },
+    hooks: schemaOnly ? undefined : { beforeChange: [buildSingleDefaultHook()] },
     timestamps: true,
   }
 }

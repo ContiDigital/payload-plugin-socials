@@ -17,6 +17,7 @@ import {
   isSafeToRetryRequest,
   policyFetch,
 } from '../../utilities/requestPolicy.js'
+import { sleep } from '../../utilities/sleep.js'
 
 /**
  * Google Business Profile HTTP client.
@@ -339,8 +340,6 @@ export const getGbpAccessToken = async (
 // ---------------------------------------------------------------------------
 // Request helper (retries 408/425/429/5xx with exponential backoff + jitter)
 // ---------------------------------------------------------------------------
-
-const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
 
 const parseRetryAfter = (headerValue: null | string): null | number => {
   if (!headerValue) {

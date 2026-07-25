@@ -4,7 +4,11 @@ import { describe, expect, it } from 'vitest'
 
 import type { PayloadPluginSocialsConfig } from '../types/index.js'
 
-import { SOCIAL_POSTS_SLUG, SOCIALS_CONNECTIONS_GLOBAL_SLUG } from '../constants.js'
+import {
+  SOCIAL_POSTS_SLUG,
+  SOCIAL_TEMPLATES_SLUG,
+  SOCIALS_CONNECTIONS_GLOBAL_SLUG,
+} from '../constants.js'
 import payloadPluginSocials, { TASK_SLUGS_OWNED_BY_PLUGIN } from '../index.js'
 
 const HEX_KEY = '00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff'
@@ -58,21 +62,34 @@ describe('payloadPluginSocials curried factory', () => {
     expect(endpoints.some((e) => e.path.includes('/health'))).toBe(true)
   })
 
-  it('short-circuits and returns the config untouched when disabled', () => {
+  it('retains a hidden, deny-all schema while omitting runtime wiring when disabled', async () => {
     const config = baseConfig()
     const result = payloadPluginSocials(validOptions({ disabled: true }))(config)
     expect(result).toBe(config)
-    expect(result.collections).toHaveLength(0)
+    expect(slugsOf(result.collections ?? [])).toEqual(
+      expect.arrayContaining([SOCIAL_POSTS_SLUG, SOCIAL_TEMPLATES_SLUG]),
+    )
+    expect(slugsOf(result.globals ?? [])).toContain(SOCIALS_CONNECTIONS_GLOBAL_SLUG)
+    expect(result.endpoints).toHaveLength(0)
+    expect(result.jobs?.tasks ?? []).toHaveLength(0)
+
+    const posts = result.collections?.find((entry) => entry.slug === SOCIAL_POSTS_SLUG)
+    const templates = result.collections?.find((entry) => entry.slug === SOCIAL_TEMPLATES_SLUG)
+    const connections = result.globals?.find(
+      (entry) => entry.slug === SOCIALS_CONNECTIONS_GLOBAL_SLUG,
+    )
+    expect(posts?.admin?.hidden).toBe(true)
+    expect(templates?.admin?.hidden).toBe(true)
+    expect(templates?.hooks?.beforeChange).toBeUndefined()
+    expect(connections?.admin?.hidden).toBe(true)
+    expect(await posts?.access?.read?.({ req: { user: { id: 1 } } } as never)).toBe(false)
+    expect(await connections?.access?.read?.({ req: { user: { id: 1 } } } as never)).toBe(false)
   })
 
-  it('does not duplicate tasks or endpoints when applied twice (HMR-safe)', () => {
+  it('rejects a second plugin instance instead of sharing process-level registries', () => {
     const config = baseConfig()
     payloadPluginSocials(validOptions())(config)
-    const tasksAfterFirst = slugsOf(config.jobs?.tasks ?? []).length
-    const endpointsAfterFirst = (config.endpoints ?? []).length
-    payloadPluginSocials(validOptions())(config)
-    expect(slugsOf(config.jobs?.tasks ?? []).length).toBe(tasksAfterFirst)
-    expect((config.endpoints ?? []).length).toBe(endpointsAfterFirst)
+    expect(() => payloadPluginSocials(validOptions())(config)).toThrow(/only one plugin instance/)
   })
 })
 

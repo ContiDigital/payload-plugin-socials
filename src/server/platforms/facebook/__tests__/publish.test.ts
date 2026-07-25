@@ -8,7 +8,11 @@ import type {
   SocialSourceContext,
 } from '../../../../types/index.js'
 
-import { PublicationPersistenceError, ValidationError } from '../../../utilities/errors.js'
+import {
+  PlatformApiError,
+  PublicationPersistenceError,
+  ValidationError,
+} from '../../../utilities/errors.js'
 import { buildPublicationIdentity } from '../../../utilities/publicationIdentity.js'
 
 vi.mock('../../_meta/api.js', () => ({
@@ -64,6 +68,12 @@ const setupPublish = (feed: Record<string, unknown> = { id: 'feed_1', post_id: '
   let photoN = 0
   mockedRequest.mockImplementation((_p, _o, _plat, path) => {
     const p = String(path)
+    if (p.includes('permalink_url')) {
+      // The post-publish permalink lookup (canonical URL).
+      return Promise.resolve(
+        jsonResponse({ permalink_url: 'https://www.facebook.com/canonical-post' }),
+      )
+    }
     if (p.includes('/photos')) {
       photoN += 1
       return Promise.resolve(jsonResponse({ id: `photo_${photoN}` }))
@@ -122,7 +132,9 @@ describe('publishFacebookPost — formats', () => {
       outcome: 'unknown',
       publishedRef: { externalId: 'p1_123', platform: 'facebook' },
     })
-    expect(mockedRequest).toHaveBeenCalledOnce()
+    // The publish POST plus the best-effort permalink lookup, both before the
+    // failing audit persistence.
+    expect(mockedRequest).toHaveBeenCalledTimes(2)
   })
 
   it('publishes a LINK post to /feed using the Page token', async () => {
@@ -134,7 +146,29 @@ describe('publishFacebookPost — formats', () => {
       payload: asPayload(payload),
     })
     expect(result.publishedRef.externalId).toBe('p1_123')
-    expect(result.publishedRef.externalUrl).toBe('https://www.facebook.com/p1/posts/123')
+    // Canonical permalink from Graph, not a string-constructed /{page}/posts/{id}.
+    expect(result.publishedRef.externalUrl).toBe('https://www.facebook.com/canonical-post')
+  })
+
+  it('falls back to the redirect-safe bare /{post_id} URL when the canonical lookup fails', async () => {
+    setupPublish()
+    // Make the permalink lookup fail; publish itself still succeeds.
+    mockedRequest.mockImplementation((_p, _o, _plat, path) => {
+      const p = String(path)
+      if (p.includes('permalink_url')) {
+        return Promise.resolve(new Response('nope', { status: 500 }))
+      }
+      return Promise.resolve(new Response(JSON.stringify({ id: 'feed_1', post_id: 'p1_123' })))
+    })
+    const result = await publishFacebookPost({
+      ctx: ctx(),
+      input: { format: 'LINK', link: 'https://example.com/p', pageId: 'p1' },
+      options,
+      payload: asPayload(payload),
+    })
+    // Bare /{post_id} redirects on both classic and new-experience Pages —
+    // never the /{page_id}/posts/{post_id} form, which 404s on the latter.
+    expect(result.publishedRef.externalUrl).toBe('https://www.facebook.com/123')
     const params = requestParams('/feed')
     expect(params.get('access_token')).toBeNull()
     expect(params.get('link')).toBe('https://example.com/p')
@@ -220,6 +254,10 @@ describe('publishFacebookPost — scheduling', () => {
     )
     expect(requestParams('/feed').get('published')).toBe('false')
     expect(result.publishedRef.meta?.scheduled).toBe(true)
+    expect(result.publishedRef.externalUrl).toBeUndefined()
+    expect(
+      mockedRequest.mock.calls.filter((call) => String(call[3]).includes('permalink_url')),
+    ).toHaveLength(0)
   })
 
   it('rejects a schedule less than 10 minutes out', async () => {
@@ -395,7 +433,7 @@ describe('deleteFacebookPost', () => {
     mockedRequest.mockResolvedValue(new Response('boom', { status: 500 }))
     await expect(
       deleteFacebookPost({ options, payload: asPayload(payload), publishedRef: ref() }),
-    ).rejects.toBeInstanceOf(ValidationError)
+    ).rejects.toBeInstanceOf(PlatformApiError)
   })
 })
 

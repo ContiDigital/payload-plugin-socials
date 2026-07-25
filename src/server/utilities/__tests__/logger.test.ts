@@ -115,6 +115,20 @@ describe('createPluginLogger', () => {
     expect(meta.items[1].ok).toBe(true)
   })
 
+  it('redacts bare provider token shapes under non-secret keys and in arrays', () => {
+    const logger = mockLogger()
+    createPluginLogger(asPayloadLogger(logger)).info('tokens', {
+      bareList: ['pina_ABCDEF123456', 'safe-value'],
+      detail: `connected with ya29.abcdEFGH1234 and EAA${'B'.repeat(30)}`,
+    })
+    const [meta] = logger.info.mock.calls[0]
+    const dump = JSON.stringify(meta)
+    expect(dump).not.toContain('pina_ABCDEF')
+    expect(dump).not.toContain('ya29.abcd')
+    expect(dump).not.toContain('EAABBB')
+    expect(dump).toContain('safe-value')
+  })
+
   it('redacts prefixed secret variants via the suffix rule', () => {
     const logger = mockLogger()
     createPluginLogger(asPayloadLogger(logger)).info('tokens', {

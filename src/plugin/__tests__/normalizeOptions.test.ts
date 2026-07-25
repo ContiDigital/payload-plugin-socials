@@ -43,11 +43,21 @@ describe('normalizePluginOptions — required-field validation', () => {
 })
 
 describe('normalizePluginOptions — disabled bypass', () => {
-  it('returns a valid stub without any credentials', () => {
-    const result = normalizePluginOptions({ disabled: true } as PayloadPluginSocialsConfig)
+  it('returns a valid stub without credentials while preserving schema-driving sources', () => {
+    const result = normalizePluginOptions({
+      disabled: true,
+      sources: base().sources,
+    } as PayloadPluginSocialsConfig)
     expect(result.disabled).toBe(true)
     expect(Buffer.isBuffer(result.encryptionKey)).toBe(true)
     expect(result.encryptionKey).toHaveLength(32)
+    expect(Object.keys(result.sources)).toEqual(['product'])
+  })
+
+  it('still requires source kinds because they shape the templates schema', () => {
+    expect(() =>
+      normalizePluginOptions({ disabled: true, sources: {} } as PayloadPluginSocialsConfig),
+    ).toThrow(/sources/)
   })
 })
 
@@ -275,6 +285,24 @@ describe('normalizePluginOptions — platform credential validation', () => {
     expect(n.platforms.pinterest.environment).toBe('sandbox')
     expect(n.platforms.pinterest.scopes).toEqual(['pins:read'])
     expect(Object.isFrozen(n.platforms.pinterest.scopes)).toBe(true)
+  })
+
+  it('rejects an unknown Pinterest environment instead of publishing to production', () => {
+    expect(() =>
+      normalizePluginOptions(
+        withOpts({
+          platforms: {
+            pinterest: {
+              clientId: 'id',
+              clientSecret: 'secret',
+              enabled: true,
+              environment: 'sandobx' as never,
+              redirectUri: 'https://example.com/callback',
+            },
+          },
+        }),
+      ),
+    ).toThrow(/environment/)
   })
 
   it('throws when Instagram is enabled without either OAuth creds or a system token', () => {

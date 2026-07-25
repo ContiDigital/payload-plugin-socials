@@ -12,6 +12,25 @@ import { normalizePluginOptions } from './plugin/normalizeOptions.js'
 import { initPlatformRegistry } from './server/platforms/registry.js'
 import { validateSourceResolvers } from './server/sources/registry.js'
 
+const PLUGIN_APPLIED = Symbol.for('payload-plugin-socials.applied')
+
+const assertNotApplied = (config: Config): void => {
+  if ((config as Record<PropertyKey, unknown>)[PLUGIN_APPLIED] === true) {
+    throw new Error(
+      'payload-plugin-socials: only one plugin instance may be applied to a Payload config',
+    )
+  }
+}
+
+const markApplied = (config: Config): Config => {
+  Object.defineProperty(config, PLUGIN_APPLIED, {
+    configurable: true,
+    enumerable: false,
+    value: true,
+  })
+  return config
+}
+
 /**
  * `payload-plugin-socials` — multi-platform social publishing for Payload CMS.
  *
@@ -25,15 +44,27 @@ import { validateSourceResolvers } from './server/sources/registry.js'
  *   4. job task enhancements (register socialPostPublish + sweep + retry + insights + connection refresh)
  *   5. endpoint enhancements (REST surface incl. internal scheduler endpoints)
  *   6. admin enhancements (nav link, dashboard widget, custom config)
- *   7. scheduled-sync wiring (optional autoRun cron + startup notice)
+ *   7. scheduled-sync wiring (task schedules + operator startup notice)
+ *
+ * When `disabled`, only the schema-contributing steps (2 collections + 3 global)
+ * run so host migrations remain stable; all runtime wiring is skipped.
  */
 export const payloadPluginSocials =
   (incomingOptions: PayloadPluginSocialsConfig) =>
   (incomingConfig: Config): Config => {
+    assertNotApplied(incomingConfig)
     const options = normalizePluginOptions(incomingOptions)
 
     if (options.disabled) {
-      return incomingConfig
+      // Still register the plugin-owned collections and global so a host that
+      // runs `payload migrate:create` while the plugin is disabled (e.g. the
+      // encryption key is unavailable at build time) does not generate a
+      // migration that DROPs social-posts / social-templates / socials-connections
+      // and destroys audit history + encrypted tokens. All runtime wiring
+      // (endpoints, jobs, admin, scheduling) is skipped.
+      let config = applyCollectionEnhancements(incomingConfig, options, { schemaOnly: true })
+      config = applyGlobalEnhancements(config, options, { schemaOnly: true })
+      return markApplied(config)
     }
 
     // Eager initialization keeps hooks, jobs, and endpoints on one option-scoped registry.
@@ -46,7 +77,7 @@ export const payloadPluginSocials =
     config = applyEndpointEnhancements(config, options)
     config = applyAdminEnhancements(config, options)
     config = applyScheduledSync(config, options)
-    return config
+    return markApplied(config)
   }
 
 // ---------------------------------------------------------------------------

@@ -277,6 +277,15 @@ const normalizePinterest = (
       `${PLUGIN_SLUG}: platforms.pinterest requires clientId, clientSecret, and redirectUri when enabled`,
     )
   }
+  if (
+    config.environment !== undefined &&
+    config.environment !== 'production' &&
+    config.environment !== 'sandbox'
+  ) {
+    throw new Error(
+      `${PLUGIN_SLUG}: platforms.pinterest.environment must be "production" or "sandbox"`,
+    )
+  }
   return {
     allowedVideoHosts: Object.freeze(
       (config.allowedVideoHosts ?? []).map((host) => host.trim().toLowerCase()).filter(Boolean),
@@ -377,17 +386,18 @@ const normalizeGbp = (config: GbpPluginConfig | undefined): NormalizedGbpConfig 
 export const normalizePluginOptions = (
   options: PayloadPluginSocialsConfig,
 ): NormalizedPluginOptions => {
-  // Validate required fields up-front. Disabled path returns a stub so tests
-  // can build the plugin without supplying credentials.
+  if (!options.sources || Object.keys(options.sources).length === 0) {
+    throw new Error(`${PLUGIN_SLUG}: sources must be a non-empty object mapping kind → resolver`)
+  }
+  // Disabled mode bypasses secrets and runtime credentials, but schema-driving
+  // source kinds remain mandatory so toggling the plugin cannot mutate the
+  // social-templates sourceKind select.
   if (options.disabled) {
     return buildNormalizedOptions(options, { disabled: true })
   }
 
   if (typeof options.authorize !== 'function') {
     throw new Error(`${PLUGIN_SLUG}: authorize must be a function`)
-  }
-  if (!options.sources || Object.keys(options.sources).length === 0) {
-    throw new Error(`${PLUGIN_SLUG}: sources must be a non-empty object mapping kind → resolver`)
   }
   if (!options.platforms || Object.keys(options.platforms).length === 0) {
     throw new Error(`${PLUGIN_SLUG}: platforms must declare at least one entry`)

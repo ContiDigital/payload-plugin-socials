@@ -22,7 +22,6 @@ vi.mock('../../_meta/oauth.js', () => ({
 vi.mock('../insights.js', () => ({ getInstagramInsightsForRef: vi.fn() }))
 vi.mock('../publish.js', async (importActual) => ({
   ...(await importActual<typeof PublishModule>()),
-  deleteInstagramMedia: vi.fn(),
   publishInstagramMedia: vi.fn(),
 }))
 

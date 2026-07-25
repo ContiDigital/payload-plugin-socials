@@ -19,6 +19,7 @@ import {
   isSafeToRetryRequest,
   policyFetch,
 } from '../../utilities/requestPolicy.js'
+import { sleep } from '../../utilities/sleep.js'
 import { parsePinterestTokenResponseScopes } from './scopes.js'
 
 /**
@@ -228,8 +229,6 @@ export const getAccessToken = async (
     byKey.delete(key)
   }
 }
-
-const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
 
 const parseRetryAfter = (headerValue: null | string, fallbackSeconds = 5): number => {
   const numeric = Number(headerValue)

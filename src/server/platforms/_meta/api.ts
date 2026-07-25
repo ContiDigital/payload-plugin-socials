@@ -21,6 +21,7 @@ import {
   isSafeToRetryRequest,
   policyFetch,
 } from '../../utilities/requestPolicy.js'
+import { sleep } from '../../utilities/sleep.js'
 
 /**
  * Shared HTTP client for the Meta Graph API surface — used by both the
@@ -283,8 +284,6 @@ const computeAppsecretProof = (accessToken: string, appSecret: string): string =
 // ---------------------------------------------------------------------------
 // Request helper
 // ---------------------------------------------------------------------------
-
-const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
 
 const computeBackoffMs = (
   attempt: number,

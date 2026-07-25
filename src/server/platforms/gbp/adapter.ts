@@ -7,13 +7,11 @@ import type {
   PreviewResult,
   PublishArgs,
   PublishedRef,
-  SocialImageFormat,
   ValidationResult,
 } from '../../../types/index.js'
 
 import { GBP_SUMMARY_MAX_CHARS } from '../../../constants.js'
-import { PLATFORM_IMAGE_CONSTRAINTS } from '../../assets/imagePreflight.js'
-import { resolvePlatformImageUrl } from '../../assets/resolvePlatformImage.js'
+import { getImageFormatValidationIssue } from '../../assets/validateImageFormat.js'
 import { resolveConfiguredText } from '../../copy/resolveConfiguredCopy.js'
 import { getCredentials, recordConnectionError } from '../../services/connectionService.js'
 import { ValidationError } from '../../utilities/errors.js'
@@ -42,32 +40,6 @@ const CAPABILITIES: PlatformCapabilities = {
   serviceAccount: true,
   stories: false,
   video: false, // The v1 adapter deliberately supports photo media only.
-}
-
-/**
- * Check whether a declared format is disallowed for this platform.
- */
-const checkFormatIssue = (
-  format: SocialImageFormat | undefined,
-  options: NormalizedPluginOptions,
-): string | undefined => {
-  if (!format) {
-    return undefined
-  }
-  if (!options.assets.preflight) {
-    return undefined
-  }
-  const allowed = PLATFORM_IMAGE_CONSTRAINTS.gbp.formats as readonly string[]
-  if (allowed.includes(format)) {
-    return undefined
-  }
-  if (options.assets.autoConvert) {
-    return undefined
-  }
-  return (
-    `Image format "${format}" is not accepted by Google Business Profile (allowed: ${allowed.join(', ')}). ` +
-    `Configure a JPEG imageSize on your upload collection or enable assets.autoConvert.`
-  )
 }
 
 export const createGbpAdapter = (
@@ -207,7 +179,12 @@ export const createGbpAdapter = (
       // Image format pre-publish check.
       if (input?.imageUrl) {
         const imgMeta = ctx.images.find((img) => img.url === input.imageUrl)
-        const formatIssue = checkFormatIssue(imgMeta?.format, args.options)
+        const formatIssue = getImageFormatValidationIssue(
+          imgMeta?.format,
+          args.options,
+          'gbp',
+          'Google Business Profile',
+        )
         if (formatIssue) {
           issues.push({ field: 'imageUrl', message: formatIssue, severity: 'error' })
         }
@@ -231,10 +208,12 @@ export const createGbpAdapter = (
         throw new ValidationError(`GBP publish input invalid: ${errors}`)
       }
       try {
-        const resolvedInput = await resolveGbpImages(args)
+        // Pass the ORIGINAL input. Image conversion happens inside
+        // publishGbpLocalPost when building the API body, only after the
+        // idempotency key is derived — so autoConvert cannot change the key.
         const result = await publishGbpLocalPost({
           ctx: args.ctx,
-          input: resolvedInput,
+          input: args.input,
           options: args.options,
           payload: args.payload,
           req: args.req,
@@ -268,21 +247,3 @@ export const createGbpAdapter = (
  * Resolve image URL for the GBP publish input through the platform
  * image format safety layer.
  */
-const resolveGbpImages = async (args: PublishArgs<GbpPublishInput>): Promise<GbpPublishInput> => {
-  const { ctx, input, options, payload } = args
-  const resolved = { ...input }
-
-  if (input.imageUrl) {
-    const imgMeta = ctx.images.find((img) => img.url === input.imageUrl)
-    const result = await resolvePlatformImageUrl({
-      declaredFormat: imgMeta?.format,
-      imageUrl: input.imageUrl,
-      options,
-      payload,
-      platform: 'gbp',
-    })
-    resolved.imageUrl = result.url
-  }
-
-  return resolved
-}

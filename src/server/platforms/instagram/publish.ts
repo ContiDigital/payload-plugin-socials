@@ -1,5 +1,6 @@
 import type { Payload, PayloadRequest } from 'payload'
 
+import type { PostStatus } from '../../../constants.js'
 import type {
   NormalizedPluginOptions,
   PublishedRef,
@@ -21,6 +22,7 @@ import { persistPublicationAudit } from '../../services/publicationPersistence.j
 import { PlatformApiError, ValidationError } from '../../utilities/errors.js'
 import { sha256Hex } from '../../utilities/hash.js'
 import { resolvePublicationIdempotencyKey } from '../../utilities/publicationIdentity.js'
+import { sleep } from '../../utilities/sleep.js'
 import { metaJson } from '../_meta/api.js'
 import { buildDefaultInstagramCaption, countHashtags, countMentions } from './copy.js'
 
@@ -112,7 +114,7 @@ type SocialPostRow = {
   externalId?: null | string
   externalUrl?: null | string
   id: number | string
-  status: 'cancelled' | 'draft' | 'failed' | 'published' | 'publishing' | 'queued'
+  status: PostStatus
 }
 
 const buildIdempotencyKey = (
@@ -230,8 +232,6 @@ const buildStoriesContainerBody = (
   }
   return body
 }
-
-const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
 
 const pollContainerStatus = async (
   payload: Payload,
@@ -625,30 +625,6 @@ export const publishInstagramMedia = async (args: {
     postId: savedId,
     publishedRef,
   }
-}
-
-/**
- * Instagram does not expose a delete endpoint for published Business media
- * through its API. Calling DELETE /{ig-media-id} always fails with
- * OAuthException code 10, regardless of the token or permissions used.
- *
- * This function is kept as an export for consumers that import it by name, but
- * it no longer makes any network request. It immediately throws so callers
- * receive a clear, actionable message instead of a cryptic Meta API error.
- *
- * To reconcile a post that was removed directly in the Instagram app, use the
- * localOnly reconcile path: DELETE {basePath}/posts/:postId?localOnly=true
- */
-export const deleteInstagramMedia = (_args: {
-  options: NormalizedPluginOptions
-  payload: Payload
-  publishedRef: PublishedRef
-}): never => {
-  throw new ValidationError(
-    'Instagram does not support removing published posts through its API. ' +
-      'Delete the post in the Instagram app, then use mark-deleted to reconcile: ' +
-      'DELETE {basePath}/posts/:postId?localOnly=true',
-  )
 }
 
 // Surface the lifetime constant for the admin UI banner copy.

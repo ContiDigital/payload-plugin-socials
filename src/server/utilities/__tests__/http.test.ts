@@ -3,7 +3,7 @@ import type { PayloadRequest } from 'payload'
 import pino from 'pino'
 import { describe, expect, it, vi } from 'vitest'
 
-import { PluginError, RateLimitedError, ValidationError } from '../errors.js'
+import { PlatformApiError, PluginError, RateLimitedError, ValidationError } from '../errors.js'
 import {
   errorResponse,
   getRouteParam,
@@ -76,6 +76,44 @@ describe('errorResponse', () => {
     expect(res.status).toBe(500)
     expect((await res.json()).error).toBe('Internal server error')
     expect(error).toHaveBeenCalledTimes(1)
+  })
+
+  it('never serializes a provider raw body to the client', async () => {
+    const logError = vi.fn()
+    const req = fakeReq({ payload: { logger: { error: logError } } })
+    const providerError = new PlatformApiError({
+      message: 'Facebook post delete failed (502)',
+      platform: 'facebook',
+      raw: '{"access_token":"provider-secret","error":"diagnostic"}',
+      retryable: true,
+      statusCode: 502,
+      upstreamCode: 190,
+    })
+
+    const res = errorResponse(req, providerError)
+    const responseText = await res.text()
+
+    expect(res.status).toBe(502)
+    expect(responseText).toBe('{"error":"Internal server error"}')
+    expect(responseText).not.toContain('provider-secret')
+    expect(responseText).not.toContain('diagnostic')
+    expect(logError).toHaveBeenCalledTimes(1)
+    expect(JSON.stringify(logError.mock.calls[0])).not.toContain('provider-secret')
+  })
+
+  it('exposes a safe 4xx provider message without its raw response body', async () => {
+    const req = fakeReq({ payload: { logger: { error: vi.fn() } } })
+    const providerError = new PlatformApiError({
+      message: 'Pinterest pin delete failed (400)',
+      platform: 'pinterest',
+      raw: 'private provider diagnostic',
+      statusCode: 400,
+    })
+
+    const res = errorResponse(req, providerError)
+    expect(await res.json()).toEqual({
+      error: 'payload-plugin-socials: Pinterest pin delete failed (400)',
+    })
   })
 
   it('returns the original safe response when logging through real Pino', async () => {

@@ -59,10 +59,10 @@
   ],
   "scripts": {
     "build": "pnpm clean && pnpm copyfiles && pnpm build:types && pnpm build:swc",
-    "build:swc": "swc ./src -d ./dist --config-file .swcrc --strip-leading-paths --ignore \"**/*.test.ts\" --ignore \"**/*.d.scss.ts\" --ignore \"**/__tests__/**\" && rimraf --glob \"dist/**/*.scss.d.js\" \"dist/**/*.scss.d.js.map\" \"dist/**/*.scss.d.ts\"",
+    "build:swc": "swc ./src -d ./dist --config-file .swcrc --source-maps false --strip-leading-paths --ignore \"**/*.test.ts\" --ignore \"**/*.d.scss.ts\" --ignore \"**/__tests__/**\" && rimraf --glob \"dist/**/*.scss.d.js\" \"dist/**/*.scss.d.js.map\" \"dist/**/*.scss.d.ts\"",
     "build:types": "tsc -p tsconfig.build.json",
     "audit:prod": "pnpm audit --prod --audit-level high",
-    "clean": "rimraf {dist,*.tsbuildinfo}",
+    "clean": "rimraf dist tsconfig.tsbuildinfo tsconfig.build.tsbuildinfo",
     "copyfiles": "copyfiles -u 1 \"src/**/*.{html,css,scss,ttf,woff,woff2,eot,svg,jpg,png,json,d.ts}\" \"src/**/*.d.scss.ts\" dist/",
     "dev": "next dev dev --turbo",
     "dev:e2e": "cross-env SOCIALS_E2E=true DATABASE_URI=file:./dev/e2e-database.db WATCHPACK_POLLING=true next dev dev --webpack",

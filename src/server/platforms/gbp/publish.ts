@@ -1,5 +1,6 @@
 import type { Payload, PayloadRequest } from 'payload'
 
+import type { PostStatus } from '../../../constants.js'
 import type {
   NormalizedPluginOptions,
   PublishedRef,
@@ -7,6 +8,7 @@ import type {
 } from '../../../types/index.js'
 
 import { GBP_SUMMARY_MAX_CHARS, SOCIAL_POSTS_SLUG } from '../../../constants.js'
+import { resolvePlatformImageUrl } from '../../assets/resolvePlatformImage.js'
 import { resolveConfiguredText } from '../../copy/resolveConfiguredCopy.js'
 import { persistPublicationAudit } from '../../services/publicationPersistence.js'
 import { PlatformApiError, ValidationError } from '../../utilities/errors.js'
@@ -110,7 +112,7 @@ type SocialPostRow = {
   externalId?: null | string
   externalUrl?: null | string
   id: number | string
-  status: 'cancelled' | 'draft' | 'failed' | 'published' | 'publishing' | 'queued'
+  status: PostStatus
 }
 
 const validateLocationResource = (name: string): { accountId: string; locationId: string } => {
@@ -287,7 +289,18 @@ export const publishGbpLocalPost = async (args: {
     topicType,
   }
   if (input.imageUrl) {
-    body.media = [{ mediaFormat: 'PHOTO', sourceUrl: input.imageUrl }]
+    // Resolve/convert the image URL HERE — after the idempotency key was
+    // derived from the ORIGINAL input.imageUrl (line above) — so autoConvert
+    // rewriting the URL cannot change the key. Mirrors the other adapters.
+    const imgMeta = ctx.images.find((img) => img.url === input.imageUrl)
+    const resolved = await resolvePlatformImageUrl({
+      declaredFormat: imgMeta?.format,
+      imageUrl: input.imageUrl,
+      options,
+      payload,
+      platform: 'gbp',
+    })
+    body.media = [{ mediaFormat: 'PHOTO', sourceUrl: resolved.url }]
   }
   if (topicType !== 'OFFER' && input.callToAction) {
     body.callToAction = input.callToAction
@@ -434,9 +447,14 @@ export const deleteGbpLocalPost = async (args: {
   )
 
   if (!response.ok && response.status !== 404) {
-    throw new ValidationError(
-      `GBP localPost delete failed: ${response.status} ${await response.text().catch(() => '')}`,
-    )
+    throw new PlatformApiError({
+      message: `GBP localPost delete failed (${response.status})`,
+      platform: 'gbp',
+      raw: await response.text().catch(() => ''),
+      retryable: response.status >= 500 || response.status === 429,
+      statusCode: response.status,
+      upstreamCode: response.status,
+    })
   }
 }
 
