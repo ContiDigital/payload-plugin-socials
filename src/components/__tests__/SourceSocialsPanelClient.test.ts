@@ -1,4 +1,16 @@
-import { describe, expect, it } from 'vitest'
+import React from 'react'
+import { renderToStaticMarkup } from 'react-dom/server'
+import { describe, expect, it, vi } from 'vitest'
+
+vi.mock('@payloadcms/ui', () => ({
+  Button: () => null,
+  toast: { error: vi.fn(), success: vi.fn() },
+  useConfig: vi.fn(() => {
+    throw new Error('useConfig must not run without sourceKind')
+  }),
+  useDocumentInfo: vi.fn(),
+  useListDrawer: vi.fn(),
+}))
 
 import type { SocialDraft, SocialDraftMedia } from '../../types/index.js'
 import type {
@@ -31,6 +43,20 @@ import {
   stripLeadingTitle,
   supportsMultipleMedia,
 } from '../socialComposerModel.js'
+import { SocialPublishPanelClient } from '../SourceSocialsPanelClient.js'
+
+describe('SocialPublishPanelClient', () => {
+  it('reports a missing sourceKind without fetching', () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch')
+
+    const html = renderToStaticMarkup(React.createElement(SocialPublishPanelClient, {}))
+
+    expect(html).toContain('Socials source is not configured.')
+    expect(html).toContain('sourceKind')
+    expect(fetchSpy).not.toHaveBeenCalled()
+    fetchSpy.mockRestore()
+  })
+})
 
 const draft: SocialDraft = {
   content: { body: 'Body', link: 'https://example.test/item', title: 'Title' },

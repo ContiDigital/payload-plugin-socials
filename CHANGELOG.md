@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [0.9.3] - 2026-07-23
 
+### Added
+
+- Opt-in, per-platform live lifecycle canaries exercise the real Pinterest, Facebook, and Instagram adapters. Pinterest and Facebook verify cleanup; Instagram requires a second residue opt-in and uses a self-expiring Story. The release runbook records preflight, canary evidence, tagging, npm bootstrap, and trusted-publishing ownership.
+
 ### Changed
 
 - **Scheduling now follows the operator-owned model.** The plugin no longer writes to your `jobs.autoRun` array. When `scheduling.autoRun` crons are set, the plugin attaches Payload task-level `schedule` entries to its sweep/insights/connection tasks; you run a Payload Jobs worker that handles schedules and drains the queue (or use the internal endpoints / worker helpers). The previous behavior registered `autoRun` entries that only drained the queue and never enqueued the periodic tasks, so insights-refresh, connection-refresh, and the sweep silently never ran under that mode.
@@ -13,6 +17,9 @@ All notable changes to this project are documented here. The format follows [Kee
 - The task queue is now configured as `scheduling.queue`, independently of native task crons. The former `scheduling.autoRun.queue` nesting has been removed.
 - A Payload config may contain only one plugin instance; applying a second now fails during config construction instead of creating first-wins/last-wins task registry behavior.
 - The standalone multi-channel composer is split from the source-record composer, and its publish success/error orchestration is covered in the three-browser Playwright suite.
+- Payload admin peers now require React and React DOM 19, matching the supported Payload 3 runtime.
+- Public copy guidance now documents the optional commerce-style metadata convention used by Pinterest defaults and the provider-conditional availability of GBP Alert posts.
+- npm provenance now comes from the steady-state trusted-publishing workflow rather than a package-level flag that prevents the one-time token bootstrap. The owner runbook reserves the package with a tagged, non-`latest` bootstrap prerelease before the real release workflow runs.
 
 ### Fixed
 
@@ -23,8 +30,15 @@ All notable changes to this project are documented here. The format follows [Kee
 - Pinterest rejects an unknown `environment` value rather than silently routing a typo to production.
 - Provider delete failures raise a sanitized platform error carrying the true upstream status instead of a 400 with the raw upstream body.
 - Log redaction also masks bare provider token shapes (`pina_`, `pinr_`, `ya29.`, `EAA…`) that appear outside secret-named keys.
+- Facebook insights use Meta's post media-view replacements instead of the impressions/reach/3-second-view metrics retired in June 2026. Facebook and Instagram now retry invalid-metric Graph code-100 failures per metric, preserve valid partial results, and record rejected names in `unavailableMetrics`; missing-object and permission-loss responses are rethrown instead of becoming empty snapshots.
 - Shared image-format validation and retry-delay helpers replace adapter-local duplicates; the unused standalone Instagram delete export is removed.
 - The clean script now removes `dist` and both TypeScript build-info files portably instead of relying on shell brace expansion, preventing stale build artifacts from entering a release.
+- Injected source composers no longer assume a `product` source kind. A missing or blank `sourceKind` now renders a configuration error before access or source requests can run.
+
+### Security
+
+- The optional `sharp` peer now requires `^0.35.0`, and the development image pipeline runs against `0.35.3`, excluding libvips builds affected by the 2026 inherited Sharp advisories.
+- Updated Next.js and pinned patched compatible transitive versions of PostCSS, fast-uri, brace-expansion, Mongoose, and Sharp. CI now audits the complete dependency graph at high severity instead of checking only published runtime dependencies; the sole incompatible dev-tooling-only brace-expansion advisory is explicitly documented in `audit-allowlist.json`.
 
 ### Notes
 
@@ -101,5 +115,5 @@ All notable changes to this project are documented here. The format follows [Kee
 [Unreleased]: https://github.com/ContiDigital/payload-plugin-socials/compare/v0.9.3...HEAD
 [0.9.3]: https://github.com/ContiDigital/payload-plugin-socials/compare/v0.9.2...v0.9.3
 [0.9.2]: https://github.com/ContiDigital/payload-plugin-socials/compare/v0.9.1...v0.9.2
-[0.9.1]: https://github.com/ContiDigital/payload-plugin-socials/compare/v0.9.0...v0.9.1
-[0.9.0]: https://github.com/ContiDigital/payload-plugin-socials/releases/tag/v0.9.0
+[0.9.1]: https://github.com/ContiDigital/payload-plugin-socials/compare/d41a1c7d0fb88346e6dfb0c10ea3480d768042e4...v0.9.1
+[0.9.0]: https://github.com/ContiDigital/payload-plugin-socials/commit/d41a1c7d0fb88346e6dfb0c10ea3480d768042e4

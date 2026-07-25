@@ -3,8 +3,8 @@
 import { toast } from '@payloadcms/ui'
 import React, { useEffect, useState } from 'react'
 
-import { SocialPublishPanelClient } from './ProductSocialsPanelClient.js'
 import { SocialsDashboardWidget } from './SocialsDashboardWidget.js'
+import { SocialPublishPanelClient } from './SourceSocialsPanelClient.js'
 import './SocialPublishPanelClient.scss'
 
 type Props = {

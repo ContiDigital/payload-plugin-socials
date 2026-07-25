@@ -43,10 +43,15 @@ import { StandaloneSocialComposer } from './StandaloneSocialComposer.js'
 import { useSocialsAccess } from './useSocialsAccess.js'
 import './SocialPublishPanelClient.scss'
 
-type Props = {
-  mode?: 'source' | 'standalone'
-  sourceKind?: string
-}
+type Props =
+  | {
+      mode: 'standalone'
+      sourceKind?: never
+    }
+  | {
+      mode?: 'source'
+      sourceKind?: string
+    }
 type Destination = ComposerDestination
 type HistoryRow = {
   externalUrl?: string
@@ -1258,12 +1263,22 @@ const SourceComposer: React.FC<{ sourceKind: string }> = ({ sourceKind }) => {
 // Entry point
 // ===========================================================================
 
-export const SocialPublishPanelClient: React.FC<Props> = ({
-  mode = 'source',
-  sourceKind = 'product',
-}) => {
+export const SocialPublishPanelClient: React.FC<Props> = ({ mode = 'source', sourceKind }) => {
   if (mode === 'standalone') {
     return <StandaloneSocialComposer />
   }
-  return <SourceComposer sourceKind={sourceKind} />
+
+  const normalizedSourceKind = sourceKind?.trim()
+  if (!normalizedSourceKind) {
+    return (
+      <section className="socials-composer" role="alert">
+        <strong>Socials source is not configured.</strong>
+        <p>
+          Set <code>{"clientProps: { sourceKind: '<your-kind>' }"}</code> on this admin component.
+        </p>
+      </section>
+    )
+  }
+
+  return <SourceComposer sourceKind={normalizedSourceKind} />
 }

@@ -645,7 +645,6 @@ export type SocialsAssetsConfig = {
 //     hit the plugin's internal HTTP endpoints (`/socials/internal/jobs/sweep`,
 //     `/socials/internal/jobs/run`, etc.) with the `scheduling.internalApiKey`.
 //     The endpoint performs the sweep + drain inline. No Payload worker needed.
-//     This is what Fine's Gallery runs in production.
 //
 //   - **Long-running worker process**: import
 //     `runQueuedSocialsJobs(payload, normalizedOptions)` and

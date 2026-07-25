@@ -28,6 +28,9 @@ pnpm release:check # format, lint, types, coverage, build, package checks, audit
 pnpm test:e2e      # Chromium, Firefox, WebKit, and axe accessibility
 ```
 
+If port 3000 is already reserved by another local project, select an isolated
+server with `PLAYWRIGHT_PORT=3100 pnpm test:e2e`.
+
 CI runs `release:check` on Node 22.12 and Node 24, boots the schema on
 PostgreSQL and MongoDB, and runs the browser suite on Node 24. The package smoke
 test installs the tarball with its declared peers, executes the root export,
@@ -35,8 +38,10 @@ and resolves the bundler-only client and RSC entrypoints.
 
 Read-only provider contract checks are opt-in because they require real approved
 credentials. Set `SOCIALS_LIVE_PLATFORM` to `pinterest`, `meta`, or `gbp`, set
-the matching `*_ACCESS_TOKEN`, and run `pnpm test:live`. These tests never
-publish or delete external content and never print token values.
+the matching `*_ACCESS_TOKEN`, and run `pnpm test:live`. Full lifecycle
+canaries are separately gated and excluded from every default and CI run. See
+[RELEASING.md](./RELEASING.md) for the exact variables, cleanup guarantees,
+evidence record, and release-owner sequence.
 
 The dev harness enables Instagram and Facebook when `META_APP_ID` and
 `META_APP_SECRET` are set, and enables GBP when `GBP_CLIENT_ID` and

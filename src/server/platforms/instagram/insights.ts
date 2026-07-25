@@ -3,6 +3,7 @@ import type { Payload } from 'payload'
 import type { NormalizedPluginOptions, PublishedRef } from '../../../types/index.js'
 
 import { metaJson } from '../_meta/api.js'
+import { fetchMetaInsightsWithFallback } from '../_meta/insights.js'
 
 export const INSTAGRAM_FEED_INSIGHT_METRICS = [
   'comments',
@@ -93,6 +94,7 @@ export type InstagramMediaInsightsSnapshot = {
   mediaProductType: InstagramMediaProductType
   metrics: Record<string, unknown>
   raw: InstagramInsightsResponse
+  unavailableMetrics: string[]
 }
 
 export const getInstagramInsightsForRef = async (args: {
@@ -112,15 +114,18 @@ export const getInstagramInsightsForRef = async (args: {
     mediaProductType = media.media_product_type ?? 'FEED'
   }
 
-  const params = new URLSearchParams({
-    metric: (args.metrics ?? metricsFor(mediaProductType)).join(','),
+  const { raw, unavailableMetrics } = await fetchMetaInsightsWithFallback<InstagramInsight>({
+    fetch: (metrics) => {
+      const params = new URLSearchParams({ metric: metrics.join(',') })
+      return metaJson<InstagramInsightsResponse>(
+        args.payload,
+        args.options,
+        'instagram',
+        `/${encodeURIComponent(args.publishedRef.externalId)}/insights?${params.toString()}`,
+      )
+    },
+    metrics: args.metrics ?? metricsFor(mediaProductType),
   })
-  const raw = await metaJson<InstagramInsightsResponse>(
-    args.payload,
-    args.options,
-    'instagram',
-    `/${encodeURIComponent(args.publishedRef.externalId)}/insights?${params.toString()}`,
-  )
 
   return {
     fetchedAt: new Date().toISOString(),
@@ -128,5 +133,6 @@ export const getInstagramInsightsForRef = async (args: {
     mediaProductType,
     metrics: summarize(raw.data ?? []),
     raw,
+    unavailableMetrics,
   }
 }

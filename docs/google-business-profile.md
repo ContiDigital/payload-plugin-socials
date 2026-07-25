@@ -98,7 +98,10 @@ required fields:
 - `EVENT`: adds an event with a title and a start and end schedule.
 - `OFFER`: adds an event and an offer block. An offer cannot include a call to
   action.
-- `ALERT`: adds an alert type and cannot carry media.
+- `ALERT`: provider-conditional and currently limited by Google to the
+  `COVID_19` subtype. Google may disable creation outside sanctioned periods;
+  such requests can be rejected even when their shape is valid. Alerts cannot
+  carry media.
 
 ## Gotchas
 

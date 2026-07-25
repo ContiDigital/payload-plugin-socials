@@ -127,13 +127,13 @@ describe('pinterest adapter — isConnected', () => {
 
   it('reports connected with account metadata when a token exists', async () => {
     vi.mocked(getCredentials).mockResolvedValue({
-      accountLabel: 'Fine Gallery',
+      accountLabel: 'Example Gallery',
       refreshToken: 'pinr_x',
       scopes: ['pins:write'],
     } as never)
     const state = await adapter.isConnected({ options, payload })
     expect(state.connected).toBe(true)
-    expect(state.accountLabel).toBe('Fine Gallery')
+    expect(state.accountLabel).toBe('Example Gallery')
     expect(state.scopes).toEqual(['pins:write'])
   })
 })
@@ -217,7 +217,7 @@ describe('pinterest adapter — delete + insights + exchange', () => {
   it('assembles exchangeCallback from the token exchange + stored credentials', async () => {
     vi.mocked(exchangeCodeForTokens).mockResolvedValue({
       accountId: 'acc1',
-      accountLabel: 'Fine',
+      accountLabel: 'Example',
       scopes: ['pins:write'],
     } as never)
     vi.mocked(getCredentials).mockResolvedValue({ accessToken: 'AT', refreshToken: 'RT' } as never)
@@ -230,7 +230,7 @@ describe('pinterest adapter — delete + insights + exchange', () => {
     expect(result).toMatchObject({
       accessToken: 'AT',
       accountId: 'acc1',
-      accountLabel: 'Fine',
+      accountLabel: 'Example',
       refreshToken: 'RT',
       scopes: ['pins:write'],
     })
