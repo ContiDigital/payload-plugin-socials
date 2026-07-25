@@ -4,6 +4,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { NormalizedPluginOptions, PublishedRef } from '../../../../types/index.js'
 
+import { PlatformApiError } from '../../../utilities/errors.js'
+
 vi.mock('../../_meta/api.js', () => ({ metaJson: vi.fn() }))
 
 import { metaJson } from '../../_meta/api.js'
@@ -16,6 +18,14 @@ import {
 
 const options = {} as NormalizedPluginOptions
 const payload = {} as Payload
+
+const unavailableMetricError = (): PlatformApiError =>
+  new PlatformApiError({
+    message: 'Invalid insights metric',
+    platform: 'instagram',
+    statusCode: 400,
+    upstreamCode: 100,
+  })
 
 beforeEach(() => {
   vi.clearAllMocks()
@@ -76,5 +86,23 @@ describe('getInstagramInsightsForRef', () => {
     expect(decodeURIComponent(String(vi.mocked(metaJson).mock.calls[0]?.[3]))).toContain(
       'metric=reach',
     )
+  })
+
+  it('degrades code-100 metric failures to a partial snapshot', async () => {
+    vi.mocked(metaJson)
+      .mockRejectedValueOnce(unavailableMetricError())
+      .mockResolvedValueOnce({ data: [{ name: 'views', total_value: { value: 20 } }] })
+      .mockRejectedValueOnce(unavailableMetricError())
+
+    const result = await getInstagramInsightsForRef({
+      metrics: ['views', 'reach'],
+      options,
+      payload,
+      publishedRef: ref('IMAGE'),
+    })
+
+    expect(result.metrics).toEqual({ views: 20 })
+    expect(result.unavailableMetrics).toEqual(['reach'])
+    expect(metaJson).toHaveBeenCalledTimes(3)
   })
 })

@@ -4,14 +4,13 @@ import type { NormalizedPluginOptions, PublishedRef } from '../../../types/index
 
 import { ValidationError } from '../../utilities/errors.js'
 import { metaJson } from '../_meta/api.js'
+import { fetchMetaInsightsWithFallback } from '../_meta/insights.js'
 import { getPageAccessToken } from './pages.js'
 
 export const FACEBOOK_POST_INSIGHT_METRICS = [
-  'post_impressions',
-  'post_impressions_unique',
-  'post_engaged_users',
+  'post_media_view',
+  'post_total_media_view_unique',
   'post_clicks',
-  'post_video_views',
   'post_reactions_by_type_total',
 ] as const
 
@@ -57,6 +56,7 @@ export type FacebookPostInsightsSnapshot = {
   pageId: string
   postId: string
   raw: FacebookInsightsResponse
+  unavailableMetrics: string[]
 }
 
 export const getFacebookInsightsForRef = async (args: {
@@ -67,18 +67,23 @@ export const getFacebookInsightsForRef = async (args: {
 }): Promise<FacebookPostInsightsSnapshot> => {
   const pageId = resolvePageId(args.publishedRef)
   const pageAccessToken = await getPageAccessToken(args.payload, args.options, pageId)
-  const params = new URLSearchParams({
-    metric: (args.metrics ?? FACEBOOK_POST_INSIGHT_METRICS).join(','),
-    period: 'lifetime',
+  const { raw, unavailableMetrics } = await fetchMetaInsightsWithFallback<FacebookInsight>({
+    fetch: (metrics) => {
+      const params = new URLSearchParams({
+        metric: metrics.join(','),
+        period: 'lifetime',
+      })
+      return metaJson<FacebookInsightsResponse>(
+        args.payload,
+        args.options,
+        'facebook',
+        `/${encodeURIComponent(args.publishedRef.externalId)}/insights?${params.toString()}`,
+        undefined,
+        { accessToken: pageAccessToken },
+      )
+    },
+    metrics: args.metrics ?? FACEBOOK_POST_INSIGHT_METRICS,
   })
-  const raw = await metaJson<FacebookInsightsResponse>(
-    args.payload,
-    args.options,
-    'facebook',
-    `/${encodeURIComponent(args.publishedRef.externalId)}/insights?${params.toString()}`,
-    undefined,
-    { accessToken: pageAccessToken },
-  )
 
   return {
     fetchedAt: new Date().toISOString(),
@@ -86,5 +91,6 @@ export const getFacebookInsightsForRef = async (args: {
     pageId,
     postId: args.publishedRef.externalId,
     raw,
+    unavailableMetrics,
   }
 }

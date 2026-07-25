@@ -116,6 +116,24 @@ reconciliation job confirms when Facebook reports it published and only then
 sets `publishedAt`. Plugin-level `scheduledAt` remains queued until its Payload
 job executes.
 
+## Insights metrics
+
+Meta retired the legacy Page/Post impressions, reach, and 3-second video-view
+metric families for every Graph API version on June 15, 2026. The plugin now
+requests the documented post-level replacements and surviving engagement
+metrics:
+
+- `post_media_view`
+- `post_total_media_view_unique`
+- `post_clicks`
+- `post_reactions_by_type_total`
+
+The adapter attempts the set in one request. If Meta returns Graph error code
+100 for an unavailable or account-incompatible metric, it retries each metric
+individually and returns the valid subset. The insights snapshot records any
+rejected names in `unavailableMetrics`; unavailable metrics are absent from the
+backward-compatible `metrics` record.
+
 ## Gotchas
 
 - **Public URLs.** Meta fetches photo and video URLs server-side, so they must

@@ -199,6 +199,14 @@ row is soft-deleted locally and the list refreshes.
 A row marked deleted this way republishes in place on the next publish, exactly
 like any other `deleted` row.
 
+## Insights metrics
+
+The Instagram adapter uses the current `views` metric family rather than the
+deprecated `impressions` metric. Metric availability still varies by media
+product type and account. If a combined insights request returns Graph error
+code 100, the adapter retries per metric and returns the valid subset while
+recording rejected names in `unavailableMetrics`.
+
 ## Gotchas
 
 - **Public, US-ASCII URLs.** Meta fetches `image_url` and `video_url`
