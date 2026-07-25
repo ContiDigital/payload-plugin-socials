@@ -8,10 +8,37 @@ import {
   SOCIAL_POST_PUBLISH_TASK_SLUG,
   SOCIAL_POST_RETRY_TASK_SLUG,
   SOCIAL_POST_SWEEP_TASK_SLUG,
-  SOCIALS_QUEUE_NAME,
 } from '../constants.js'
 import { setSocialsQueueName } from './jobQueue.js'
 import { ALL_TASK_BUILDERS, setPluginOptionsForTasks } from './jobTaskDefinitions.js'
+
+/**
+ * Resolve the Payload task `schedule` for a periodic task from the host's
+ * `scheduling.autoRun` crons. Returns `[{ cron, queue }]` when a cron is
+ * configured for this task slug, else `undefined`. This is the correct
+ * Payload-native enqueue mechanism — unlike a `jobs.autoRun` entry, which only
+ * drains the queue and never enqueues the task. The host must run a Jobs worker
+ * that handles schedules; the plugin never writes to `config.jobs.autoRun`.
+ */
+const scheduleForTaskSlug = (
+  slug: string,
+  options: NormalizedPluginOptions,
+): Array<{ cron: string; queue: string }> | undefined => {
+  const auto = options.scheduling.autoRun
+  if (!auto) {
+    return undefined
+  }
+  const queue = options.scheduling.queue
+  const cron =
+    slug === SOCIAL_POST_SWEEP_TASK_SLUG
+      ? auto.cron
+      : slug === SOCIAL_INSIGHTS_REFRESH_TASK_SLUG
+        ? auto.insightsRefreshCron
+        : slug === SOCIAL_CONNECTION_REFRESH_TASK_SLUG
+          ? auto.connectionRefreshCron
+          : undefined
+  return cron ? [{ cron, queue }] : undefined
+}
 
 const TASK_SLUGS_OWNED_BY_PLUGIN = [
   SOCIAL_POST_PUBLISH_TASK_SLUG,
@@ -65,7 +92,7 @@ export const applyJobEnhancements = (config: Config, options: NormalizedPluginOp
   const previousOnInit = config.onInit
   config.onInit = async (payload) => {
     setPluginOptionsForTasks(payload, options)
-    setSocialsQueueName(payload, options.scheduling.autoRun?.queue ?? SOCIALS_QUEUE_NAME)
+    setSocialsQueueName(payload, options.scheduling.queue)
     if (previousOnInit) {
       await previousOnInit(payload)
     }
@@ -82,7 +109,13 @@ export const applyJobEnhancements = (config: Config, options: NormalizedPluginOp
   }
 
   for (const builder of ALL_TASK_BUILDERS) {
-    const taskConfig = builder()
+    const taskConfig = builder() as { schedule?: unknown; slug: string }
+    // Attach the Payload-native task `schedule` for periodic tasks when the
+    // host opted into native scheduling via `scheduling.autoRun` crons.
+    const schedule = scheduleForTaskSlug(taskConfig.slug, options)
+    if (schedule) {
+      taskConfig.schedule = schedule
+    }
     if (!findTaskBySlug(config, taskConfig.slug)) {
       tasks.push(taskConfig as never)
     }

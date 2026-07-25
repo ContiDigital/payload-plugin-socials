@@ -81,6 +81,7 @@ describe('normalizePluginOptions — defaults', () => {
     expect(n.scheduling.drainBatchSize).toBe(100)
     expect(n.scheduling.connectionRefreshWindowSeconds).toBe(86_400)
     expect(n.scheduling.insightsRefreshWindowSeconds).toBe(30 * 86_400)
+    expect(n.scheduling.queue).toBe('socials')
     expect(n.scheduling.autoRun).toBeUndefined()
   })
 
@@ -142,9 +143,28 @@ describe('normalizePluginOptions — primitive normalizers', () => {
     expect(n.rateLimit.jitterFactor).toBe(1)
   })
 
-  it('registers an autoRun entry only when a cron is supplied, defaulting the queue', () => {
+  it('registers the autoRun block when a cron is supplied', () => {
     const n = normalizePluginOptions(withOpts({ scheduling: { autoRun: { cron: '7 * * * *' } } }))
-    expect(n.scheduling.autoRun).toMatchObject({ cron: '7 * * * *', queue: 'socials' })
+    expect(n.scheduling.autoRun).toEqual({ cron: '7 * * * *' })
+  })
+
+  it('registers the autoRun block when only a refresh cron is supplied (no sweep cron)', () => {
+    const n = normalizePluginOptions(
+      withOpts({ scheduling: { autoRun: { insightsRefreshCron: '0 9 * * *' } } }),
+    )
+    expect(n.scheduling.autoRun).toEqual({ insightsRefreshCron: '0 9 * * *' })
+    expect(n.scheduling.autoRun?.cron).toBeUndefined()
+  })
+
+  it('preserves a custom queue even when no native task cron is configured', () => {
+    const n = normalizePluginOptions(withOpts({ scheduling: { queue: '  operator-socials  ' } }))
+    expect(n.scheduling.queue).toBe('operator-socials')
+    expect(n.scheduling.autoRun).toBeUndefined()
+  })
+
+  it('falls back to the plugin queue for a blank queue name', () => {
+    const n = normalizePluginOptions(withOpts({ scheduling: { queue: '  ' } }))
+    expect(n.scheduling.queue).toBe('socials')
   })
 
   it('honours testMode', () => {

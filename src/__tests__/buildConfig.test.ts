@@ -23,11 +23,22 @@ beforeAll(async () => {
     collections: [{ slug: 'products', fields: [{ name: 'title', type: 'text' }] }],
     db: sqliteAdapter({ client: { url: ':memory:' } }),
     editor: lexicalEditor(),
+    jobs: {
+      autoRun: [{ cron: '13 * * * *', queue: 'host-jobs' }],
+    },
     plugins: [
       payloadPluginSocials({
         authorize: () => Promise.resolve(true),
         encryptionKey: HEX_KEY,
         platforms: { pinterest: { enabled: false } },
+        scheduling: {
+          autoRun: {
+            connectionRefreshCron: '0 3 * * *',
+            cron: '*/5 * * * *',
+            insightsRefreshCron: '0 9 * * *',
+          },
+          queue: 'operator-socials',
+        },
         sources: {
           product: ({ id }) =>
             Promise.resolve({
@@ -73,6 +84,23 @@ describe('buildConfig sanitization', () => {
     ]) {
       expect(slugs).toContain(slug)
     }
+  })
+
+  it('preserves host autoRun and attaches periodic task schedules to the configured queue', () => {
+    expect(config.jobs?.autoRun).toEqual([{ cron: '13 * * * *', queue: 'host-jobs' }])
+    const tasks = (config.jobs?.tasks ?? []) as Array<{
+      schedule?: Array<{ cron: string; queue: string }>
+      slug: string
+    }>
+    expect(tasks.find((task) => task.slug === 'socialPostSweep')?.schedule).toEqual([
+      { cron: '*/5 * * * *', queue: 'operator-socials' },
+    ])
+    expect(tasks.find((task) => task.slug === 'socialInsightsRefresh')?.schedule).toEqual([
+      { cron: '0 9 * * *', queue: 'operator-socials' },
+    ])
+    expect(tasks.find((task) => task.slug === 'socialConnectionRefresh')?.schedule).toEqual([
+      { cron: '0 3 * * *', queue: 'operator-socials' },
+    ])
   })
 
   it('mounts the plugin REST endpoints including the health probe and composer', () => {

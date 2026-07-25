@@ -55,14 +55,18 @@ const normalizeScheduling = (
       THIRTY_DAYS_SECONDS,
     ),
     internalApiKey: config?.internalApiKey?.trim() || undefined,
+    queue: normalizeNonEmptyString(config?.queue, SOCIALS_QUEUE_NAME),
     sweepBatchSize: normalizePositiveInteger(config?.sweepBatchSize, 100),
   }
-  if (config?.autoRun?.cron) {
+  // Register the autoRun block when ANY cron is present — each of the three
+  // crons attaches an independent Payload task `schedule`, so setting only the
+  // refresh crons (without a sweep cron) must not silently drop the whole block.
+  const auto = config?.autoRun
+  if (auto && (auto.cron || auto.insightsRefreshCron || auto.connectionRefreshCron)) {
     out.autoRun = {
-      connectionRefreshCron: config.autoRun.connectionRefreshCron,
-      cron: config.autoRun.cron,
-      insightsRefreshCron: config.autoRun.insightsRefreshCron,
-      queue: config.autoRun.queue ?? SOCIALS_QUEUE_NAME,
+      connectionRefreshCron: auto.connectionRefreshCron,
+      cron: auto.cron,
+      insightsRefreshCron: auto.insightsRefreshCron,
     }
   }
   return out
