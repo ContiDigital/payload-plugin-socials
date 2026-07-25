@@ -28,6 +28,9 @@ pnpm release:check # format, lint, types, coverage, build, package checks, audit
 pnpm test:e2e      # Chromium, Firefox, WebKit, and axe accessibility
 ```
 
+If port 3000 is already reserved by another local project, select an isolated
+server with `PLAYWRIGHT_PORT=3100 pnpm test:e2e`.
+
 CI runs `release:check` on Node 22.12 and Node 24, boots the schema on
 PostgreSQL and MongoDB, and runs the browser suite on Node 24. The package smoke
 test installs the tarball with its declared peers, executes the root export,

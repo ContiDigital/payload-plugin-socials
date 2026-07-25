@@ -7,6 +7,17 @@ loadEnv(path.resolve(process.cwd(), 'dev'))
 
 const artifactsDir =
   process.env.PLAYWRIGHT_ARTIFACTS_DIR || path.join(tmpdir(), 'payload-plugin-socials-playwright')
+const playwrightPortValue = process.env.PLAYWRIGHT_PORT ?? '3000'
+const playwrightPort = Number(playwrightPortValue)
+if (
+  !/^\d+$/.test(playwrightPortValue) ||
+  !Number.isInteger(playwrightPort) ||
+  playwrightPort < 1 ||
+  playwrightPort > 65_535
+) {
+  throw new Error('PLAYWRIGHT_PORT must be an integer between 1 and 65535')
+}
+const baseURL = `http://localhost:${playwrightPort}`
 
 /**
  * See https://playwright.dev/docs/test-configuration.
@@ -49,14 +60,15 @@ export default defineConfig({
   ],
   use: {
     /* Base URL to use in actions like `await page.goto('/')`. */
-    baseURL: 'http://localhost:3000',
+    baseURL,
 
     /* Collect trace when retrying the failed test. See https://playwright.dev/docs/trace-viewer */
     trace: 'on-first-retry',
   },
   webServer: {
     command: 'pnpm dev:e2e',
+    env: { PORT: String(playwrightPort) },
     reuseExistingServer: false,
-    url: 'http://localhost:3000/admin',
+    url: `${baseURL}/admin`,
   },
 })
