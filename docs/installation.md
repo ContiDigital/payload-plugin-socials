@@ -1,15 +1,22 @@
 # Installation and configuration
 
-A production-shaped walkthrough for wiring `payload-plugin-socials` into a Payload CMS 3 project: multiple source types, format-safe media, host-owned migrations, and scheduling through either Payload Jobs or external infrastructure.
+A production-shaped walkthrough for wiring `payload-plugin-socials` into a Payload CMS 3 project: arbitrary source types, format-safe media, host-owned migrations, and scheduling through either Payload Jobs or external infrastructure.
 
-The example collection fields are illustrative. Replace them with the generated types and fields from your host project.
+The guide uses two deliberately neutral placeholders:
+
+| Example                                         | What it demonstrates                                                    | Replace it with                                                               |
+| ----------------------------------------------- | ----------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| `content` collection / `entry` source kind      | Publishing one record with its own copy and media                       | Any independently publishable collection in your application                  |
+| `campaigns` collection / `campaign` source kind | Publishing an aggregate record with media gathered from related records | Any collection, landing page, bundle, series, or other parent-of-many concept |
+
+These collection names and fields are illustrative. You do not need to create them. Map your existing collections into the same `SocialSourceContext` contract.
 
 ## What a full installation looks like
 
 By the end of this guide you will have:
 
 1. The plugin installed and configured with an encryption key and access control.
-2. Source resolvers for several content types, including a category that pulls in its member products' images.
+2. Source resolvers for both a direct record and an aggregate record that gathers media from related content.
 3. A dedicated rendition collection so non-JPEG media publishes cleanly to Instagram and Facebook.
 4. The Socials tab on each source collection, plus the standalone composer.
 5. Pinterest connected via OAuth and Meta connected via a system-user token.
@@ -25,6 +32,8 @@ By the end of this guide you will have:
   - **Pinterest:** an app in the [Pinterest developer portal](https://developers.pinterest.com/) with a client ID and secret, and a registered redirect URI.
   - **Meta (Facebook + Instagram):** a Meta app, a Facebook Page, an Instagram Business account linked to that Page, and a Business Manager **system-user token** with `pages_show_list`, `pages_read_engagement`, `pages_manage_posts`, `instagram_basic`, `instagram_content_publish`, and `instagram_manage_insights`. See [docs/facebook.md](./facebook.md) and [docs/instagram.md](./instagram.md).
   - **Google Business Profile (optional):** a Google Cloud project with Basic API Access approved. See [docs/google-business-profile.md](./google-business-profile.md).
+
+> **Meta visibility gate:** New Meta apps start in **Development mode**. Meta can accept a Facebook or Instagram publish and return a real object ID while the resulting test post is visible only to people with a role on the app, such as its administrators, developers, and testers. Public publishing requires the app/use case to be **Live**, with the required permissions and access levels approved for the accounts it serves. Before switching to Live, remove test content you do not want exposed; Meta documents that Development-mode data can become visible to non-role users after the switch. See [Meta App Modes](https://developers.facebook.com/documentation/development/build-and-test/app-modes), [Facebook setup](./facebook.md#4-development-mode-is-not-public-publishing), and [Instagram setup](./instagram.md#4-development-mode-is-not-public-publishing).
 
 Generate your encryption and internal API keys now:
 
@@ -60,12 +69,7 @@ Create a dedicated module for the plugin so the resolvers have room to grow. Thi
 // src/plugins/socials.ts
 import type { PayloadPluginSocialsConfig } from 'payload-plugin-socials'
 import { payloadPluginSocials } from 'payload-plugin-socials'
-import {
-  productResolver,
-  categoryResolver,
-  blogResolver,
-  projectResolver,
-} from './socials-resolvers'
+import { campaignResolver, entryResolver } from './socials-resolvers'
 
 const base = () => (process.env.PUBLIC_URL ?? '').replace(/\/+$/, '')
 
@@ -88,19 +92,15 @@ export const socialsOptions = {
   },
 
   sources: {
-    product: productResolver,
-    category: categoryResolver,
-    blogPost: blogResolver,
-    project: projectResolver,
+    entry: entryResolver,
+    campaign: campaignResolver,
   },
 
   admin: {
     mode: 'both',
     injectInto: [
-      { collection: 'products', sourceKind: 'product' },
-      { collection: 'categories', sourceKind: 'category' },
-      { collection: 'posts', sourceKind: 'blogPost' },
-      { collection: 'projects', sourceKind: 'project' },
+      { collection: 'content', sourceKind: 'entry', label: 'Content' },
+      { collection: 'campaigns', sourceKind: 'campaign', label: 'Campaigns' },
     ],
   },
 
@@ -133,7 +133,7 @@ export const SocialsPlugin = payloadPluginSocials(socialsOptions)
 
 Add `SocialsPlugin` to your `plugins` array in `payload.config.ts`.
 
-> **Graceful disable.** If `SOCIALS_ENCRYPTION_KEY` may be absent in some environments (a migrate step before secrets are wired, for example), pass `disabled: !process.env.SOCIALS_ENCRYPTION_KEY`. The config still builds; the plugin just stays inactive.
+> **Graceful disable.** If `SOCIALS_ENCRYPTION_KEY` may be absent in some environments (a migrate step before secrets are wired, for example), pass `disabled: !process.env.SOCIALS_ENCRYPTION_KEY`. The plugin keeps its collections/global in the schema but hides them, denies access, removes hooks, and omits all endpoints, tasks, and admin surfaces. Keep the same `sources` keys and `authCollection` in enabled and disabled environments so generated migrations remain stable.
 
 ## Step 3: Write the source resolvers
 
@@ -180,93 +180,70 @@ const imagesFrom = (docs: unknown[], role = 'main'): SocialImage[] =>
   })
 ```
 
-### Products
+### A direct record source
 
-The bread-and-butter source. Note `metadata`: every key is reachable in templates as `{{ metadata.<key> }}` and appears in the template builder's field picker.
+The most common resolver publishes one document with its own copy, destination, media, and application-specific metadata. Every `metadata` key is reachable in templates as `{{ metadata.<key> }}` and appears in the template builder's field picker.
 
 ```ts
-export const productResolver: SourceContextResolver = async ({ payload, id }) => {
-  const p = await payload.findByID({ collection: 'products', id, depth: 1 })
+export const entryResolver: SourceContextResolver = async ({ payload, id }) => {
+  const entry = await payload.findByID({ collection: 'content', id, depth: 1 })
+
   return {
-    sourceId: String(p.id),
-    sourceKind: 'product',
-    baseTitle: p.title,
-    baseDescription: p.description ?? '',
-    link: `${base()}/products/${p.slug}`,
-    // If you have a watermark-free image set, list it first.
-    images: [...imagesFrom([p.mainImage]), ...imagesFrom(p.gallery ?? [], 'detail')],
-    videos: (p.videos ?? []).flatMap((value) => {
+    sourceId: String(entry.id),
+    sourceKind: 'entry',
+    baseTitle: entry.title,
+    baseDescription: entry.summary ?? '',
+    link: `${base()}/content/${entry.slug}`,
+    images: [...imagesFrom([entry.hero]), ...imagesFrom(entry.media ?? [], 'detail')],
+    videos: (entry.videos ?? []).flatMap((value) => {
       if (!value || typeof value !== 'object' || !('url' in value)) return []
       return typeof value.url === 'string' ? [{ url: value.url }] : []
     }),
-    metadata: { sku: p.sku, price: p.price, material: p.material },
+    metadata: {
+      audience: entry.audience,
+      locale: entry.locale,
+      tags: entry.tags,
+    },
   }
 }
 ```
 
-### Categories that publish their products' images
+### An aggregate source with related media
 
-This pattern publishes a collection page while offering imagery from its member records. The resolver adds one product image to the pool while keeping the outbound `link` on the category page.
+Resolvers can query any data available through Payload. This pattern publishes an aggregate record while offering its own cover plus one image from each related record. The outbound `link` still points to the aggregate page.
 
 ```ts
-export const categoryResolver: SourceContextResolver = async ({ payload, id }) => {
-  const category = await payload.findByID({ collection: 'categories', id, depth: 1 })
+export const campaignResolver: SourceContextResolver = async ({ payload, id }) => {
+  const campaign = await payload.findByID({ collection: 'campaigns', id, depth: 1 })
 
-  // Pull the products in this category, populated enough to read their images.
-  const members = await payload.find({
-    collection: 'products',
-    where: { categories: { in: [id] } },
+  // Replace this relationship field with the equivalent in your schema.
+  const related = await payload.find({
+    collection: 'content',
+    where: { campaigns: { in: [id] } },
     depth: 1,
-    limit: 24, // cap so the composer media grid stays usable
+    limit: 24,
   })
 
-  const memberImages = members.docs.flatMap((p) => imagesFrom([p.mainImage], 'product').slice(0, 1))
+  const relatedImages = related.docs.flatMap((entry) =>
+    imagesFrom([entry.hero], 'related').slice(0, 1),
+  )
 
   return {
-    sourceId: String(category.id),
-    sourceKind: 'category',
-    baseTitle: category.title,
-    baseDescription: category.description ?? '',
-    link: `${base()}/browse/${category.slug}`, // link stays on the category page
-    images: [...imagesFrom([category.image]), ...memberImages],
-    metadata: { productCount: members.totalDocs },
+    sourceId: String(campaign.id),
+    sourceKind: 'campaign',
+    baseTitle: campaign.title,
+    baseDescription: campaign.summary ?? '',
+    link: `${base()}/campaigns/${campaign.slug}`,
+    images: [...imagesFrom([campaign.cover]), ...relatedImages],
+    metadata: {
+      itemCount: related.totalDocs,
+      theme: campaign.theme,
+    },
   }
 }
 ```
 
-The operator opens a category, sees its own image plus a grid of its products' images, picks the one that sells best, and publishes. The same shape works for promotions, look-books, or any parent-of-many record.
-
-### Blog posts and projects
-
-Any collection can be a source. Repeat the pattern with the fields that matter for each.
-
-```ts
-export const blogResolver: SourceContextResolver = async ({ payload, id }) => {
-  const post = await payload.findByID({ collection: 'posts', id, depth: 1 })
-  return {
-    sourceId: String(post.id),
-    sourceKind: 'blogPost',
-    baseTitle: post.title,
-    baseDescription: post.excerpt ?? '',
-    link: `${base()}/blog/${post.slug}`,
-    images: imagesFrom([post.heroImage]),
-    metadata: { author: post.author?.name, published: post.publishedOn },
-  }
-}
-
-export const projectResolver: SourceContextResolver = async ({ payload, id }) => {
-  const project = await payload.findByID({ collection: 'projects', id, depth: 1 })
-  return {
-    sourceId: String(project.id),
-    sourceKind: 'project',
-    baseTitle: project.title,
-    baseDescription: project.summary ?? '',
-    link: `${base()}/work/${project.slug}`,
-    images: imagesFrom([project.hero, ...(project.gallery ?? [])]),
-    metadata: { location: project.location, completedAt: project.date },
-  }
-}
-```
+The operator opens a campaign, sees its own cover plus a bounded media pool from related records, chooses the strongest asset, and publishes without changing the destination URL. The same resolver shape works for any direct, aggregate, or computed source. Register additional source kinds by adding another resolver and `admin.injectInto` entry; the plugin itself has no closed list of source types.
 
 ### Resolver rules that matter in production
 
@@ -297,7 +274,7 @@ export const SocialRenditions: CollectionConfig = {
 
 Add it to your `collections` array, and register it with your storage adapter exactly like your main media collection so its URLs are public. If your media collection uses `@payloadcms/storage-s3`, add `social-renditions` to the same `collections` map with its own prefix.
 
-> **Why a separate collection.** Pointing `renditionCollection` at a media collection that converts uploads to WebP would silently convert the plugin's JPEG right back, defeating the purpose. A dedicated, format-free collection is the fix.
+> **Why a separate collection.** Pointing `renditionCollection` at a media collection that converts uploads to WebP would silently convert the plugin's JPEG right back, defeating the purpose. A dedicated, format-free collection is the solution.
 
 ## Step 5: Generate types, import map, and migration
 
@@ -312,6 +289,29 @@ pnpm payload migrate
 - **Inspect the migration** before applying. It adds the `social-posts` and `social-templates` tables and the `socials-connections` global. The plugin never writes migrations itself; you own them.
 
 ## Step 6: Connect the platforms
+
+### Meta: Development mode is not public publishing
+
+Meta's [App Modes documentation](https://developers.facebook.com/documentation/development/build-and-test/app-modes) distinguishes API testing from public distribution:
+
+| Meta app state                               | What a successful publish proves                                                          | Expected visibility                                                                      |
+| -------------------------------------------- | ----------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| **Development**                              | The token, asset assignment, payload, and Graph API transport worked for an app-role user | Test content is limited to app administrators, developers, testers, and other role users |
+| **Live** with the required permission access | The integration is eligible to serve the intended accounts                                | Content can be validated from an ordinary, non-role account                              |
+
+A returned Page post ID, Instagram container ID, or `media_publish` ID is therefore not proof that the public can see the content.
+
+Before production:
+
+1. Complete the App Review, Business Verification, and permission-access work shown for your app's current use case.
+2. Remove Development-mode canaries you do not want to become public. For Instagram, remove them in the Instagram app because this integration has no upstream delete capability.
+3. Switch the app/use case to **Live** in the Meta App Dashboard.
+4. Revalidate the token, its granular asset assignments, and the required permissions.
+5. Publish a fresh canary and verify its canonical URL while logged out or from an account with no role on the app, Meta Business, Page, or Instagram account.
+
+See the platform-specific [Facebook](./facebook.md#4-development-mode-is-not-public-publishing) and [Instagram](./instagram.md#4-development-mode-is-not-public-publishing) checklists.
+
+### Connect and test
 
 1. Start the app and open `/admin/socials`.
 2. On the **Connections** tab:
@@ -336,44 +336,53 @@ Header: X-Socials-API-Key: <SOCIALS_INTERNAL_API_KEY>
 
 This is the production pattern: a scheduled event invokes a small function that calls the sweep endpoint. The example is AWS EventBridge plus a Lambda, but the shape is identical for Vercel Cron, a GitHub Actions schedule, Google Cloud Scheduler, or a plain crontab: **on a timer, POST the endpoint with the API key header.**
 
-The function:
+The Lambda handler is plain Node.js and has no framework dependency:
 
-```ts
-// A tiny handler that pings the sweep endpoint. Deploy it however you deploy functions.
+```js
+// lambda/socials-sweep.mjs
 export const handler = async () => {
-  const res = await fetch(`${process.env.PUBLIC_URL}/api/socials/internal/jobs/sweep`, {
+  const publicUrl = process.env.PUBLIC_URL?.replace(/\/+$/, '')
+  const apiKey = process.env.SOCIALS_INTERNAL_API_KEY
+
+  if (!publicUrl || !apiKey) {
+    throw new Error('PUBLIC_URL and SOCIALS_INTERNAL_API_KEY are required')
+  }
+
+  const response = await fetch(`${publicUrl}/api/socials/internal/jobs/sweep`, {
     method: 'POST',
-    headers: { 'x-socials-api-key': process.env.SOCIALS_INTERNAL_API_KEY! },
+    headers: { 'x-socials-api-key': apiKey },
   })
-  if (!res.ok) throw new Error(`Socials sweep failed: ${res.status} ${await res.text()}`)
+
+  if (!response.ok) {
+    throw new Error(`Socials sweep failed: ${response.status} ${await response.text()}`)
+  }
+
   return { statusCode: 200 }
 }
 ```
 
-Wiring it on AWS with SST (Terraform / CDK / Pulumi follow the same three resources: a function, a schedule rule, a target):
+Assuming your existing Terraform creates the Lambda as `aws_lambda_function.socials_sweep`, only the schedule wiring is plugin-specific:
 
-```ts
-const sweep = new sst.aws.Function('SocialsSweep', {
-  handler: 'src/functions/socials-sweep.handler',
-  environment: {
-    PUBLIC_URL: process.env.PUBLIC_URL!,
-    SOCIALS_INTERNAL_API_KEY: process.env.SOCIALS_INTERNAL_API_KEY!,
-  },
-})
+```hcl
+resource "aws_cloudwatch_event_rule" "socials_sweep" {
+  schedule_expression = "rate(5 minutes)"
+}
 
-const rule = new aws.cloudwatch.EventRule('SocialsSweepSchedule', {
-  scheduleExpression: 'rate(5 minutes)',
-})
+resource "aws_lambda_permission" "socials_sweep" {
+  statement_id  = "AllowEventBridgeInvoke"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.socials_sweep.function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.socials_sweep.arn
+}
 
-new aws.lambda.Permission('SocialsSweepPermission', {
-  action: 'lambda:InvokeFunction',
-  function: sweep.arn,
-  principal: 'events.amazonaws.com',
-  sourceArn: rule.arn,
-})
-
-new aws.cloudwatch.EventTarget('SocialsSweepTarget', { rule: rule.name, arn: sweep.arn })
+resource "aws_cloudwatch_event_target" "socials_sweep" {
+  arn  = aws_lambda_function.socials_sweep.arn
+  rule = aws_cloudwatch_event_rule.socials_sweep.name
+}
 ```
+
+If the function is declared in another module, substitute that module's Lambda name and ARN outputs.
 
 The equivalent as a plain crontab entry on any box that can reach your site:
 
@@ -385,18 +394,34 @@ The sweep is idempotent, so an overlapping fire cannot double-publish. Publish l
 
 ### Mode B: Native Payload Jobs
 
-If your app runs Payload's job worker and does not disable `autoRun`, let the plugin schedule itself:
+Setting `scheduling.autoRun` crons attaches Payload task-level `schedule` entries to the plugin's sweep/insights/connection tasks. **You still run the worker** — the plugin never writes to your `jobs.autoRun`.
 
 ```ts
+// Plugin options:
 scheduling: {
   internalApiKey: process.env.SOCIALS_INTERNAL_API_KEY!,
+  queue: 'operator-socials',
   autoRun: {
-    cron: '*/5 * * * *',                 // the sweep
+    cron: '*/5 * * * *',                 // the sweep (optional if you drive it via the endpoints)
     insightsRefreshCron: '0 * * * *',    // optional: pull engagement hourly
     connectionRefreshCron: '0 3 * * *',  // optional: refresh tokens nightly
   },
 },
 ```
+
+Then configure the host-owned Payload Jobs worker on the same queue:
+
+```ts
+export default buildConfig({
+  jobs: {
+    autoRun: [{ cron: '* * * * *', queue: 'operator-socials' }],
+  },
+  plugins: [SocialsPlugin],
+  // ...
+})
+```
+
+The host `jobs.autoRun` entry runs the worker; the plugin's task-level schedules enqueue the periodic sweep/insights/connection tasks. Alternatively, call `payload.jobs.handleSchedules()` and `payload.jobs.run()` from your own trigger. Without a worker that handles schedules and drains the selected queue, the configured task crons do nothing.
 
 ### Mode C: Worker loop
 
@@ -425,16 +450,19 @@ Scheduling from the composer is safe regardless of mode: a past or near-past tim
 
 ## Step 8: Templates (optional, recommended)
 
-Create reusable copy templates in the **Social Templates** collection. Each is bound to a source kind, so a product template only appears when composing from products. Build copy with the field picker (scoped to that collection's real fields, discovered from a sample record) and a live preview, or toggle raw mode to write `{{ }}` strings. Mark one "default for this collection" and it auto-applies.
+Create reusable copy templates in the **Social Templates** collection. Each is bound to a source kind, so an `entry` template only appears when composing from the collection mapped to `entry`. Build copy with the field picker (scoped to that collection's real fields, discovered from a sample record) and a live preview, or toggle raw mode to write `{{ }}` strings. Mark one "default for this collection" and it auto-applies.
 
 Config `transformations` (in the plugin options) are the code-level default; templates layer on top. Precedence, most specific first: a chosen template, then a default template for the kind, then `transformations`, then the built-in copy builders.
 
 ```ts
 // In the plugin config: operator-set defaults per source kind.
 transformations: {
-  product: {
-    pinterestTitle: '{{ title }} | {{ metadata.material }}',
+  entry: {
+    pinterestTitle: '{{ title }} | {{ metadata.audience | default:Featured }}',
     instagramCaption: '{{ title }}\n\n{{ description | truncate:2000 }}',
+  },
+  campaign: {
+    instagramCaption: '{{ title }}\n\n{{ description }}\n\n{{ metadata.itemCount }} highlights',
   },
   '*': { facebookMessage: '{{ title }}\n\n{{ description | truncate:400 }}' },
 },
@@ -453,7 +481,9 @@ transformations: {
 ## Production checklist
 
 - [ ] `SOCIALS_ENCRYPTION_KEY` (32 bytes) set in every environment, stable per environment.
+- [ ] Meta app/use case is **Live**, not Development; required permission access and review are complete.
 - [ ] Meta token validated in the Access Token Debugger; assigned Pages, permissions, and actual expiry recorded in operations documentation.
+- [ ] Facebook and Instagram canaries are visible from a logged-out or non-role account, not only from an app administrator/tester.
 - [ ] Pinterest redirect URI registered; a publisher completed the one-time Connect on production.
 - [ ] `assets.autoConvert` on with a dedicated, format-free rendition collection (if your media is not JPEG).
 - [ ] Rendition and media URLs publicly fetchable from outside your network.
@@ -468,9 +498,10 @@ transformations: {
 - **The Socials tab or template builder is blank.** Stale import map. Run `pnpm payload generate:importmap` and rebuild.
 - **A publish fails with a format error.** The image is a format the platform rejects (commonly WebP on Instagram). Enable `assets.autoConvert` with a rendition collection (Step 4), or serve JPEG.
 - **A publish fails fetching the image.** The URL is not publicly reachable. Check for localhost, expiring signed URLs, or IP allowlists.
+- **Meta returns a post/media ID, but ordinary users cannot see it.** The app is usually still in Development mode or lacks the required Live permission access. Check App Mode, App Review/access levels, token scopes, and granular asset assignments, then repeat the canary from a non-role account.
 - **An extensionless CDN image fails preflight.** Extensions are not required; the plugin checks file-signature bytes. A failure means the signature was unreadable or unrecognized and is intentionally fail-closed while preflight is enabled.
 - **A private media origin is rejected.** Prefer a public CDN. If the origin is host-controlled and intentionally private, add its exact DNS hostname to `assets.trustedRemoteHosts`; this explicitly bypasses private-address rejection for that host.
 - **A post is `unknown`.** The provider may have accepted the write even though the response was lost, or the provider returned an ID but final audit persistence failed. The latter path captures that ID whenever the database accepts the safety-fence update. Verify the destination first; then use `POST /api/socials/posts/{id}/resolve` with `outcome: 'published'` plus the provider ID, or `outcome: 'not-published'`. Do not retry before reconciling.
 - **Pinterest connects but publishing 403s.** The account may lack a required scope, or the app may be in Trial Access. See [docs/pinterest.md](./pinterest.md).
 - **Scheduled posts never publish.** No sweep trigger is firing. Confirm your scheduler is POSTing `/api/socials/internal/jobs/sweep` (Step 7).
-- **A category composer shows no product images.** The `where` clause in the category resolver does not match your products-to-categories relationship. Adjust the field name to your schema.
+- **An aggregate composer shows no related images.** The `where` clause in the aggregate resolver does not match your relationship field. Adjust it to your schema and ensure the upload relationships are populated at the resolver's selected depth.
