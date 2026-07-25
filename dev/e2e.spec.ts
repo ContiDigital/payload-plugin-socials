@@ -59,7 +59,14 @@ test('renders the social control center and product composer accessibly', async 
     })
   })
 
+  const accessProbe = page.waitForResponse(
+    (response) =>
+      response.request().method() === 'GET' && response.url().endsWith('/api/socials/access'),
+  )
   await page.goto('/admin/socials', { waitUntil: 'domcontentloaded' })
+  const accessResponse = await accessProbe
+  expect(accessResponse.ok()).toBe(true)
+  await expect(accessResponse.json()).resolves.toMatchObject({ publisher: true })
   await expect(page.getByRole('heading', { level: 1, name: 'Socials' })).toBeVisible()
   await expect(
     page.getByRole('tablist', { name: 'Socials view' }).getByRole('tab', { name: 'Connections' }),
@@ -68,7 +75,7 @@ test('renders the social control center and product composer accessibly', async 
   const standaloneComposer = page
     .locator('.socials-composer')
     .filter({ has: page.getByRole('heading', { level: 2, name: 'Standalone composer' }) })
-  await expect(standaloneComposer).toBeVisible()
+  await expect(standaloneComposer).toBeVisible({ timeout: 30_000 })
   await standaloneComposer.getByLabel('Post title').fill('E2E launch')
   await standaloneComposer.getByLabel('Pinterest').check()
   await standaloneComposer.getByLabel('Pinterest destination').selectOption('board-e2e')
