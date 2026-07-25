@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [0.9.3] - 2026-07-23
 
+### Added
+
+- Opt-in, per-platform live lifecycle canaries exercise the real Pinterest, Facebook, and Instagram adapters. Pinterest and Facebook verify cleanup; Instagram requires a second residue opt-in and uses a self-expiring Story. The release runbook records preflight, canary evidence, tagging, npm bootstrap, and trusted-publishing ownership.
+
 ### Changed
 
 - **Scheduling now follows the operator-owned model.** The plugin no longer writes to your `jobs.autoRun` array. When `scheduling.autoRun` crons are set, the plugin attaches Payload task-level `schedule` entries to its sweep/insights/connection tasks; you run a Payload Jobs worker that handles schedules and drains the queue (or use the internal endpoints / worker helpers). The previous behavior registered `autoRun` entries that only drained the queue and never enqueued the periodic tasks, so insights-refresh, connection-refresh, and the sweep silently never ran under that mode.

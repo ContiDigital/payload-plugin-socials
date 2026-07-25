@@ -9,6 +9,7 @@ const dirname = path.dirname(filename)
 
 export default defineConfig(() => {
   loadEnv(path.resolve(dirname, './dev'))
+  const liveSpecSelected = process.argv.some((argument) => argument.includes('dev/live'))
 
   return {
     plugins: [
@@ -41,7 +42,7 @@ export default defineConfig(() => {
       // Payload boot coverage lives under src; browser behavior runs through Playwright.
       exclude: ['**/node_modules/**', '**/dist/**', 'dev/e2e.spec.ts', 'dev/int.spec.ts'],
       hookTimeout: 30_000,
-      include: ['src/**/*.{test,spec}.ts'],
+      include: ['src/**/*.{test,spec}.ts', ...(liveSpecSelected ? ['dev/live*.spec.ts'] : [])],
       testTimeout: 30_000,
     },
   }
