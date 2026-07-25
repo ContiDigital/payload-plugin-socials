@@ -13,6 +13,8 @@ All notable changes to this project are documented here. The format follows [Kee
 - The task queue is now configured as `scheduling.queue`, independently of native task crons. The former `scheduling.autoRun.queue` nesting has been removed.
 - A Payload config may contain only one plugin instance; applying a second now fails during config construction instead of creating first-wins/last-wins task registry behavior.
 - The standalone multi-channel composer is split from the source-record composer, and its publish success/error orchestration is covered in the three-browser Playwright suite.
+- Payload admin peers now require React and React DOM 19, matching the supported Payload 3 runtime.
+- Public copy guidance now documents the optional commerce-style metadata convention used by Pinterest defaults and the provider-conditional availability of GBP Alert posts.
 
 ### Fixed
 
@@ -26,6 +28,7 @@ All notable changes to this project are documented here. The format follows [Kee
 - Facebook insights use Meta's post media-view replacements instead of the impressions/reach/3-second-view metrics retired in June 2026. Facebook and Instagram now retry Graph code-100 failures per metric, preserve valid partial results, and record rejected names in `unavailableMetrics`.
 - Shared image-format validation and retry-delay helpers replace adapter-local duplicates; the unused standalone Instagram delete export is removed.
 - The clean script now removes `dist` and both TypeScript build-info files portably instead of relying on shell brace expansion, preventing stale build artifacts from entering a release.
+- Injected source composers no longer assume a `product` source kind. A missing or blank `sourceKind` now renders a configuration error before access or source requests can run.
 
 ### Security
 

@@ -74,6 +74,24 @@ platforms: {
 
 Then connect from `/admin/socials`.
 
+## Optional metadata used by the default copy
+
+The Pinterest defaults work with only `baseTitle` and `baseDescription`. When a
+resolver provides these optional commerce-style metadata keys, the built-in
+builders add the corresponding detail:
+
+| Metadata key     | Default-copy effect                                                                                   |
+| ---------------- | ----------------------------------------------------------------------------------------------------- |
+| `categoryLabel`  | Leads the description and, when not already in the title, identifies the collection in alt text.      |
+| `googleMaterial` | Adds “crafted from …” to description and alt text and contributes a hashtag.                          |
+| `googleColor`    | Adds “in …” to description and alt text and contributes a hashtag unless the value describes “multi”. |
+| `dimensions`     | Adds a dimensions sentence to the description and a “measuring …” phrase to alt text.                 |
+
+`modelLabel` also augments the title and description, while
+`hints.pinterestSegments` supplies explicit hashtag candidates. These names are
+a convention, not a required source schema: omit them or replace the defaults
+with transformations, `copyOverrides`, or templates.
+
 ## Gotchas
 
 - **Public images only.** Pinterest fetches `image_url` server-side once.

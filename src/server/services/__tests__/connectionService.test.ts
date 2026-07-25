@@ -37,7 +37,7 @@ describe('connectionService — encrypted round trip', () => {
       accessToken: 'pina_SECRET',
       accessTokenExpiresAt: '2027-01-01T00:00:00.000Z',
       accountId: 'acc1',
-      accountLabel: 'Fine Gallery',
+      accountLabel: 'Example Gallery',
       refreshToken: 'pinr_SECRET',
       scopes: ['pins:read', 'pins:write'],
     })
@@ -46,7 +46,7 @@ describe('connectionService — encrypted round trip', () => {
       accessToken: 'pina_SECRET',
       accessTokenExpiresAt: '2027-01-01T00:00:00.000Z',
       accountId: 'acc1',
-      accountLabel: 'Fine Gallery',
+      accountLabel: 'Example Gallery',
       refreshToken: 'pinr_SECRET',
       scopes: ['pins:read', 'pins:write'],
     })

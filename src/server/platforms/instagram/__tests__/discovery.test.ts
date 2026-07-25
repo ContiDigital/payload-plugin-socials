@@ -20,13 +20,13 @@ describe('discoverIgAccountFromPage', () => {
   it('returns the linked IG account', async () => {
     vi.mocked(metaJson).mockResolvedValueOnce({
       id: 'p1',
-      name: 'Fine Gallery',
+      name: 'Example Gallery',
       instagram_business_account: { id: 'ig1' },
     } as never)
     expect(await discoverIgAccountFromPage(payload, options, 'p1')).toEqual({
       igUserId: 'ig1',
       pageId: 'p1',
-      pageName: 'Fine Gallery',
+      pageName: 'Example Gallery',
     })
   })
 

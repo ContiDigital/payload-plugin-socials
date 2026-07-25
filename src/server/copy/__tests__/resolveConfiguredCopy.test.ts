@@ -13,7 +13,7 @@ import { resolveConfiguredHashtags, resolveConfiguredText } from '../resolveConf
 // ---------------------------------------------------------------------------
 
 const makeCtx = (overrides: Partial<SocialSourceContext> = {}): SocialSourceContext => ({
-  baseDescription: 'Fine Italian marble.',
+  baseDescription: 'Hand-finished Italian marble.',
   baseTitle: 'Carrara Mantel',
   images: [{ role: 'main', url: 'https://cdn.example.com/x.jpg' }],
   link: 'https://example.com/p/carrara',
@@ -186,7 +186,7 @@ describe('resolveConfiguredText — template rendering', () => {
   })
 
   it('renders {{ description | truncate:10 }}', () => {
-    const ctx = makeCtx({ baseDescription: 'Fine Italian marble.' })
+    const ctx = makeCtx({ baseDescription: 'Hand-finished Italian marble.' })
     const options = makeOptions(
       Object.freeze({
         product: Object.freeze({ pinterestDescription: '{{ description | truncate:10 }}' }),

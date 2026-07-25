@@ -2,7 +2,7 @@
 
 Multi-platform organic social publishing for [Payload CMS](https://payloadcms.com) 3.
 
-Compose, preview, template, schedule, publish, reconcile, and measure posts across Pinterest, Instagram Business, Facebook Pages, and Google Business Profile. The plugin provides real API adapters, encrypted credential storage, idempotency controls, a durable audit trail, and Payload-native admin surfaces. It does not provide a copy-and-paste fallback or embed application-specific catalog logic.
+Compose, preview, template, schedule, publish, reconcile, and measure posts across Pinterest, Instagram Business, Facebook Pages, and Google Business Profile. The plugin provides real API adapters, encrypted credential storage, idempotency controls, a durable audit trail, and Payload-native admin surfaces. It does not provide a copy-and-paste fallback. Its editorial defaults can optionally use the documented commerce-style metadata convention, while transformations, `copyOverrides`, and templates let every host replace that copy without embedding application-specific catalog logic.
 
 **Running in production at [Fine's Gallery](https://www.finesgallery.com).** This plugin was built for, and extracted from, Fine's Gallery, a luxury bronze and marble retailer with nearly 1M annual users, where it is the social publishing control center.
 
@@ -23,6 +23,7 @@ The host supplies source resolvers, authorization, credentials, the encryption k
 
 - Payload CMS `^3.84.1`
 - Node.js `>=22.12.0`
+- React and React DOM `^19.0.0` for Payload admin surfaces
 - pnpm 9 or 10 when working in this repository
 - `sharp` only when `assets.autoConvert` is enabled
 - A public HTTPS origin for OAuth callbacks and provider-fetchable media
@@ -33,12 +34,12 @@ pnpm add payload-plugin-socials
 
 ## Platform readiness
 
-| Platform                | Implementation                                                                                         | Release guidance                                                                                                           |
-| ----------------------- | ------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------- |
-| Pinterest               | OAuth, board discovery/CRUD, image and video Pins, insights, delete                                    | **Live in production at Fine's Gallery**; run a controlled canary with your own credentials                                |
-| Facebook Pages          | System-user or OAuth credentials; link, photo, multi-photo, video, native scheduling, insights, delete | **Live in production at Fine's Gallery**; Meta app must be Live for public visibility, then verify with a non-role account |
-| Instagram Business      | System-user or OAuth credentials; image, Reels, Stories, Carousel, insights                            | **Live in production at Fine's Gallery**; Meta app must be Live; remove upstream media in-app and reconcile locally        |
-| Google Business Profile | OAuth or service account; account/location discovery; Standard, Event, Offer, Alert; insights, delete  | Experimental: API-complete and contract-tested, but requires Google Basic API Access and has not yet run a live canary     |
+| Platform                | Implementation                                                                                                           | Release guidance                                                                                                           |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------- |
+| Pinterest               | OAuth, board discovery/CRUD, image and video Pins, insights, delete                                                      | **Live in production at Fine's Gallery**; run a controlled canary with your own credentials                                |
+| Facebook Pages          | System-user or OAuth credentials; link, photo, multi-photo, video, native scheduling, insights, delete                   | **Live in production at Fine's Gallery**; Meta app must be Live for public visibility, then verify with a non-role account |
+| Instagram Business      | System-user or OAuth credentials; image, Reels, Stories, Carousel, insights                                              | **Live in production at Fine's Gallery**; Meta app must be Live; remove upstream media in-app and reconcile locally        |
+| Google Business Profile | OAuth or service account; account/location discovery; Standard, Event, Offer, provider-permitted Alert; insights, delete | Experimental: API-complete and contract-tested, but requires Google Basic API Access and has not yet run a live canary     |
 
 Provider approval, quotas, and policy compliance remain the host's responsibility. See the platform guides before enabling an adapter.
 
