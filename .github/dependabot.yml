@@ -22,3 +22,10 @@ updates:
       - dependency-name: typescript
         update-types:
           - version-update:semver-major
+      # @types/node tracks the MINIMUM supported Node version (engines
+      # >=22.12.0), not the newest release. A newer types major lets
+      # Node-only APIs from unsupported versions type-check and then crash
+      # on the support floor.
+      - dependency-name: '@types/node'
+        update-types:
+          - version-update:semver-major
