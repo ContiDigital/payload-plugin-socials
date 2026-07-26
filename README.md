@@ -8,11 +8,11 @@ Compose, preview, template, schedule, publish, reconcile, and measure posts acro
 
 **Running in production at [Fine's Gallery](https://www.finesgallery.com).** This plugin was built for, and extracted from, Fine's Gallery, a luxury bronze and marble retailer with nearly 1M annual users, where it is the social publishing control center.
 
-**The composer, end to end.** Publishing a live product post directly from the Payload admin: open the record's Socials tab, pick the media, review the generated per-platform copy in each channel tab, preview, and publish — the post is live on the real platform seconds later, with the publication recorded in the plugin's audit collection.
+**The composer, end to end.** Publishing a live product post directly from the Payload admin: open the record's Socials tab, pick the media, review the generated per-platform copy in each channel tab, preview, and publish. The post is live on the real platform seconds later, with the publication recorded in the plugin's audit collection.
 
 https://github.com/user-attachments/assets/3e05266b-7870-494b-b679-dfff6a08bfaf
 
-**Fully agent-drivable.** Every capability in that composer is also a deterministic, authenticated HTTP surface — discovery, validation, multi-channel publish, history, deletion, and reconciliation — so an AI agent can run your social publishing without the plugin embedding any model. Here, an agent composes and publishes a post through the same API a human would use, with idempotent retries and a durable audit trail guarding every write. See the [agent and headless integration guide](./docs/agent-integration.md).
+**Fully agent-drivable.** Every capability in that composer is also a deterministic, authenticated HTTP surface (discovery, validation, multi-channel publish, history, deletion, and reconciliation), so an AI agent can run your social publishing without the plugin embedding any model. Here, an agent composes and publishes a post through the same API a human would use, with idempotent retries and a durable audit trail guarding every write. See the [agent and headless integration guide](./docs/agent-integration.md).
 
 https://github.com/user-attachments/assets/67e33cd7-8b9e-4763-95b7-06cb7c7b40bc
 
@@ -309,7 +309,7 @@ or `{ "outcome": "not-published" }`. This prevents retry logic from creating dup
 
 The plugin defines the jobs and their tasks; **the host owns the trigger and runs the workers** (the same contract as the sibling Merchant Center plugin). The plugin never writes to your `jobs.autoRun`. Choose any of these, and mix freely:
 
-- **Native Payload Jobs.** Set `scheduling.autoRun` crons — the plugin attaches Payload task-level `schedule` entries to its sweep/insights/connection tasks. Run a Payload Jobs worker that handles schedules and drains the queue: configure your own `jobs.autoRun` in the Payload config, or call `payload.jobs.handleSchedules()` + `payload.jobs.run()` on a cron.
+- **Native Payload Jobs.** Set `scheduling.autoRun` crons and the plugin attaches Payload task-level `schedule` entries to its sweep/insights/connection tasks. Run a Payload Jobs worker that handles schedules and drains the queue: configure your own `jobs.autoRun` in the Payload config, or call `payload.jobs.handleSchedules()` + `payload.jobs.run()` on a cron.
 - **External cron.** Have EventBridge, Vercel cron, a GitHub Action, or plain cron `POST /api/socials/internal/jobs/sweep` (and `/insights/refresh`, `/connections/refresh`) with the `X-Socials-API-Key`. No Payload worker required. This is what Fine's Gallery runs in production.
 - **Long-running worker.** Call `sweepDueSocialPosts(payload, normalizedOptions)` and `runQueuedSocialsJobs(payload, normalizedOptions)` in a loop.
 
