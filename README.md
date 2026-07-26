@@ -2,9 +2,15 @@
 
 Multi-platform organic social publishing for [Payload CMS](https://payloadcms.com) 3.
 
+<img width="1542" height="1169" alt="Screenshot from 2026-07-25 18-45-39" src="https://github.com/user-attachments/assets/1e00ac76-42b9-4574-a2d7-5a8b1674d045" />
+
 Compose, preview, template, schedule, publish, reconcile, and measure posts across Pinterest, Instagram Business, Facebook Pages, and Google Business Profile. The plugin provides real API adapters, encrypted credential storage, idempotency controls, a durable audit trail, and Payload-native admin surfaces. It does not provide a copy-and-paste fallback. Its editorial defaults can optionally use the documented commerce-style metadata convention, while transformations, `copyOverrides`, and templates let every host replace that copy without embedding application-specific catalog logic.
 
 **Running in production at [Fine's Gallery](https://www.finesgallery.com).** This plugin was built for, and extracted from, Fine's Gallery, a luxury bronze and marble retailer with nearly 1M annual users, where it is the social publishing control center.
+
+https://github.com/user-attachments/assets/3e05266b-7870-494b-b679-dfff6a08bfaf
+
+https://github.com/user-attachments/assets/67e33cd7-8b9e-4763-95b7-06cb7c7b40bc
 
 ## What it adds
 
