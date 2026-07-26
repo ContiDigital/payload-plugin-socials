@@ -54,9 +54,9 @@ approves a real verified location for a lifecycle canary.
 
 Record the result before tagging:
 
-| Date (UTC) | Platform | External ID | Public visibility checked by | Cleanup confirmed |
-| ---------- | -------- | ----------- | ---------------------------- | ----------------- |
-|            |          |             |                              |                   |
+| Date (UTC) | Platform | External ID                         | Public visibility checked by                      | Cleanup confirmed                        |
+| ---------- | -------- | ----------------------------------- | ------------------------------------------------- | ---------------------------------------- |
+| 2026-07-25 | Facebook | `2313737801971147_1462338662597809` | Owner, from a non-role account (app in Live mode) | N/A: production post, retained by design |
 
 Public visibility must be checked from a logged-out or non-role account. This
 is especially important for Meta, where Development mode content is role-only.
