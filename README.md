@@ -2,13 +2,17 @@
 
 Multi-platform organic social publishing for [Payload CMS](https://payloadcms.com) 3.
 
-<img width="1542" height="1169" alt="Screenshot from 2026-07-25 18-45-39" src="https://github.com/user-attachments/assets/1e00ac76-42b9-4574-a2d7-5a8b1674d045" />
+<img width="1542" height="1169" alt="The multi-platform social composer inside the Payload admin, with per-platform tabs, media selection, and live preview" src="https://github.com/user-attachments/assets/1e00ac76-42b9-4574-a2d7-5a8b1674d045" />
 
 Compose, preview, template, schedule, publish, reconcile, and measure posts across Pinterest, Instagram Business, Facebook Pages, and Google Business Profile. The plugin provides real API adapters, encrypted credential storage, idempotency controls, a durable audit trail, and Payload-native admin surfaces. It does not provide a copy-and-paste fallback. Its editorial defaults can optionally use the documented commerce-style metadata convention, while transformations, `copyOverrides`, and templates let every host replace that copy without embedding application-specific catalog logic.
 
 **Running in production at [Fine's Gallery](https://www.finesgallery.com).** This plugin was built for, and extracted from, Fine's Gallery, a luxury bronze and marble retailer with nearly 1M annual users, where it is the social publishing control center.
 
+**The composer, end to end.** Publishing a live product post directly from the Payload admin: open the record's Socials tab, pick the media, review the generated per-platform copy in each channel tab, preview, and publish — the post is live on the real platform seconds later, with the publication recorded in the plugin's audit collection.
+
 https://github.com/user-attachments/assets/3e05266b-7870-494b-b679-dfff6a08bfaf
+
+**Fully agent-drivable.** Every capability in that composer is also a deterministic, authenticated HTTP surface — discovery, validation, multi-channel publish, history, deletion, and reconciliation — so an AI agent can run your social publishing without the plugin embedding any model. Here, an agent composes and publishes a post through the same API a human would use, with idempotent retries and a durable audit trail guarding every write. See the [agent and headless integration guide](./docs/agent-integration.md).
 
 https://github.com/user-attachments/assets/67e33cd7-8b9e-4763-95b7-06cb7c7b40bc
 
