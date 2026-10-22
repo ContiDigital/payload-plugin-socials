@@ -92,4 +92,21 @@ describe('listPostablesLocations', () => {
     expect(postable).toHaveLength(1)
     expect(postable[0]?.locationId).toBe('a')
   })
+
+  it('keeps a verified location whose metadata omits canOperateLocalPost', async () => {
+    // Business Information v1 leaves the flag out for listings that do take posts; voice of merchant
+    // is the verified-owner signal (seen live on a gallery listing with LIVE localPosts).
+    vi.mocked(gbpJson)
+      .mockResolvedValueOnce({ accounts: [{ name: 'accounts/123' }], nextPageToken: null } as never)
+      .mockResolvedValueOnce({
+        locations: [
+          { name: 'locations/a', metadata: { hasVoiceOfMerchant: true }, title: 'Verified' },
+          { name: 'locations/b', metadata: {}, title: 'Unverified' },
+        ],
+        nextPageToken: null,
+      } as never)
+    const postable = await listPostablesLocations(payload, options)
+    expect(postable.map((location) => location.locationId)).toEqual(['a'])
+    expect(postable[0]).toMatchObject({ canOperateLocalPost: true, hasVoiceOfMerchant: true })
+  })
 })

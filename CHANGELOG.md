@@ -4,6 +4,10 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Fixed
+
+- Business Profile: a verified location (voice of merchant) is postable even when Google omits `canOperateLocalPost`, which Business Information v1 does for listings that take posts. Such locations were hidden from the location picker.
+
 ## [0.9.3] - 2026-07-23
 
 ### Added
