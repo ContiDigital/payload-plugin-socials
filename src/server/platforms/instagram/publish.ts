@@ -475,6 +475,7 @@ export const publishInstagramMedia = async (args: {
       options,
       payload,
       platform: 'instagram',
+      presentation: mediaType === 'STORIES' ? 'story' : undefined,
     })
     outboundImageUrl = resolved.url
   }

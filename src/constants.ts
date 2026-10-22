@@ -78,6 +78,31 @@ export const DEFAULT_RETRY_JITTER_FACTOR = 0.25
 export const DEFAULT_REQUEST_TIMEOUT_MS = 20_000
 export const DEFAULT_ASSET_FETCH_TIMEOUT_MS = 15_000
 export const MAX_SOURCE_IMAGE_BYTES = 25 * 1024 * 1024
+// Decoded pixel budget for normalized renditions (sharp limitInputPixels).
+export const MAX_NORMALIZED_IMAGE_PIXELS = 64 * 1024 * 1024
+export const DEFAULT_MAX_CONCURRENT_CONVERSIONS = 1
+// Normalized rendition canvases. Instagram crops carousel children to one
+// shared ratio, so feed images are padded onto a square and stories onto the
+// vertical canvas; Facebook keeps the photograph's own proportions.
+export const NORMALIZED_SQUARE_CANVAS = 1080
+export const NORMALIZED_STORY_CANVAS = { height: 1920, width: 1080 } as const
+export const NORMALIZED_PHOTO_CANVAS = 2048
+export const NORMALIZED_RENDITION_VERSION = 'uncropped-v1'
+
+// Deferred publishing contract between the composers and a host that runs
+// publish requests outside the request cycle. The composer sends the request
+// header; a host that defers replies 202 with the status header set to
+// `pending`, a `Location` under `{basePath}/requests/{id}`, and optionally
+// `Retry-After` in seconds. The composer polls that URL until a non-pending
+// response arrives and treats it as the original publish response.
+export const SOCIAL_PUBLISH_ASYNC_HEADER = 'X-Socials-Publish-Async'
+export const SOCIAL_PUBLISH_STATUS_HEADER = 'X-Socials-Publish-Status'
+export const SOCIAL_PUBLISH_STATUS_PENDING = 'pending'
+export const SOCIAL_PUBLISH_REQUESTS_SEGMENT = 'requests'
+export const SOCIAL_PUBLISH_POLL_DEADLINE_MS = 10 * 60 * 1000
+export const SOCIAL_PUBLISH_POLL_MIN_SECONDS = 1
+export const SOCIAL_PUBLISH_POLL_MAX_SECONDS = 5
+export const SOCIAL_PUBLISH_POLL_DEFAULT_SECONDS = 2
 export const MAX_REMOTE_ASSET_REDIRECTS = 3
 export const DEFAULT_MAX_REQUESTS_PER_MINUTE = 60
 export const MAX_WEBHOOK_BODY_BYTES = 1024 * 1024

@@ -87,6 +87,7 @@ export const applyAdminEnhancements = (
     enabledPlatforms: Object.entries(options.platforms)
       .filter(([, p]) => p.enabled)
       .map(([id]) => id),
+    ...(options.admin.mediaLibrary ? { mediaLibrary: options.admin.mediaLibrary } : {}),
     // Expose the registered source kinds so the template builder can
     // populate the record-picker dropdown without enumerating collections.
     sourceKinds: options.admin.injectInto.map(({ collection, label, sourceKind }) => ({

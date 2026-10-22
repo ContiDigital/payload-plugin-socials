@@ -15,19 +15,23 @@ import type {
 
 import { PLATFORM_IDS, PLATFORM_LABELS } from '../constants.js'
 import { resolveSocialsEndpointBase } from './accessModel.js'
+import { fetchSocialPublish } from './fetchSocialPublish.js'
 import {
   acceptedMediaTypes,
   buildInitialComposerState,
   compileComposerInput,
   type ComposerState,
+  filterMediaBySearch,
   filterTemplatesForContext,
   formatLocalDateTimeMin,
   getEffectiveAssets,
+  mediaToggleLabel,
   mergeDraftMedia,
   normalizeSelectedUploadMedia,
   pickDefaultTemplate,
   pruneSelectedMedia,
   reorderSelectedMedia,
+  resolveMediaLibraryOptions,
   shouldFetchEnvelope,
   supportsMultipleMedia,
 } from './socialComposerModel.js'
@@ -124,9 +128,12 @@ const SourceComposerAuthorized: React.FC<{ sourceKind: string }> = ({ sourceKind
   const [deletingId, setDeletingId] = useState<number | string>()
   // The media pool is shared while selection and ordering remain per platform.
   const [extraMedia, setExtraMedia] = useState<SocialDraftMedia[]>([])
+  const [mediaSearch, setMediaSearch] = useState('')
 
+  const mediaLibrary = resolveMediaLibraryOptions(socials)
   const [ListDrawer, , { closeDrawer, openDrawer }] = useListDrawer({
-    collectionSlugs: undefined as never,
+    collectionSlugs: mediaLibrary.collectionSlugs as never,
+    filterOptions: mediaLibrary.filterOptions as never,
     uploads: true,
   })
 
@@ -494,11 +501,15 @@ const SourceComposerAuthorized: React.FC<{ sourceKind: string }> = ({ sourceKind
       if (scheduledAt) {
         body.scheduledAt = new Date(scheduledAt).toISOString()
       }
-      const response = await fetch(`${sourceBase}/publish`, {
-        body: JSON.stringify(body),
-        headers: { 'Content-Type': 'application/json' },
-        method: 'POST',
-      })
+      const response = await fetchSocialPublish(
+        `${sourceBase}/publish`,
+        {
+          body: JSON.stringify(body),
+          headers: { 'Content-Type': 'application/json' },
+          method: 'POST',
+        },
+        { endpointBase },
+      )
       const result = (await response.json()) as {
         error?: string
         publishedRef?: PublishedRef
@@ -623,6 +634,7 @@ const SourceComposerAuthorized: React.FC<{ sourceKind: string }> = ({ sourceKind
         ...assets.filter((asset) => !state.selectedMedia.includes(asset.url)),
       ]
     : assets
+  const visibleAssets = filterMediaBySearch(orderedAssets, mediaSearch)
   const previewAsset = getEffectiveAssets(platform, state, mergedDraft)[0]
   const mediaRequired =
     state.format !== 'LINK' && state.format !== 'STANDARD' && state.format !== 'ALERT'
@@ -928,8 +940,24 @@ const SourceComposerAuthorized: React.FC<{ sourceKind: string }> = ({ sourceKind
                 {supportsMultipleMedia(platform, state.format) ? '(choose and order 2-10)' : ''}
               </legend>
               {assets.length === 0 && <p>No source media is available.</p>}
+              <label className="socials-composer__media-search">
+                Find media
+                <input
+                  aria-label="Find media"
+                  onChange={(event) => setMediaSearch(event.target.value)}
+                  placeholder="Search media descriptions"
+                  type="search"
+                  value={mediaSearch}
+                />
+              </label>
+              <p aria-live="polite">
+                {`${visibleAssets.length} of ${assets.length} media items, ${state.selectedMedia.length} selected`}
+              </p>
+              {mediaSearch.trim() && visibleAssets.length === 0 && (
+                <p>No matching media. Clear the search to see everything.</p>
+              )}
               <div className="socials-composer__media-grid" role="list">
-                {orderedAssets.map((asset) => {
+                {visibleAssets.map((asset) => {
                   const orderIndex = state.selectedMedia.indexOf(asset.url)
                   const selected = orderIndex >= 0
                   const isAccepted = accepted.includes(asset.type)
@@ -972,23 +1000,22 @@ const SourceComposerAuthorized: React.FC<{ sourceKind: string }> = ({ sourceKind
                       role="listitem"
                     >
                       {asset.type === 'image' ? (
-                        <img alt={asset.altText ?? ''} src={asset.url} />
+                        <img alt={asset.altText ?? ''} loading="lazy" src={asset.url} />
                       ) : (
                         <VideoTile asset={asset} />
                       )}
                       <button
-                        aria-label={
-                          isAccepted
-                            ? `${selected ? 'Deselect' : 'Select'} ${asset.type} asset`
-                            : 'Not available for this format'
-                        }
+                        aria-label={mediaToggleLabel(asset, selected, isAccepted)}
                         aria-pressed={selected}
                         className="socials-composer__asset-toggle"
                         disabled={!isAccepted}
                         onClick={() => isAccepted && toggleMedia(asset.url)}
-                        title={isAccepted ? undefined : 'Not available for this format'}
+                        title={isAccepted ? asset.altText : 'Not available for this format'}
                         type="button"
                       />
+                      {asset.altText && (
+                        <span className="socials-composer__asset-caption">{asset.altText}</span>
+                      )}
                       {reorderable && (
                         <span className="socials-composer__asset-order">{orderIndex + 1}</span>
                       )}
@@ -1251,12 +1278,15 @@ const SourceComposerAuthorized: React.FC<{ sourceKind: string }> = ({ sourceKind
  * preview/history/destination fetches never fire for an unauthorized user.
  */
 const SourceComposer: React.FC<{ sourceKind: string }> = ({ sourceKind }) => {
+  const { id } = useDocumentInfo()
   const { config } = useConfig()
   const { loading, publisher } = useSocialsAccess(resolveSocialsEndpointBase(config))
   if (loading || !publisher) {
     return null
   }
-  return <SourceComposerAuthorized sourceKind={sourceKind} />
+  // Remount per record so selections, search and fetched envelopes never
+  // carry over when the admin navigates between documents in place.
+  return <SourceComposerAuthorized key={`${sourceKind}:${String(id)}`} sourceKind={sourceKind} />
 }
 
 // ===========================================================================

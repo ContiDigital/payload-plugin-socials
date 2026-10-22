@@ -631,3 +631,34 @@
   color: var(--theme-error-500, #d93025);
   font-size: 0.75rem;
 }
+
+/* The media pool can hold a whole catalog of related records: keep each item
+   identifiable by its label and show it uncropped. */
+.socials-composer__media-search {
+  display: grid;
+  gap: 0.35rem;
+  margin-block: 0.5rem;
+}
+
+.socials-composer__asset-caption {
+  background: #000c;
+  color: #fff;
+  font-size: 0.7rem;
+  inset-block-end: 0;
+  inset-inline: 0;
+  line-height: 1.25;
+  max-height: 2.8em;
+  overflow: hidden;
+  padding: 0.25rem 0.35rem;
+  pointer-events: none;
+  position: absolute;
+}
+
+.socials-composer__asset:has(.socials-composer__asset-caption) img {
+  object-fit: contain;
+}
+
+/* Keep the label clear of the reorder controls on a selected multi-media tile. */
+.socials-composer__asset--draggable .socials-composer__asset-caption {
+  inset-block-end: 1.7rem;
+}

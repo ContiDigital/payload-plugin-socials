@@ -803,3 +803,61 @@ export const filterTemplatesForContext = <T extends ComposerTemplateSummary>(
 export const pickDefaultTemplate = <T extends { isDefault?: boolean }>(
   templates: T[],
 ): T | undefined => templates.find((template) => template.isDefault === true)
+
+/**
+ * Narrow a shared media pool (which can include a whole catalog of related
+ * records) by alt text, role or type. Returns the same array for a blank query.
+ */
+export const filterMediaBySearch = (
+  assets: SocialDraftMedia[],
+  query: string,
+): SocialDraftMedia[] => {
+  const search = query.trim().toLocaleLowerCase()
+  if (!search) {
+    return assets
+  }
+  return assets.filter((asset) =>
+    [asset.altText, asset.role, asset.type]
+      .filter(Boolean)
+      .join(' ')
+      .toLocaleLowerCase()
+      .includes(search),
+  )
+}
+
+export const mediaToggleLabel = (
+  asset: Pick<SocialDraftMedia, 'altText' | 'type'>,
+  selected: boolean,
+  accepted: boolean,
+): string => {
+  if (!accepted) {
+    return 'Not available for this format'
+  }
+  return `${selected ? 'Deselect' : 'Select'} ${asset.altText || `${asset.type} asset`}`
+}
+
+export type MediaLibraryOptions = {
+  collectionSlugs: string[] | undefined
+  filterOptions: Record<string, unknown> | undefined
+}
+
+/** Read the optional `admin.mediaLibrary` scope from the serialized plugin config. */
+export const resolveMediaLibraryOptions = (
+  socials: Record<string, unknown> | undefined,
+): MediaLibraryOptions => {
+  const library = socials?.mediaLibrary
+  if (typeof library !== 'object' || library === null || Array.isArray(library)) {
+    return { collectionSlugs: undefined, filterOptions: undefined }
+  }
+  const { collectionSlugs, filterOptions } = library as Record<string, unknown>
+  const slugs = Array.isArray(collectionSlugs)
+    ? collectionSlugs.filter((slug): slug is string => typeof slug === 'string')
+    : undefined
+  return {
+    collectionSlugs: slugs && slugs.length > 0 ? slugs : undefined,
+    filterOptions:
+      typeof filterOptions === 'object' && filterOptions !== null && !Array.isArray(filterOptions)
+        ? (filterOptions as Record<string, unknown>)
+        : undefined,
+  }
+}

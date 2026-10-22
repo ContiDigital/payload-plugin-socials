@@ -8,6 +8,7 @@ import type { SocialDraftMedia } from '../types/index.js'
 
 import { PLATFORM_IDS, PLATFORM_LABELS } from '../constants.js'
 import { resolveSocialsEndpointBase } from './accessModel.js'
+import { fetchSocialPublish } from './fetchSocialPublish.js'
 import {
   buildStandaloneInitialState,
   compileStandalonePublishBody,
@@ -15,6 +16,7 @@ import {
   normalizeSelectedUploadMedia,
   parseComposeResponse,
   reorderSelectedMedia,
+  resolveMediaLibraryOptions,
   type StandaloneComposerState,
   supportsMultipleMedia,
 } from './socialComposerModel.js'
@@ -66,8 +68,10 @@ const StandaloneComposerAuthorized: React.FC = () => {
     }>
   >([])
 
+  const mediaLibrary = resolveMediaLibraryOptions(socials)
   const [ListDrawer, , { closeDrawer, openDrawer }] = useListDrawer({
-    collectionSlugs: undefined as never,
+    collectionSlugs: mediaLibrary.collectionSlugs as never,
+    filterOptions: mediaLibrary.filterOptions as never,
     uploads: true,
   })
 
@@ -198,11 +202,15 @@ const StandaloneComposerAuthorized: React.FC = () => {
     setResults([])
     try {
       const body = compileStandalonePublishBody(state, perChannelFormat)
-      const response = await fetch(`${endpointBase}/compose/publish`, {
-        body: JSON.stringify(body),
-        headers: { 'Content-Type': 'application/json' },
-        method: 'POST',
-      })
+      const response = await fetchSocialPublish(
+        `${endpointBase}/compose/publish`,
+        {
+          body: JSON.stringify(body),
+          headers: { 'Content-Type': 'application/json' },
+          method: 'POST',
+        },
+        { endpointBase },
+      )
       const rawBody: unknown = await response.json()
       const parsed = parseComposeResponse(response.ok, rawBody)
       if (!parsed.ok) {
