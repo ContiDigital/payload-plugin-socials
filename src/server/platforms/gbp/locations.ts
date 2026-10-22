@@ -99,9 +99,15 @@ export const listAccounts = async (
 
 export type GbpLocation = {
   accountId: string
-  /** True only when the location is currently allowed to receive LocalPosts. */
+  /**
+   * True when the location can receive LocalPosts: Google says so, or the owner holds voice of
+   * merchant. Business Information v1 omits `canOperateLocalPost` for verified listings that do
+   * take posts, so the flag alone hides them.
+   */
   canOperateLocalPost: boolean
   hasPendingEdits?: boolean
+  /** The signed-in owner is verified and controls the listing. */
+  hasVoiceOfMerchant?: boolean
   languageCode?: string
   latlng?: { latitude?: number; longitude?: number }
   locationId: string
@@ -131,6 +137,7 @@ type RawLocation = {
   metadata?: {
     canOperateLocalPost?: boolean
     hasPendingEdits?: boolean
+    hasVoiceOfMerchant?: boolean
     mapsUri?: string
     placeId?: string
   }
@@ -186,8 +193,10 @@ export const listLocations = async (
       }
       out.push({
         accountId,
-        canOperateLocalPost: raw.metadata?.canOperateLocalPost === true,
+        canOperateLocalPost:
+          raw.metadata?.canOperateLocalPost === true || raw.metadata?.hasVoiceOfMerchant === true,
         hasPendingEdits: raw.metadata?.hasPendingEdits,
+        hasVoiceOfMerchant: raw.metadata?.hasVoiceOfMerchant,
         languageCode: raw.languageCode,
         latlng: raw.latlng,
         locationId,
@@ -212,8 +221,8 @@ export const listLocations = async (
 
 /**
  * Convenience: discover every location the credential can post to, flattened
- * across all accounts the user manages. Filters out locations where
- * `canOperateLocalPost === false` (suspended / duplicate / unverified).
+ * across all accounts the user manages. Keeps locations Google marks postable or whose owner holds
+ * voice of merchant; drops the rest (suspended / duplicate / unverified).
  */
 export const listPostablesLocations = async (
   payload: Payload,
