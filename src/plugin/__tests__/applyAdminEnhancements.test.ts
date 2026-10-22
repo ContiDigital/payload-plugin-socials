@@ -134,4 +134,25 @@ describe('applyAdminEnhancements', () => {
     applyAdminEnhancements(config, options)
     expect(options.admin.adminBase).toBe('/admin')
   })
+
+  it('exposes the admin media library scope to both composers', () => {
+    const mediaLibrary = {
+      collectionSlugs: ['media'],
+      filterOptions: { media: { private: { not_equals: true } } },
+    }
+    const { config, options } = optionsWith({ mediaLibrary, mode: 'route' })
+    applyAdminEnhancements(config, options)
+
+    const adminCustom = config.admin?.custom as { socials?: { mediaLibrary?: unknown } }
+    expect(adminCustom.socials?.mediaLibrary).toEqual(mediaLibrary)
+    const serverCustom = config.custom as { socials?: { mediaLibrary?: unknown } }
+    expect(serverCustom.socials?.mediaLibrary).toEqual(mediaLibrary)
+  })
+
+  it('omits the media library key when it is not configured', () => {
+    const { config, options } = optionsWith({ mode: 'route' })
+    applyAdminEnhancements(config, options)
+    const adminCustom = config.admin?.custom as { socials?: Record<string, unknown> }
+    expect('mediaLibrary' in (adminCustom.socials ?? {})).toBe(false)
+  })
 })

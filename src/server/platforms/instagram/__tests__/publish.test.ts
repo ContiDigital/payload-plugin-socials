@@ -419,6 +419,39 @@ describe('publishInstagramMedia — idempotency key uses ORIGINAL url when autoC
 
     const containerBody = createBodies()[0]
     expect(containerBody.image_url).toBe(CONVERTED_URL)
+    expect(mockedResolve).toHaveBeenCalledWith(
+      expect.objectContaining({ platform: 'instagram', presentation: 'story' }),
+    )
+  })
+
+  it('IMAGE and CAROUSEL: resolve without a story presentation', async () => {
+    mockedResolve.mockResolvedValue({ converted: true, format: 'jpeg', url: CONVERTED_URL })
+    setupFlow()
+
+    await publishInstagramMedia({
+      ctx: ctx(),
+      input: { igUserId: 'ig1', imageUrl: ORIGINAL_URL, mediaType: 'IMAGE' },
+      options: autoConvertOptions,
+      payload: asPayload(payload),
+    })
+    await publishInstagramMedia({
+      ctx: ctx(),
+      input: {
+        carouselChildren: [
+          { imageUrl: ORIGINAL_URL },
+          { imageUrl: 'https://cdn.example.com/2.jpg' },
+        ],
+        igUserId: 'ig1',
+        mediaType: 'CAROUSEL',
+      },
+      options: autoConvertOptions,
+      payload: asPayload(payload),
+    })
+
+    for (const call of mockedResolve.mock.calls) {
+      expect(call[0].presentation).toBeUndefined()
+    }
+    expect(mockedResolve).toHaveBeenCalledTimes(3)
   })
 
   it('with autoConvert OFF and an allowed format, passes through unchanged', async () => {

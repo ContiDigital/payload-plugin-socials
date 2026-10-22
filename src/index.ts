@@ -94,6 +94,10 @@ export {
   SOCIAL_POST_RETRY_TASK_SLUG,
   SOCIAL_POST_SWEEP_TASK_SLUG,
   SOCIAL_POSTS_SLUG,
+  SOCIAL_PUBLISH_ASYNC_HEADER,
+  SOCIAL_PUBLISH_REQUESTS_SEGMENT,
+  SOCIAL_PUBLISH_STATUS_HEADER,
+  SOCIAL_PUBLISH_STATUS_PENDING,
   SOCIAL_TEMPLATES_SLUG,
   SOCIALS_CONNECTIONS_GLOBAL_SLUG,
   SOCIALS_QUEUE_NAME,
@@ -140,6 +144,8 @@ export type {
   PreflightResult,
   TargetDimensions,
 } from './server/assets/imagePreflight.js'
+export { resolveNormalizedCanvas } from './server/assets/resolvePlatformImage.js'
+export type { ImagePresentation, NormalizedCanvas } from './server/assets/resolvePlatformImage.js'
 export { transformImage } from './server/assets/transformImage.js'
 
 export type { TransformOutputFormat, TransformSpec } from './server/assets/transformImage.js'
@@ -214,6 +220,7 @@ export type {
   SocialsCoordinationConfig,
   SocialsCopyOverrides,
   SocialsDistributedLock,
+  SocialsMediaLibraryConfig,
   SocialSource,
   SocialSourceContext,
   SocialSourceKind,

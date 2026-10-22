@@ -14,6 +14,7 @@ import type {
   SocialCopyFieldTransforms,
   SocialsAdminConfig,
   SocialsAssetsConfig,
+  SocialsMediaLibraryConfig,
   SocialsSchedulingConfig,
   SocialsTransformations,
 } from '../types/index.js'
@@ -25,6 +26,7 @@ import {
   DEFAULT_ASSET_FETCH_TIMEOUT_MS,
   DEFAULT_BASE_RETRY_DELAY_MS,
   DEFAULT_MAX_CONCURRENCY,
+  DEFAULT_MAX_CONCURRENT_CONVERSIONS,
   DEFAULT_MAX_REQUESTS_PER_MINUTE,
   DEFAULT_MAX_RETRIES,
   DEFAULT_MAX_RETRY_DELAY_MS,
@@ -32,6 +34,7 @@ import {
   DEFAULT_RATE_LIMIT_ENABLED,
   DEFAULT_REQUEST_TIMEOUT_MS,
   DEFAULT_RETRY_JITTER_FACTOR,
+  MAX_SOURCE_IMAGE_BYTES,
   PLUGIN_SLUG,
   SOCIALS_QUEUE_NAME,
 } from '../constants.js'
@@ -83,10 +86,20 @@ const normalizeAssets = (config: SocialsAssetsConfig | undefined): NormalizedAss
     )
   }
 
+  const normalize = config?.normalize === true
+  if (normalize && !autoConvert) {
+    throw new Error(`${PLUGIN_SLUG}: assets.normalize requires assets.autoConvert to be enabled`)
+  }
+
   const rawQuality = config?.jpegQuality
   let jpegQuality = 82
   if (typeof rawQuality === 'number' && Number.isFinite(rawQuality)) {
     jpegQuality = Math.max(1, Math.min(100, Math.round(rawQuality)))
+  }
+
+  const renditionData = config?.renditionData ?? {}
+  if (typeof renditionData !== 'object' || renditionData === null || Array.isArray(renditionData)) {
+    throw new Error(`${PLUGIN_SLUG}: assets.renditionData must be a plain object`)
   }
 
   const trustedRemoteHosts = Array.from(
@@ -105,14 +118,43 @@ const normalizeAssets = (config: SocialsAssetsConfig | undefined): NormalizedAss
   return {
     autoConvert,
     jpegQuality,
+    maxConcurrentConversions: normalizePositiveInteger(
+      config?.maxConcurrentConversions,
+      DEFAULT_MAX_CONCURRENT_CONVERSIONS,
+    ),
+    maxSourceImageBytes: normalizePositiveInteger(
+      config?.maxSourceImageBytes,
+      MAX_SOURCE_IMAGE_BYTES,
+    ),
+    normalize,
     preflight,
     remoteFetchTimeoutMs: normalizePositiveInteger(
       config?.remoteFetchTimeoutMs,
       DEFAULT_ASSET_FETCH_TIMEOUT_MS,
     ),
     renditionCollection,
+    renditionData: { ...renditionData },
     trustedRemoteHosts,
   }
+}
+
+const normalizeMediaLibrary = (
+  config: SocialsMediaLibraryConfig | undefined,
+): SocialsMediaLibraryConfig | undefined => {
+  if (!config) {
+    return undefined
+  }
+  const collectionSlugs = Array.from(
+    new Set((config.collectionSlugs ?? []).map((slug) => slug.trim()).filter(Boolean)),
+  )
+  const out: SocialsMediaLibraryConfig = {}
+  if (collectionSlugs.length > 0) {
+    out.collectionSlugs = collectionSlugs
+  }
+  if (config.filterOptions && typeof config.filterOptions === 'object') {
+    out.filterOptions = config.filterOptions
+  }
+  return Object.keys(out).length > 0 ? out : undefined
 }
 
 // ---------------------------------------------------------------------------
@@ -437,6 +479,7 @@ const buildNormalizedOptions = (
       // overwrites it with the actual value derived from config.routes.admin.
       adminBase: '/admin',
       injectInto: adminConfig.injectInto ?? [],
+      mediaLibrary: normalizeMediaLibrary(adminConfig.mediaLibrary),
       mode: normalizeAdminMode(adminConfig.mode),
       navLabel: normalizeNonEmptyString(adminConfig.navLabel, DEFAULT_ADMIN_NAV_LABEL),
       route: normalizePath(adminConfig.route ?? DEFAULT_ADMIN_ROUTE_PATH),

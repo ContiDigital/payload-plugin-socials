@@ -276,6 +276,8 @@ Add it to your `collections` array, and register it with your storage adapter ex
 
 > **Why a separate collection.** Pointing `renditionCollection` at a media collection that converts uploads to WebP would silently convert the plugin's JPEG right back, defeating the purpose. A dedicated, format-free collection is the solution.
 
+If the rendition collection has required fields, supply their values with `assets.renditionData` (for example `{ alt: 'Prepared for social publishing' }`). To re-encode every image into a bounded, uncropped, platform-sized JPEG rather than only unsupported formats, add `assets.normalize: true`; large originals may also need a higher `assets.maxSourceImageBytes`. See the README's image safety section for the canvases used.
+
 ## Step 5: Generate types, import map, and migration
 
 ```bash
@@ -497,6 +499,8 @@ transformations: {
 
 - **The Socials tab or template builder is blank.** Stale import map. Run `pnpm payload generate:importmap` and rebuild.
 - **A publish fails with a format error.** The image is a format the platform rejects (commonly WebP on Instagram). Enable `assets.autoConvert` with a rendition collection (Step 4), or serve JPEG.
+- **A publish fails because the image is too large, rotated, or cropped by the platform.** Enable `assets.normalize` so every image is re-encoded onto a bounded canvas without cropping, and raise `assets.maxSourceImageBytes` for high-resolution originals.
+- **The media library drawer shows private uploads or the wrong collections.** Scope it with `admin.mediaLibrary` (collection slugs plus serializable `Where` filters).
 - **A publish fails fetching the image.** The URL is not publicly reachable. Check for localhost, expiring signed URLs, or IP allowlists.
 - **Meta returns a post/media ID, but ordinary users cannot see it.** The app is usually still in Development mode or lacks the required Live permission access. Check App Mode, App Review/access levels, token scopes, and granular asset assignments, then repeat the canary from a non-role account.
 - **An extensionless CDN image fails preflight.** Extensions are not required; the plugin checks file-signature bytes. A failure means the signature was unreadable or unrecognized and is intentionally fail-closed while preflight is enabled.

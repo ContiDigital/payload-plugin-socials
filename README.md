@@ -25,7 +25,7 @@ https://github.com/user-attachments/assets/67e33cd7-8b9e-4763-95b7-06cb7c7b40bc
 - Pinterest image/video Pins, Instagram images/Reels/Stories/Carousels, Facebook link/photo/multi-photo/video posts, and GBP Standard/Event/Offer/Alert Local Posts.
 - Destination discovery, preview, server-side validation, publication, history, deletion, reconciliation, insights, OAuth, and webhook endpoints.
 - Payload Jobs task definitions for scheduled publication, retries, insights, and credential refresh. The host controls when workers run.
-- Optional image-format preflight and deterministic JPEG rendition generation.
+- Optional image-format preflight, deterministic JPEG rendition generation, and bounded, uncropped rendition normalization.
 
 The host supplies source resolvers, authorization, credentials, the encryption key, and any scheduling trigger.
 
@@ -191,6 +191,10 @@ payloadPluginSocials({
       label?: string
       tabPosition?: 'append' | 'before-last' | number
     }>
+    mediaLibrary?: {
+      collectionSlugs?: string[]
+      filterOptions?: Partial<Record<string, Where | boolean>>
+    }
   }
   api?: { basePath?: `/${string}` }
   transformations?: SocialsTransformations
@@ -199,7 +203,11 @@ payloadPluginSocials({
     preflight?: boolean
     autoConvert?: boolean
     renditionCollection?: string
+    renditionData?: Record<string, unknown>
+    normalize?: boolean
     jpegQuality?: number
+    maxSourceImageBytes?: number
+    maxConcurrentConversions?: number
     remoteFetchTimeoutMs?: number
     trustedRemoteHosts?: string[]
   }
@@ -225,9 +233,11 @@ payloadPluginSocials({
 })
 ```
 
+`admin.mediaLibrary` scopes the "Add from media library" drawer in both composers to specific upload collections and, through serializable per-collection `Where` filters, to specific documents (for example, public images only). Without it the drawer lists every upload collection.
+
 If a host has multiple auth-enabled collections, `authCollection` is required so the optional `publishedBy` relationship has an unambiguous target. A host with no auth collection may omit it; request authorization still remains mandatory.
 
-Version `0.9.x` supports one `payloadPluginSocials(...)` instance per Payload config and throws during config construction if a second instance is applied. Combine all enabled platforms and source resolvers in that instance.
+The plugin supports one `payloadPluginSocials(...)` instance per Payload config and throws during config construction if a second instance is applied. Combine all enabled platforms and source resolvers in that instance.
 
 With `disabled: true`, the plugin keeps its two collections and connection global in the schema, but hides them, denies access, removes hooks, and registers no endpoints, tasks, or admin surfaces. Keep the same `sources` keys and `authCollection` as enabled mode so migrations remain stable; encryption and platform credentials may be omitted.
 
@@ -345,11 +355,17 @@ Facebook's `scheduledPublishTime` is provider-native scheduling. The generic sou
 
 ## Image safety
 
-With preflight enabled, remote image inspection is HTTPS-only, redirect-bounded, time-bounded, and streamed under a 25 MB processing cap. Every redirect hostname is resolved and validated, and the HTTPS connection is pinned to that validated address while preserving the hostname for TLS SNI and certificate verification. DNS names resolving to local, private, link-local, documentation, or otherwise non-public IP ranges are rejected. `trustedRemoteHosts` is an explicit exact-host bypass for a host-controlled private media origin and should normally remain empty; those connections are still DNS-pinned.
+With preflight enabled, remote image inspection is HTTPS-only, redirect-bounded, time-bounded, and streamed under a processing cap (`assets.maxSourceImageBytes`, 25 MiB by default). Every redirect hostname is resolved and validated, and the HTTPS connection is pinned to that validated address while preserving the hostname for TLS SNI and certificate verification. DNS names resolving to local, private, link-local, documentation, or otherwise non-public IP ranges are rejected. `trustedRemoteHosts` is an explicit exact-host bypass for a host-controlled private media origin and should normally remain empty; those connections are still DNS-pinned.
 
 Image detection uses file signatures, not URL extensions, so extensionless CDN URLs are supported. With preflight enabled, an unreadable or unrecognized signature fails closed instead of passing an uninspected asset to a provider. Set `assets.preflight: false` only when the host deliberately accepts that pass-through behavior.
 
-When `autoConvert` is enabled, configure a dedicated public upload collection with no `formatOptions`; the plugin writes deterministic JPEG renditions there. Idempotency continues to use the original media URL.
+When `autoConvert` is enabled, configure a dedicated public upload collection with no `formatOptions`; the plugin writes deterministic JPEG renditions there. Idempotency continues to use the original media URL. `assets.renditionData` supplies field values the rendition collection requires, such as alt text.
+
+`assets.normalize` extends conversion to every image, including formats the platform already accepts. Each rendition applies EXIF orientation, flattens transparency to white, converts to sRGB, strips metadata and is fitted onto a per-platform canvas without cropping: Facebook keeps the photograph's own proportions within 2048 pixels and is never enlarged, Instagram stories use a 1080 by 1920 canvas, and every other image is padded onto a 1080 pixel square so a carousel of mixed ratios publishes intact. Sources are decoded within a 64 megapixel budget and the encoded result must fit the platform's byte limit. Renditions are cached per source URL, platform, presentation and quality. Raise `maxSourceImageBytes` when originals are large; `maxConcurrentConversions` (default 1) bounds how many conversions a process runs at once, which matters for multi-photo and carousel publishes.
+
+## Deferred publishing
+
+Publishing can outlive an HTTP request when a host runs provider calls on a worker. The composers send `X-Socials-Publish-Async: 1` with every publish request. A host that defers the request may answer `202 Accepted` with `X-Socials-Publish-Status: pending`, a `Location` header pointing at `{basePath}/requests/{id}` (same origin, numeric id, no query string) and an optional `Retry-After` in seconds. The composer keeps the publish control busy and polls that URL with `GET` until a non-pending response arrives, then handles it exactly as it would the original publish response, including provider errors. The publish request is submitted once; polling only reads, is clamped to one to five seconds between attempts and gives up after ten minutes with a message that points the operator at post history. Hosts that answer synchronously need no changes, and an unrelated `202` without the status header is passed through untouched. The header names and path segment are exported as `SOCIAL_PUBLISH_ASYNC_HEADER`, `SOCIAL_PUBLISH_STATUS_HEADER`, `SOCIAL_PUBLISH_STATUS_PENDING` and `SOCIAL_PUBLISH_REQUESTS_SEGMENT`.
 
 ## Access and secrets
 

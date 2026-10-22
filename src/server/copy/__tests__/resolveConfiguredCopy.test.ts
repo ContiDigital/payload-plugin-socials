@@ -38,8 +38,12 @@ const makeOptions = (
     assets: {
       autoConvert: false,
       jpegQuality: 82,
+      maxConcurrentConversions: 1,
+      maxSourceImageBytes: 25 * 1024 * 1024,
+      normalize: false,
       preflight: true,
       remoteFetchTimeoutMs: 15_000,
+      renditionData: {},
       trustedRemoteHosts: [],
     },
     authorize: () => true,

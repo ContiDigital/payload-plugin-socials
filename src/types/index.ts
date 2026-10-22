@@ -1,4 +1,4 @@
-import type { CollectionSlug, Config, Payload, PayloadRequest } from 'payload'
+import type { CollectionSlug, Config, Payload, PayloadRequest, Where } from 'payload'
 
 import type { PlatformId, PlatformPublicationStatus, PostStatus } from '../constants.js'
 
@@ -511,9 +511,21 @@ export type SocialsAdminConfig = {
     sourceKind: SocialSourceKind
     tabPosition?: 'append' | 'before-last' | number
   }>
+  /**
+   * Scope the "Add from media library" drawer in both composers. By default
+   * the drawer lists every upload collection without a filter.
+   */
+  mediaLibrary?: SocialsMediaLibraryConfig
   mode?: AdminMode
   navLabel?: string
   route?: `/${string}`
+}
+
+export type SocialsMediaLibraryConfig = {
+  /** Upload collections offered by the drawer. */
+  collectionSlugs?: CollectionSlug[]
+  /** Per-collection `Where` filters (or `false` to hide a collection). Must be serializable. */
+  filterOptions?: Partial<Record<string, boolean | Where>>
 }
 
 export type SocialsApiConfig = {
@@ -606,6 +618,26 @@ export type SocialsAssetsConfig = {
    */
   jpegQuality?: number
   /**
+   * How many rendition conversions (download, decode, encode, upload) may run
+   * at once per process. Carousel and multi-photo publishes resolve their
+   * images concurrently; this bounds their memory use. Default: 1.
+   */
+  maxConcurrentConversions?: number
+  /**
+   * Largest source image the plugin downloads for conversion, in bytes.
+   * Default: 25 MiB. Raise it for high-resolution originals when `normalize`
+   * bounds the output.
+   */
+  maxSourceImageBytes?: number
+  /**
+   * When true, every image, including formats the platform already accepts,
+   * is re-encoded into a bounded JPEG rendition: EXIF orientation applied,
+   * transparency flattened to white, converted to sRGB, metadata stripped and
+   * fitted onto a per-platform canvas without cropping. Requires
+   * `autoConvert` and `renditionCollection`. Default: false.
+   */
+  normalize?: boolean
+  /**
    * When true (default), the plugin checks image formats against each
    * platform's allowlist before publishing. When false, images pass through
    * without format checks.
@@ -618,6 +650,11 @@ export type SocialsAssetsConfig = {
    * Required when `autoConvert` is true.
    */
   renditionCollection?: string
+  /**
+   * Extra field values written on every rendition document, for collections
+   * with required fields such as alt text. Default: `{}`.
+   */
+  renditionData?: Record<string, unknown>
   /**
    * Exact hostnames that may resolve to private addresses. Only use this for
    * host-controlled media origins, such as an internal development CDN.
@@ -824,9 +861,13 @@ export type NormalizedRateLimitConfig = {
 export type NormalizedAssetsConfig = {
   autoConvert: boolean
   jpegQuality: number
+  maxConcurrentConversions: number
+  maxSourceImageBytes: number
+  normalize: boolean
   preflight: boolean
   remoteFetchTimeoutMs: number
   renditionCollection?: string
+  renditionData: Record<string, unknown>
   trustedRemoteHosts: readonly string[]
 }
 
@@ -840,6 +881,7 @@ export type NormalizedPluginOptions = {
      */
     adminBase: string
     injectInto: NonNullable<SocialsAdminConfig['injectInto']>
+    mediaLibrary?: SocialsMediaLibraryConfig
     mode: AdminMode
     navLabel: string
     route: `/${string}`

@@ -111,9 +111,13 @@ describe('normalizePluginOptions — defaults', () => {
     expect(n.assets).toEqual({
       autoConvert: false,
       jpegQuality: 82,
+      maxConcurrentConversions: 1,
+      maxSourceImageBytes: 25 * 1024 * 1024,
+      normalize: false,
       preflight: true,
       remoteFetchTimeoutMs: 15_000,
       renditionCollection: undefined,
+      renditionData: {},
       trustedRemoteHosts: [],
     })
   })
@@ -362,5 +366,72 @@ describe('normalizePluginOptions — platform credential validation', () => {
     expect(() =>
       normalizePluginOptions(withOpts({ platforms: { gbp: { enabled: true } } })),
     ).toThrow(/gbp/)
+  })
+})
+
+describe('normalizePluginOptions: rendition normalization', () => {
+  it('throws when normalize is set without autoConvert', () => {
+    expect(() =>
+      normalizePluginOptions(withOpts({ assets: { normalize: true, renditionCollection: 'r' } })),
+    ).toThrow(/normalize requires assets.autoConvert/)
+  })
+
+  it('accepts normalize alongside autoConvert and a rendition collection', () => {
+    const n = normalizePluginOptions(
+      withOpts({ assets: { autoConvert: true, normalize: true, renditionCollection: 'r' } }),
+    )
+    expect(n.assets.normalize).toBe(true)
+  })
+
+  it('normalizes the source byte budget and conversion concurrency', () => {
+    const n = normalizePluginOptions(
+      withOpts({
+        assets: { maxConcurrentConversions: 3.6, maxSourceImageBytes: 64 * 1024 * 1024 },
+      }),
+    )
+    expect(n.assets.maxSourceImageBytes).toBe(64 * 1024 * 1024)
+    expect(n.assets.maxConcurrentConversions).toBe(3)
+
+    const fallback = normalizePluginOptions(
+      withOpts({ assets: { maxConcurrentConversions: 0, maxSourceImageBytes: Number.NaN } }),
+    )
+    expect(fallback.assets.maxSourceImageBytes).toBe(25 * 1024 * 1024)
+    expect(fallback.assets.maxConcurrentConversions).toBe(1)
+  })
+
+  it('copies rendition data and rejects non-object values', () => {
+    const n = normalizePluginOptions(withOpts({ assets: { renditionData: { alt: 'Prepared' } } }))
+    expect(n.assets.renditionData).toEqual({ alt: 'Prepared' })
+    expect(() =>
+      normalizePluginOptions(withOpts({ assets: { renditionData: ['alt'] as never } })),
+    ).toThrow(/renditionData/)
+  })
+})
+
+describe('normalizePluginOptions: admin media library', () => {
+  it('leaves the media library unset by default', () => {
+    expect(normalizePluginOptions(withOpts()).admin.mediaLibrary).toBeUndefined()
+  })
+
+  it('trims collection slugs and keeps filter options', () => {
+    const n = normalizePluginOptions(
+      withOpts({
+        admin: {
+          mediaLibrary: {
+            collectionSlugs: [' media ', '', 'media', 'videos'],
+            filterOptions: { media: { private: { not_equals: true } } },
+          },
+        },
+      }),
+    )
+    expect(n.admin.mediaLibrary).toEqual({
+      collectionSlugs: ['media', 'videos'],
+      filterOptions: { media: { private: { not_equals: true } } },
+    })
+  })
+
+  it('drops an empty media library block', () => {
+    const n = normalizePluginOptions(withOpts({ admin: { mediaLibrary: { collectionSlugs: [] } } }))
+    expect(n.admin.mediaLibrary).toBeUndefined()
   })
 })

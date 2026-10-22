@@ -158,6 +158,12 @@ The simplest setup for Instagram publishing is to add `formatOptions` to your
 upload collection's `imageSizes` so that Payload itself generates a JPEG
 derivative at upload time, and point your source resolver at that derivative URL.
 
+Instagram also crops every carousel child to one shared ratio, which cuts into
+images of mixed proportions. With `assets.normalize: true` the plugin pads each
+feed image and carousel child onto a 1080 pixel square and each story onto a
+1080 by 1920 canvas, keeping the whole image visible, and bounds the result to
+the 8 MB limit.
+
 ## Deleting posts
 
 Meta's Graph API does not expose a delete endpoint for published Instagram

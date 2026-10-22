@@ -4,9 +4,29 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-10-22
+
+### Added
+
+- Deferred publishing: the composers send `X-Socials-Publish-Async: 1` and, when a host answers `202` with `X-Socials-Publish-Status: pending` and a same-origin `Location` under `{basePath}/requests/{id}`, poll that status URL (honoring a clamped `Retry-After`) until the original provider response arrives. The publish request is submitted once; polling stops after ten minutes with a message that points at post history. The header names and path segment are exported constants.
+- `assets.normalize` re-encodes every image, including accepted formats, into a bounded JPEG rendition: EXIF orientation applied, transparency flattened to white, sRGB, metadata stripped, fitted without cropping onto a per-platform canvas (Facebook within 2048 pixels at its own proportions, Instagram stories 1080 by 1920, everything else a 1080 pixel square). Sources decode within a 64 megapixel budget and results must fit the platform byte limit. Renditions are cached per source URL, platform, presentation and quality.
+- `assets.maxSourceImageBytes` (default 25 MiB) sets the download budget for conversions, `assets.maxConcurrentConversions` (default 1) bounds concurrent conversions per process so carousel and multi-photo publishes cannot exhaust worker memory, and `assets.renditionData` supplies required field values for rendition documents.
+- `admin.mediaLibrary` scopes the composers' media library drawer to specific upload collections and serializable `Where` filters.
+- The source composer's media pool has a search box, a visible count of matching and selected items, lazy-loaded tiles, captions from alt text that stay clear of the reorder controls, and select buttons named after the asset's alt text.
+
+### Changed
+
+- Instagram stories resolve their image with a `story` presentation so normalized renditions use the vertical canvas.
+- Rendition conversions run through a process-wide limiter; a failed conversion releases its slot so later images still publish.
+- The source composer remounts per record, so selections, search and fetched previews no longer carry over when the admin navigates between documents in place.
+
 ### Fixed
 
 - Business Profile: a verified location (voice of merchant) is postable even when Google omits `canOperateLocalPost`, which Business Information v1 does for listings that take posts. Such locations were hidden from the location picker.
+
+### Notes
+
+- No plugin-owned schema changes; no host migration required. Defaults are unchanged: without `assets.normalize`, accepted formats pass through and unsupported formats transcode exactly as before, with the same rendition file names.
 
 ## [0.9.3] - 2026-07-23
 
@@ -116,7 +136,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 - Private prerelease containing the initial four adapters, admin composer, encrypted connection storage, source resolver registry, templates, scheduling, insights, and audit collection.
 
-[Unreleased]: https://github.com/ContiDigital/payload-plugin-socials/compare/v0.9.3...HEAD
+[Unreleased]: https://github.com/ContiDigital/payload-plugin-socials/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/ContiDigital/payload-plugin-socials/compare/v0.9.3...v0.10.0
 [0.9.3]: https://github.com/ContiDigital/payload-plugin-socials/compare/v0.9.2...v0.9.3
 [0.9.2]: https://github.com/ContiDigital/payload-plugin-socials/compare/v0.9.1...v0.9.2
 [0.9.1]: https://github.com/ContiDigital/payload-plugin-socials/compare/d41a1c7d0fb88346e6dfb0c10ea3480d768042e4...v0.9.1
