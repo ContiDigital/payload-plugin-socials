@@ -14,7 +14,7 @@ concurrency:
 jobs:
   npm:
     name: Publish to npm
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     environment: npm
     timeout-minutes: 15
     permissions:
