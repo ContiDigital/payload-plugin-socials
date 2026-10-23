@@ -99,12 +99,16 @@ export const listAccounts = async (
 
 export type GbpLocation = {
   accountId: string
+  /** Google allows the API to delete this listing (`metadata.canDelete`). */
+  canDelete?: boolean
   /**
    * True when the location can receive LocalPosts: Google says so, or the owner holds voice of
    * merchant. Business Information v1 omits `canOperateLocalPost` for verified listings that do
    * take posts, so the flag alone hides them.
    */
   canOperateLocalPost: boolean
+  /** Resource name of the listing Google considers this one a duplicate of. */
+  duplicateLocation?: string
   hasPendingEdits?: boolean
   /** The signed-in owner is verified and controls the listing. */
   hasVoiceOfMerchant?: boolean
@@ -135,7 +139,9 @@ type RawLocation = {
   languageCode?: string
   latlng?: GbpLocation['latlng']
   metadata?: {
+    canDelete?: boolean
     canOperateLocalPost?: boolean
+    duplicateLocation?: string
     hasPendingEdits?: boolean
     hasVoiceOfMerchant?: boolean
     mapsUri?: string
@@ -193,8 +199,10 @@ export const listLocations = async (
       }
       out.push({
         accountId,
+        canDelete: raw.metadata?.canDelete,
         canOperateLocalPost:
           raw.metadata?.canOperateLocalPost === true || raw.metadata?.hasVoiceOfMerchant === true,
+        duplicateLocation: raw.metadata?.duplicateLocation,
         hasPendingEdits: raw.metadata?.hasPendingEdits,
         hasVoiceOfMerchant: raw.metadata?.hasVoiceOfMerchant,
         languageCode: raw.languageCode,
@@ -227,16 +235,21 @@ export const listLocations = async (
 export const listPostablesLocations = async (
   payload: Payload,
   options: NormalizedPluginOptions,
+): Promise<GbpLocation[]> =>
+  (await listAllLocations(payload, options)).filter((location) => location.canOperateLocalPost)
+
+/**
+ * Every location across every account the credential manages, postable or not. Stale listings
+ * show up here: a duplicate carries `duplicateLocation`, an unverified one lacks voice of merchant.
+ */
+export const listAllLocations = async (
+  payload: Payload,
+  options: NormalizedPluginOptions,
 ): Promise<GbpLocation[]> => {
   const accounts = await listAccounts(payload, options)
   const out: GbpLocation[] = []
   for (const account of accounts) {
-    const locations = await listLocations(payload, options, account.accountId)
-    for (const location of locations) {
-      if (location.canOperateLocalPost) {
-        out.push(location)
-      }
-    }
+    out.push(...(await listLocations(payload, options, account.accountId)))
   }
   return out
 }

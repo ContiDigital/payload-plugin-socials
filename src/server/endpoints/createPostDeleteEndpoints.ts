@@ -5,6 +5,7 @@ import type { NormalizedPluginOptions, PlatformId, PublishedRef } from '../../ty
 import { PLATFORM_IDS, SOCIAL_POSTS_SLUG } from '../../constants.js'
 import { INSTAGRAM_DELETE_UNSUPPORTED_MESSAGE } from '../platforms/instagram/adapter.js'
 import { getPlatformAdapter } from '../platforms/registry.js'
+import { cancelQueuedSocialPost } from '../services/postCancellation.js'
 import { assertAccess } from '../utilities/access.js'
 import { NotFoundError, ValidationError } from '../utilities/errors.js'
 import { errorResponse, getRouteParam, jsonResponse, parseRequestBody } from '../utilities/http.js'
@@ -44,6 +45,10 @@ import { errorResponse, getRouteParam, jsonResponse, parseRequestBody } from '..
  *   deleted via the normal path.
  *
  * Access: publisher scope.
+ *
+ * POST {basePath}/posts/:postId/cancel is the cancel-only route: it cancels a queued row and
+ * never calls a platform, so it cannot remove a live post. Body `{ minLeadSeconds? }` also
+ * refuses when the post is due within that many seconds. Anything but a queued row is a 409.
  */
 export const createPostDeleteEndpoints = (options: NormalizedPluginOptions): Endpoint[] => [
   {
@@ -90,28 +95,12 @@ export const createPostDeleteEndpoints = (options: NormalizedPluginOptions): End
 
         // A queued row has no upstream post, so status is the cancellation fence.
         if (row.status === 'queued') {
-          const cancelledMeta: Record<string, unknown> = {
-            ...existingMeta,
-            cancelledAt: new Date().toISOString(),
-            ...(userId !== undefined ? { cancelledBy: userId } : {}),
-          }
-          await req.payload.update({
-            id: row.id as never,
-            collection: SOCIAL_POSTS_SLUG as never,
-            data: {
-              meta: cancelledMeta,
-              status: 'cancelled',
-            } as never,
-            overrideAccess: true,
+          const cancelled = await cancelQueuedSocialPost({
+            payload: req.payload,
+            postId: row.id as number | string,
+            userId,
           })
-          if (typeof row.queuedJobId === 'string') {
-            try {
-              await req.payload.jobs.cancelByID({ id: row.queuedJobId as never })
-            } catch {
-              // The row status is the execution fence if the queued job already started.
-            }
-          }
-          return jsonResponse({ ok: true, postId: row.id, status: 'cancelled' })
+          return jsonResponse({ ok: true, ...cancelled })
         }
 
         // Only published rows (or queued, handled above) can be acted on via
@@ -259,6 +248,43 @@ export const createPostDeleteEndpoints = (options: NormalizedPluginOptions): End
     },
     method: 'post',
     path: `${options.api.basePath}/posts/:postId/resolve`,
+  },
+  {
+    handler: async (req) => {
+      try {
+        await assertAccess(req, options, 'publisher')
+        const postId = getRouteParam(req, 'postId')
+        if (!postId) {
+          throw new ValidationError('postId route parameter is required')
+        }
+        const body = await parseRequestBody(req)
+        const minLeadSeconds = body.minLeadSeconds
+        if (
+          minLeadSeconds !== undefined &&
+          (typeof minLeadSeconds !== 'number' ||
+            !Number.isInteger(minLeadSeconds) ||
+            minLeadSeconds < 0 ||
+            minLeadSeconds > 86_400)
+        ) {
+          throw new ValidationError('minLeadSeconds must be an integer from 0 to 86400')
+        }
+        const userId =
+          req.user && typeof (req.user as { id?: number | string }).id !== 'undefined'
+            ? (req.user as { id: number | string }).id
+            : undefined
+        const cancelled = await cancelQueuedSocialPost({
+          minLeadSeconds,
+          payload: req.payload,
+          postId,
+          userId,
+        })
+        return jsonResponse({ ok: true, ...cancelled })
+      } catch (error) {
+        return errorResponse(req, error)
+      }
+    },
+    method: 'post',
+    path: `${options.api.basePath}/posts/:postId/cancel`,
   },
 ]
 

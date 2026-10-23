@@ -407,6 +407,12 @@ export type GbpPluginConfig = {
   clientId?: string
   clientSecret?: string
   enabled?: boolean
+  /**
+   * Mount the listing write routes (`PATCH /gbp/locations/:id`, `POST .../open-status`,
+   * `DELETE /gbp/locations/:id`), which change the listing on Google inline in the request under
+   * the `admin` scope. Off by default; the exported helpers work either way.
+   */
+  listingManagement?: boolean
   redirectUri?: string
   /** Optional service-account JSON for the SA-managed flow. */
   serviceAccount?: {
@@ -838,6 +844,7 @@ export type NormalizedFacebookConfig = NormalizedInstagramConfig
 export type NormalizedGbpConfig = {
   clientId: string
   clientSecret: string
+  listingManagement: boolean
   redirectUri: string
   serviceAccount?: {
     clientEmail: string

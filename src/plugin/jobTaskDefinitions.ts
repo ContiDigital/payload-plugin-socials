@@ -443,7 +443,7 @@ const refreshInsightsForPlatform = async (
   const rangeStart = since
 
   const rows = result.docs as unknown as Array<{
-    destination?: { id?: null | string }
+    destinationId?: null | string
     externalId?: null | string
     externalUrl?: null | string
     id: number | string
@@ -466,9 +466,9 @@ const refreshInsightsForPlatform = async (
             externalUrl: row.externalUrl ?? undefined,
             meta: {
               ...(row.meta ?? {}),
-              ...(row.destination?.id ? { destinationId: row.destination.id } : {}),
-              ...(platform === 'facebook' && row.destination?.id
-                ? { pageId: row.destination.id }
+              ...(row.destinationId ? { destinationId: row.destinationId } : {}),
+              ...(platform === 'facebook' && row.destinationId
+                ? { pageId: row.destinationId }
                 : {}),
             },
             platform,

@@ -628,9 +628,9 @@ export const publishFacebookPost = async (args: {
     attempts: ((existing as unknown as { attempts?: number })?.attempts ?? 0) + 1,
     body: message,
     destination: {
-      id: input.pageId,
       meta: { format, scheduledPublishTime: input.scheduledPublishTime },
     },
+    destinationId: input.pageId,
     externalId,
     externalUrl,
     idempotencyKey,

@@ -61,7 +61,13 @@ const makeOptions = (
         scopes: [],
         systemUserAccessToken: '',
       },
-      gbp: { clientId: '', clientSecret: '', enabled: false, redirectUri: '' },
+      gbp: {
+        clientId: '',
+        clientSecret: '',
+        enabled: false,
+        listingManagement: false,
+        redirectUri: '',
+      },
       instagram: {
         apiVersion: 'v25.0',
         appId: '',

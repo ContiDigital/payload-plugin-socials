@@ -5,6 +5,7 @@ import type {
   PlatformId,
   PublishedRef,
   SocialSourceContext,
+  ValidationResult,
 } from '../../types/index.js'
 
 import { getPlatformAdapter } from '../platforms/registry.js'
@@ -109,6 +110,45 @@ const publishOne = async (
   } catch (error) {
     return { error: publicErrorMessage(error), ok: false, platform: target.platform }
   }
+}
+
+export type ComposeValidationItem = {
+  platform: PlatformId
+  validation: ValidationResult
+}
+
+/**
+ * Run each target's adapter validation against a standalone context without reserving or
+ * publishing anything. A disabled or unknown platform is reported as an error issue for that
+ * target, never as a thrown request failure.
+ */
+export const validateComposeTargets = async (args: {
+  ctx: SocialSourceContext
+  options: NormalizedPluginOptions
+  targets: ComposeTarget[]
+}): Promise<{ ok: boolean; results: ComposeValidationItem[] }> => {
+  const results = await Promise.all(
+    args.targets.map(async (target): Promise<ComposeValidationItem> => {
+      try {
+        const adapter = getPlatformAdapter(target.platform, args.options)
+        const validation = await adapter.validate({
+          ctx: args.ctx,
+          input: target.input,
+          options: args.options,
+        })
+        return { platform: target.platform, validation }
+      } catch (error) {
+        return {
+          platform: target.platform,
+          validation: {
+            issues: [{ message: publicErrorMessage(error), severity: 'error' }],
+            ok: false,
+          },
+        }
+      }
+    }),
+  )
+  return { ok: results.every((item) => item.validation.ok), results }
 }
 
 export const composeAndPublish = async (args: {

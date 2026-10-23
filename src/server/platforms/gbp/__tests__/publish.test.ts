@@ -251,6 +251,8 @@ describe('publishGbpLocalPost — body assembly', () => {
     expect(body.summary).toBe('Hello')
     expect(body.media).toEqual([{ mediaFormat: 'PHOTO', sourceUrl: 'https://cdn/x.jpg' }])
     expect(payload.create.mock.calls[0][0].data.platformPublicationStatus).toBe('published')
+    expect(payload.create.mock.calls[0][0].data.destinationId).toBe(LOCATION)
+    expect(payload.create.mock.calls[0][0].data.destination).not.toHaveProperty('id')
   })
 
   it('derives the idempotency key from the ORIGINAL image URL when autoConvert rewrites it', async () => {

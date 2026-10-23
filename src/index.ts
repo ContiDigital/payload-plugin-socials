@@ -157,14 +157,59 @@ export type {
   ComposeResultItem,
   ComposeTarget,
 } from './server/compose/composePublish.js'
+export { validateComposeTargets } from './server/compose/composePublish.js'
+export type { ComposeValidationItem } from './server/compose/composePublish.js'
 export { buildSocialDraft } from './server/compose/socialDraft.js'
 export { buildStandaloneContext } from './server/compose/standaloneContext.js'
 
 export type { StandaloneComposeInput } from './server/compose/standaloneContext.js'
+// Google Business Profile listing management: discovery, the full profile read, and the
+// profile, open-status and deletion writes the plugin's admin-scoped endpoints also expose.
+export {
+  buildLocationPatch,
+  GBP_DAYS_OF_WEEK,
+  GBP_DESCRIPTION_MAX_LENGTH,
+  GBP_OPEN_STATUSES,
+  parseGoogleFieldViolations,
+  toLocationName,
+} from './server/platforms/gbp/locationPatch.js'
+export type {
+  GbpDate,
+  GbpDayOfWeek,
+  GbpLocationPatch,
+  GbpOpenStatus,
+  GbpPostalAddress,
+  GbpSpecialHourPeriod,
+  GbpTimeOfDay,
+  GbpTimePeriod,
+} from './server/platforms/gbp/locationPatch.js'
+export {
+  deleteLocation,
+  GBP_LOCATION_DETAIL_READ_MASK,
+  getLocation,
+  locationDeletionRefusal,
+  setOpenStatus,
+  updateLocation,
+} from './server/platforms/gbp/locationProfile.js'
+
+export type {
+  GbpLocationDetail,
+  GbpLocationMetadata,
+  GbpLocationWriteResult,
+} from './server/platforms/gbp/locationProfile.js'
+export {
+  listAccounts,
+  listAllLocations,
+  listLocations,
+  listPostablesLocations,
+} from './server/platforms/gbp/locations.js'
+export type { GbpAccount, GbpLocation } from './server/platforms/gbp/locations.js'
+export { cancelQueuedSocialPost } from './server/services/postCancellation.js'
 // Reusable post-template interpolation. Hosts can drive copyOverrides from a
 // stored template: `pinterestTitle: (ctx) => renderTemplate(tpl, buildTemplateScope(ctx))`.
 export { buildTemplateScope, renderTemplate } from './server/templates/renderTemplate.js'
 export { resolveTemplateCopy } from './server/templates/resolveTemplateCopy.js'
+
 export type {
   ResolvedTemplateCopy,
   SocialTemplateFields,
@@ -176,6 +221,9 @@ export {
   decryptStringWithKeyring,
   encryptString,
 } from './server/utilities/encryption.js'
+export { PlatformApiError } from './server/utilities/errors.js'
+
+export type { PlatformFieldViolation } from './server/utilities/errors.js'
 
 export { ACCESS_SCOPES } from './types/index.js'
 

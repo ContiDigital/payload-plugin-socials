@@ -12,7 +12,7 @@ vi.mock('../../platforms/registry.js', () => ({ getPlatformAdapter: vi.fn() }))
 
 import { getPlatformAdapter } from '../../platforms/registry.js'
 import { NotFoundError } from '../../utilities/errors.js'
-import { composeAndPublish } from '../composePublish.js'
+import { composeAndPublish, validateComposeTargets } from '../composePublish.js'
 
 const mockedGetAdapter = vi.mocked(getPlatformAdapter)
 
@@ -153,5 +153,66 @@ describe('composeAndPublish', () => {
   it('returns an empty result set for no targets', async () => {
     const result = await composeAndPublish({ ctx, options, payload, targets: [] })
     expect(result).toEqual({ anyPublished: false, results: [] })
+  })
+})
+
+describe('validateComposeTargets', () => {
+  it('validates every target without reserving or publishing', async () => {
+    const validateOk = vi.fn().mockResolvedValue({ issues: [], ok: true })
+    const publishOk = vi.fn()
+    const ok = fakeAdapter({ publish: publishOk, validate: validateOk })
+    const bad = fakeAdapter({
+      validate: vi.fn().mockResolvedValue({
+        issues: [{ field: 'summary', message: 'Summary too long', severity: 'error' }],
+        ok: false,
+      }),
+    })
+    mockedGetAdapter.mockImplementation((platform) => (platform === 'gbp' ? bad : ok))
+    const result = await validateComposeTargets({
+      ctx,
+      options,
+      targets: [
+        { input: { boardId: 'b' }, platform: 'pinterest' },
+        { input: { summary: 'x' }, platform: 'gbp' },
+      ],
+    })
+    expect(result.ok).toBe(false)
+    expect(result.results.map((item) => [item.platform, item.validation.ok])).toEqual([
+      ['pinterest', true],
+      ['gbp', false],
+    ])
+    expect(validateOk).toHaveBeenCalledWith({ ctx, input: { boardId: 'b' }, options })
+    expect(publishOk).not.toHaveBeenCalled()
+    expect(createPost).not.toHaveBeenCalled()
+    expect(updatePost).not.toHaveBeenCalled()
+  })
+
+  it('reports a disabled platform as an error issue for that target', async () => {
+    mockedGetAdapter.mockImplementation(() => {
+      throw new NotFoundError('platform "facebook" is not enabled in plugin options')
+    })
+    const result = await validateComposeTargets({
+      ctx,
+      options,
+      targets: [{ input: {}, platform: 'facebook' }],
+    })
+    expect(result).toEqual({
+      ok: false,
+      results: [
+        {
+          platform: 'facebook',
+          validation: {
+            issues: [
+              {
+                message:
+                  'payload-plugin-socials: platform "facebook" is not enabled in plugin options',
+                severity: 'error',
+              },
+            ],
+            ok: false,
+          },
+        },
+      ],
+    })
   })
 })

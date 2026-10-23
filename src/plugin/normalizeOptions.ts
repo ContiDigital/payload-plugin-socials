@@ -394,6 +394,7 @@ const normalizeGbp = (config: GbpPluginConfig | undefined): NormalizedGbpConfig 
       clientId: '',
       clientSecret: '',
       enabled: false,
+      listingManagement: false,
       redirectUri: '',
     }
   }
@@ -410,6 +411,7 @@ const normalizeGbp = (config: GbpPluginConfig | undefined): NormalizedGbpConfig 
     clientId: (config.clientId ?? '').trim(),
     clientSecret: config.clientSecret ?? '',
     enabled: true,
+    listingManagement: config.listingManagement === true,
     redirectUri: (config.redirectUri ?? '').trim(),
     serviceAccount: config.serviceAccount
       ? {

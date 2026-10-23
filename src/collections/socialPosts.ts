@@ -133,13 +133,25 @@ export const buildSocialPostsCollection = (
       admin: { description: 'Outbound URL embedded in the post.', readOnly: true },
     },
     {
+      // Top level rather than `destination.id`: SQL adapters never store a field named `id`
+      // below the top level, so the account a post went to was silently dropped.
+      name: 'destinationId',
+      type: 'text',
+      admin: {
+        description:
+          'Account the post went to: board id, Instagram user id, Page id or ' +
+          'Business Profile location resource name.',
+        readOnly: true,
+      },
+      index: true,
+    },
+    {
       name: 'destination',
       type: 'group',
       admin: {
-        description: 'Channel-specific destination (board id, location id, page id, etc.).',
+        description: 'Display label and channel-specific details of the destination.',
       },
       fields: [
-        { name: 'id', type: 'text' },
         { name: 'label', type: 'text' },
         { name: 'meta', type: 'json' },
       ],

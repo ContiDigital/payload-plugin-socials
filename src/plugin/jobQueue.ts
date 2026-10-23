@@ -306,12 +306,13 @@ export const queueSocialPostSweep = async (
  */
 export const scheduleSocialPostPublish = async (args: {
   body?: string
-  /** Snapshotted destination + display fields for the admin UI. */
+  /** Snapshotted display fields for the admin UI. */
   destination?: {
-    id?: string
     label?: string
     meta?: Record<string, unknown>
   }
+  /** The account the post goes to (board, Instagram user, Page or location resource name). */
+  destinationId?: string
   idempotencyKey: string
   imageUrl?: string
   link?: string
@@ -364,6 +365,7 @@ export const scheduleSocialPostPublish = async (args: {
     attempts: 0,
     body: args.body,
     destination: args.destination,
+    destinationId: args.destinationId,
     idempotencyKey: args.idempotencyKey,
     imageUrl: args.imageUrl,
     link: args.link,

@@ -369,7 +369,7 @@ Publishing can outlive an HTTP request when a host runs provider calls on a work
 
 ## Access and secrets
 
-Every API and admin surface calls the host's `authorize` function. `publisher` covers compose, preview, publish, history, delete, and reconciliation. `admin` covers connection and template administration.
+Every API and admin surface calls the host's `authorize` function. `publisher` covers compose, preview, validation, publish, history, cancellation, delete, reconciliation and the Business Profile listing read. `admin` covers connection and template administration and the Business Profile listing writes (profile edits, open status, deletion), which are mounted only with `platforms.gbp.listingManagement: true`.
 
 Stored tokens use authenticated AES-256-GCM envelopes. Keep `encryptionKey` stable and identical across all instances. During rotation, make the new key primary and temporarily provide old keys in `previousEncryptionKeys`; successfully read envelopes are rewritten with the primary key. Secret-bearing fields are redacted before plugin logs reach the host logger.
 
@@ -389,10 +389,14 @@ Paths below are relative to Payload's `/api` route and the default `/socials` pl
 | GET / POST | `/socials/{platform}/{kind}/{id}/preview`, `/validate`                                  | Publisher                 |
 | POST       | `/socials/{platform}/{kind}/{id}/publish`                                               | Publisher                 |
 | GET        | `/socials/{platform}/{kind}/{id}/history`                                               | Publisher                 |
-| POST       | `/socials/compose/publish`                                                              | Publisher                 |
+| POST       | `/socials/compose/publish`, `/compose/validate`                                         | Publisher                 |
 | DELETE     | `/socials/posts/{postId}`                                                               | Publisher                 |
-| POST       | `/socials/posts/{postId}/resolve`                                                       | Publisher                 |
+| POST       | `/socials/posts/{postId}/cancel`, `/resolve`                                            | Publisher                 |
 | GET        | `/socials/pinterest/boards`, `/facebook/pages`, `/instagram/accounts`, `/gbp/locations` | Publisher                 |
+| GET        | `/socials/gbp/locations/{locationId}`                                                   | Publisher                 |
+| PATCH      | `/socials/gbp/locations/{locationId}` (with `listingManagement`)                        | Admin                     |
+| POST       | `/socials/gbp/locations/{locationId}/open-status` (with `listingManagement`)            | Admin                     |
+| DELETE     | `/socials/gbp/locations/{locationId}` (with `listingManagement`)                        | Admin                     |
 | POST       | `/socials/templates/preview`                                                            | Admin                     |
 | POST       | `/socials/internal/jobs/sweep`, `/jobs/run`                                             | Scheduler API key         |
 
@@ -418,6 +422,8 @@ const result = await composeAndPublish({
 ```
 
 `normalizePluginOptions` is exported for worker entrypoints that construct the same host configuration outside Payload's plugin pipeline.
+
+The Business Profile listing helpers (`getLocation`, `updateLocation`, `setOpenStatus`, `deleteLocation`, `listAllLocations`) and `cancelQueuedSocialPost` are exported the same way, for hosts that run provider work in their own job runner. See [Google Business Profile](./docs/google-business-profile.md#managing-the-listing).
 
 ## Release and migration policy
 

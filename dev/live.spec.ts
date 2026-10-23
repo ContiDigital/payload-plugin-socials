@@ -186,6 +186,38 @@ describe.skipIf(!platform)('live provider contracts', () => {
       }),
     )
   })
+
+  // Non-mutating: Google validates the nested update masks the plugin sends, with the
+  // listing's own current values, and saves nothing.
+  it.skipIf(platform !== 'gbp' || !hasSecrets('GBP_ACCESS_TOKEN', 'CANARY_GBP_LOCATION_ID'))(
+    'validates a Business Profile listing patch without saving it',
+    async () => {
+      const token = requireSecret('GBP_ACCESS_TOKEN')
+      const name = `locations/${requireSecret('CANARY_GBP_LOCATION_ID')}`
+      const base = `https://mybusinessbusinessinformation.googleapis.com/v1/${name}`
+      const read = await fetch(`${base}?readMask=profile,phoneNumbers,openInfo`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      await expectOk(read)
+      const current = (await read.json()) as {
+        openInfo?: { status?: string }
+        phoneNumbers?: { primaryPhone?: string }
+        profile?: { description?: string }
+      }
+      const mask = 'profile.description,phoneNumbers.primaryPhone,openInfo.status'
+      await expectOk(
+        await fetch(`${base}?updateMask=${mask}&validateOnly=true`, {
+          body: JSON.stringify({
+            openInfo: { status: current.openInfo?.status ?? 'OPEN' },
+            phoneNumbers: { primaryPhone: current.phoneNumbers?.primaryPhone },
+            profile: { description: current.profile?.description },
+          }),
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+          method: 'PATCH',
+        }),
+      )
+    },
+  )
 })
 
 describe('live provider publication lifecycles', () => {

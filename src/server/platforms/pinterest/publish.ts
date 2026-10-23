@@ -366,9 +366,9 @@ export const publishPinterestPin = async (args: {
       : 1,
     body: description,
     destination: {
-      id: input.boardId,
       label: input.boardName ?? undefined,
     },
+    destinationId: input.boardId,
     externalId: pinId,
     externalUrl: pinUrl,
     idempotencyKey,
