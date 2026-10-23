@@ -89,7 +89,7 @@ export const reservePublication = async (args: {
     const created = (await args.payload.create({
       collection: SOCIAL_POSTS_SLUG as never,
       data: {
-        destination: { id: args.destinationId },
+        destinationId: args.destinationId,
         idempotencyKey: args.idempotencyKey,
         imageUrl: args.imageUrl,
         lastAttemptedAt: new Date().toISOString(),

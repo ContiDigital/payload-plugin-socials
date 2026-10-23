@@ -572,9 +572,9 @@ export const publishInstagramMedia = async (args: {
     attempts: ((existing as unknown as { attempts?: number })?.attempts ?? 0) + 1,
     body: caption,
     destination: {
-      id: input.igUserId,
       meta: { containerId, locationId: input.locationId, mediaType },
     },
+    destinationId: input.igUserId,
     externalId: published.id,
     externalUrl,
     idempotencyKey,

@@ -34,6 +34,9 @@ describe('publication reservations', () => {
         data: expect.objectContaining({ status: 'publishing' }),
       }),
     )
+    const data = create.mock.calls[0][0].data as Record<string, unknown>
+    expect(data.destinationId).toBe('board_1')
+    expect(data).not.toHaveProperty('destination')
   })
 
   it('returns an already-published reference without claiming it', async () => {

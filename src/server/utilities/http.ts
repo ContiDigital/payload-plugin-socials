@@ -70,6 +70,15 @@ export const errorResponse = (req: PayloadRequest, error: unknown): Response => 
   ) {
     extras.retryAfterSeconds = (error as { retryAfterSeconds: number }).retryAfterSeconds
   }
+  if (
+    statusCode < 500 &&
+    typeof error === 'object' &&
+    error !== null &&
+    'fieldViolations' in error &&
+    Array.isArray((error as { fieldViolations?: unknown }).fieldViolations)
+  ) {
+    extras.fieldViolations = (error as { fieldViolations: unknown[] }).fieldViolations
+  }
 
   return jsonResponse({ error: clientMessage, ...extras }, statusCode)
 }

@@ -1,10 +1,15 @@
 import type { Endpoint } from 'payload'
 
-import type { NormalizedPluginOptions, SocialImageFormat } from '../../types/index.js'
+import type {
+  NormalizedPluginOptions,
+  SocialImageFormat,
+  SocialSourceContext,
+} from '../../types/index.js'
+import type { ComposeTarget } from '../compose/composePublish.js'
 import type { StandaloneComposeInput } from '../compose/standaloneContext.js'
 
 import { PLATFORM_IDS } from '../../constants.js'
-import { composeAndPublish } from '../compose/composePublish.js'
+import { composeAndPublish, validateComposeTargets } from '../compose/composePublish.js'
 import { buildStandaloneContext } from '../compose/standaloneContext.js'
 import { assertAccess } from '../utilities/access.js'
 import { ValidationError } from '../utilities/errors.js'
@@ -60,33 +65,40 @@ const coerceImages = (raw: unknown): StandaloneComposeInput['images'] => {
   return images.length > 0 ? images : undefined
 }
 
+/** Parse the shared compose body into a standalone context and its per-platform targets. */
+const parseComposeRequest = (
+  body: Record<string, unknown>,
+): { ctx: SocialSourceContext; targets: ComposeTarget[] } => {
+  const content = asRecord(body.content)
+  const title = requireString(content.title, 'content.title')
+
+  const rawTargets = Array.isArray(body.targets) ? body.targets : []
+  if (rawTargets.length === 0) {
+    throw new ValidationError('targets must be a non-empty array')
+  }
+  const targets = rawTargets.map((raw, index) => {
+    const target = asRecord(raw)
+    const platform = requireOneOf(target.platform, PLATFORM_IDS, `targets[${index}].platform`)
+    return { input: asRecord(target.input), platform }
+  })
+
+  const ctx = buildStandaloneContext({
+    body: optionalString(content.body),
+    images: coerceImages(content.images),
+    imageUrl: optionalString(content.imageUrl),
+    link: optionalString(content.link),
+    metadata: content.metadata ? asRecord(content.metadata) : undefined,
+    modelLabel: optionalString(content.modelLabel),
+    title,
+  })
+  return { ctx, targets }
+}
+
 export const createComposeEndpoint = (options: NormalizedPluginOptions): Endpoint => ({
   handler: async (req) => {
     try {
       await assertAccess(req, options, 'publisher')
-      const body = await parseRequestBody(req)
-      const content = asRecord(body.content)
-      const title = requireString(content.title, 'content.title')
-
-      const rawTargets = Array.isArray(body.targets) ? body.targets : []
-      if (rawTargets.length === 0) {
-        throw new ValidationError('targets must be a non-empty array')
-      }
-      const targets = rawTargets.map((raw, index) => {
-        const target = asRecord(raw)
-        const platform = requireOneOf(target.platform, PLATFORM_IDS, `targets[${index}].platform`)
-        return { input: asRecord(target.input), platform }
-      })
-
-      const ctx = buildStandaloneContext({
-        body: optionalString(content.body),
-        images: coerceImages(content.images),
-        imageUrl: optionalString(content.imageUrl),
-        link: optionalString(content.link),
-        metadata: content.metadata ? asRecord(content.metadata) : undefined,
-        modelLabel: optionalString(content.modelLabel),
-        title,
-      })
+      const { ctx, targets } = parseComposeRequest(await parseRequestBody(req))
 
       const result = await composeAndPublish({
         ctx,
@@ -108,6 +120,29 @@ export const createComposeEndpoint = (options: NormalizedPluginOptions): Endpoin
   path: `${options.api.basePath}/compose/publish`,
 })
 
+/**
+ *   POST {basePath}/compose/validate
+ *
+ * Same body as `compose/publish`. Runs every target's adapter validation and returns
+ * `{ ok, results: [{ platform, validation }], source }` (always 200 for a well-formed body). Never
+ * reserves a `social-posts` row and never contacts a platform.
+ */
+export const createComposeValidateEndpoint = (options: NormalizedPluginOptions): Endpoint => ({
+  handler: async (req) => {
+    try {
+      await assertAccess(req, options, 'publisher')
+      const { ctx, targets } = parseComposeRequest(await parseRequestBody(req))
+      const result = await validateComposeTargets({ ctx, options, targets })
+      return jsonResponse({ ...result, source: { id: ctx.sourceId, kind: ctx.sourceKind } })
+    } catch (error) {
+      return errorResponse(req, error)
+    }
+  },
+  method: 'post',
+  path: `${options.api.basePath}/compose/validate`,
+})
+
 export const createComposeEndpoints = (options: NormalizedPluginOptions): Endpoint[] => [
   createComposeEndpoint(options),
+  createComposeValidateEndpoint(options),
 ]

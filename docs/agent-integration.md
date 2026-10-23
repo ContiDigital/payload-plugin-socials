@@ -129,7 +129,9 @@ A practical model-facing catalog looks like this:
 | Validate           | `POST /api/socials/{platform}/{kind}/{id}/validate` | Publisher, computational                            |
 | History            | `GET /api/socials/{platform}/{kind}/{id}/history`   | Publisher, read-only                                |
 | Publish            | `POST /api/socials/{platform}/{kind}/{id}/publish`  | Publisher, external write                           |
+| Standalone check   | `POST /api/socials/compose/validate`                | Publisher, computational                            |
 | Standalone compose | `POST /api/socials/compose/publish`                 | Publisher, immediate external writes                |
+| Cancel queued      | `POST /api/socials/posts/{postId}/cancel`           | Publisher, local only, never a provider write       |
 | Cancel/delete      | `DELETE /api/socials/posts/{postId}`                | Publisher, local and possibly provider write        |
 | Resolve unknown    | `POST /api/socials/posts/{postId}/resolve`          | Publisher, audit mutation                           |
 
@@ -162,13 +164,21 @@ location titles. Preserve the exact identifier returned by discovery and show
 both its label and identifier in the approval plan.
 
 For GBP, the flattened locations endpoint only returns locations that can
-currently operate LocalPosts. For account-level diagnostics, the plugin also
-provides:
+currently operate LocalPosts. Add `?include=all` to list every location across
+every account, with `canOperateLocalPost`, `hasVoiceOfMerchant`, `canDelete` and
+`duplicateLocation` so stale listings are visible. For account-level
+diagnostics, the plugin also provides:
 
 ```http
 GET /api/socials/gbp/accounts
 GET /api/socials/gbp/accounts/{accountId}/locations
 ```
+
+Listing management (address, hours, description, phone, website, open status
+and deletion of a stale listing) is described in
+[Google Business Profile](./google-business-profile.md#managing-the-listing).
+Its writes need the `admin` scope; keep them behind the same approval gate as
+publication, and validate with `validateOnly: true` before asking for approval.
 
 ## Source-based publication workflow
 
@@ -581,11 +591,23 @@ Interpret outcomes carefully:
 
 ## Delete, cancellation, and reconciliation
 
+To withdraw a scheduled post before it publishes, prefer the cancel-only route:
+
+```http
+POST /api/socials/posts/{postId}/cancel
+{ "minLeadSeconds": 120 }
+```
+
+It changes a `queued` row to `cancelled` in one guarded update and never calls a
+provider, so it cannot remove a live post. Anything other than a queued row is
+refused with `409`, as is a post due within `minLeadSeconds` (optional). The
+publish task claims only queued rows, so a cancelled post never publishes.
+
 ```http
 DELETE /api/socials/posts/{postId}
 ```
 
-- A queued row is cancelled and fenced from execution.
+- A queued row is cancelled and fenced from execution, exactly as above.
 - Pinterest, Facebook, and GBP posts are deleted upstream where supported, then
   the audit row is soft-deleted.
 - Instagram does not expose deletion of published Business media through this
@@ -607,6 +629,12 @@ outcome resolution should be approval-gated.
 Use `POST /api/socials/compose/publish` only when no canonical Payload source
 exists. It publishes immediately and does not provide the source-preview or
 plugin-level scheduling workflow.
+
+`POST /api/socials/compose/validate` takes the same body and runs every
+target's adapter validation without reserving or publishing anything. It
+answers `{ ok, results: [{ platform, validation }], source }`; `source` is the
+same standalone identity the publish route would use for that content. Run it
+before approval, exactly as the source-based validate route.
 
 ```json
 {

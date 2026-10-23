@@ -196,7 +196,7 @@ export const createPublishEndpoint = (options: NormalizedPluginOptions): Endpoin
           JSON.stringify({ adapterInput, platform, scheduledAt: rawScheduledAt }),
         )
         const result = await scheduleSocialPostPublish({
-          destination: { id: destinationId },
+          destinationId,
           idempotencyKey,
           imageUrl: primaryAssetUrl,
           link: ctx.link,

@@ -386,7 +386,7 @@ describe('createPostDeleteEndpoints — Instagram plain delete (unsupported)', (
 describe('createPostDeleteEndpoints — cancel queued post', () => {
   it('cancels a queued post without calling the adapter', async () => {
     const findByID = vi.fn().mockResolvedValue(queuedRow)
-    const update = vi.fn().mockResolvedValue({ id: 'queued_1' })
+    const update = vi.fn().mockResolvedValue({ docs: [{ id: 'queued_1' }] })
     const req = makeReq({ findByID, update }, { routeParams: { postId: 'queued_1' } })
 
     const res = await run(getEndpoint(), req)
@@ -401,7 +401,6 @@ describe('createPostDeleteEndpoints — cancel queued post', () => {
     // Row must be transitioned to 'cancelled' with metadata.
     expect(update).toHaveBeenCalledWith(
       expect.objectContaining({
-        id: 'queued_1',
         data: expect.objectContaining({
           meta: expect.objectContaining({
             cancelledAt: expect.any(String),
@@ -409,13 +408,14 @@ describe('createPostDeleteEndpoints — cancel queued post', () => {
           }),
           status: 'cancelled',
         }),
+        where: { and: [{ id: { equals: 'queued_1' } }, { status: { equals: 'queued' } }] },
       }),
     )
   })
 
   it('records cancelledBy as the authenticated user id', async () => {
     const findByID = vi.fn().mockResolvedValue(queuedRow)
-    const update = vi.fn().mockResolvedValue({ id: 'queued_1' })
+    const update = vi.fn().mockResolvedValue({ docs: [{ id: 'queued_1' }] })
     const req = makeReq(
       { findByID, update },
       {
@@ -435,7 +435,7 @@ describe('createPostDeleteEndpoints — cancel queued post', () => {
 
   it('does not set deletedAt or deletedBy on a cancelled row', async () => {
     const findByID = vi.fn().mockResolvedValue(queuedRow)
-    const update = vi.fn().mockResolvedValue({ id: 'queued_1' })
+    const update = vi.fn().mockResolvedValue({ docs: [{ id: 'queued_1' }] })
     const req = makeReq({ findByID, update }, { routeParams: { postId: 'queued_1' } })
     await run(getEndpoint(), req)
     const updateArg = update.mock.calls[0][0] as { data: { meta: Record<string, unknown> } }
@@ -449,7 +449,7 @@ describe('createPostDeleteEndpoints — cancel queued post', () => {
       meta: { queuedInput: { boardId: 'b1' }, someExisting: true },
     }
     const findByID = vi.fn().mockResolvedValue(rowWithMeta)
-    const update = vi.fn().mockResolvedValue({ id: 'queued_1' })
+    const update = vi.fn().mockResolvedValue({ docs: [{ id: 'queued_1' }] })
     const req = makeReq({ findByID, update }, { routeParams: { postId: 'queued_1' } })
     await run(getEndpoint(), req)
     const updateArg = update.mock.calls[0][0] as { data: { meta: Record<string, unknown> } }
@@ -463,11 +463,125 @@ describe('createPostDeleteEndpoints — cancel queued post', () => {
     // republished in-place. This test verifies the endpoint writes the right
     // status so that invariant holds.
     const findByID = vi.fn().mockResolvedValue(queuedRow)
-    const update = vi.fn().mockResolvedValue({ id: 'queued_1' })
+    const update = vi.fn().mockResolvedValue({ docs: [{ id: 'queued_1' }] })
     const req = makeReq({ findByID, update }, { routeParams: { postId: 'queued_1' } })
     await run(getEndpoint(), req)
     const updateArg = update.mock.calls[0][0] as { data: { status: string } }
     expect(updateArg.data.status).toBe('cancelled')
+  })
+
+  it('answers 409 when the publish task claimed the row first', async () => {
+    const findByID = vi
+      .fn()
+      .mockResolvedValueOnce(queuedRow)
+      .mockResolvedValueOnce(queuedRow)
+      .mockResolvedValueOnce({ ...queuedRow, status: 'publishing' })
+    const update = vi.fn().mockResolvedValue({ docs: [] })
+    const req = makeReq({ findByID, update }, { routeParams: { postId: 'queued_1' } })
+    const res = await run(getEndpoint(), req)
+    expect(res.status).toBe(409)
+    expect((await res.json()).error).toMatch(/this post is publishing/)
+    expect(adapterDelete).not.toHaveBeenCalled()
+  })
+})
+
+const getCancelEndpoint = () => {
+  const endpoint = createPostDeleteEndpoints(options).find((item) =>
+    item.path.endsWith('/posts/:postId/cancel'),
+  )
+  if (!endpoint) {
+    throw new Error('no cancel endpoint')
+  }
+  return endpoint
+}
+
+describe('createPostDeleteEndpoints: cancel-only route', () => {
+  it('is a POST under posts/:postId/cancel', () => {
+    expect(getCancelEndpoint().method).toBe('post')
+    expect(getCancelEndpoint().path.endsWith('/posts/:postId/cancel')).toBe(true)
+  })
+
+  it('cancels a queued post and cancels its job', async () => {
+    const findByID = vi.fn().mockResolvedValue({ ...queuedRow, queuedJobId: '91' })
+    const update = vi.fn().mockResolvedValue({ docs: [{ id: 'queued_1' }] })
+    const cancelByID = vi.fn().mockResolvedValue(undefined)
+    const req = makeReq({ findByID, update }, { routeParams: { postId: 'queued_1' } })
+    ;(req.payload as unknown as { jobs: unknown }).jobs = { cancelByID }
+    const res = await run(getCancelEndpoint(), req)
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ ok: true, postId: 'queued_1', status: 'cancelled' })
+    expect(cancelByID).toHaveBeenCalledWith({ id: '91' })
+    expect(adapterDelete).not.toHaveBeenCalled()
+  })
+
+  it('adds the lead time to the guarded update', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2027-08-01T09:00:00.000Z'))
+    try {
+      const findByID = vi.fn().mockResolvedValue(queuedRow)
+      const update = vi.fn().mockResolvedValue({ docs: [{ id: 'queued_1' }] })
+      const req = makeReq(
+        { findByID, update },
+        { data: { minLeadSeconds: 120 }, routeParams: { postId: 'queued_1' } },
+      )
+      const res = await run(getCancelEndpoint(), req)
+      expect(res.status).toBe(200)
+      expect(update.mock.calls[0][0].where.and[2]).toEqual({
+        scheduledAt: { greater_than: '2027-08-01T09:02:00.000Z' },
+      })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('refuses a queued post due inside the lead time', async () => {
+    const findByID = vi.fn().mockResolvedValue(queuedRow)
+    const update = vi.fn().mockResolvedValue({ docs: [] })
+    const req = makeReq(
+      { findByID, update },
+      { data: { minLeadSeconds: 120 }, routeParams: { postId: 'queued_1' } },
+    )
+    const res = await run(getCancelEndpoint(), req)
+    expect(res.status).toBe(409)
+    expect((await res.json()).error).toMatch(/due within 120 seconds/)
+  })
+
+  it.each(['published', 'publishing', 'scheduled', 'unknown', 'failed'])(
+    'never touches a %s post or its platform',
+    async (status) => {
+      const findByID = vi.fn().mockResolvedValue({ ...publishedRow, status })
+      const update = vi.fn()
+      const req = makeReq({ findByID, update })
+      const res = await run(getCancelEndpoint(), req)
+      expect(res.status).toBe(409)
+      expect(update).not.toHaveBeenCalled()
+      expect(adapterDelete).not.toHaveBeenCalled()
+    },
+  )
+
+  it('404s an unknown post', async () => {
+    const findByID = vi.fn().mockRejectedValue(new Error('Not Found'))
+    const res = await run(getCancelEndpoint(), makeReq({ findByID }))
+    expect(res.status).toBe(404)
+  })
+
+  it.each([-1, 1.5, 'soon', 86_401])('400s minLeadSeconds %j', async (minLeadSeconds) => {
+    const update = vi.fn()
+    const res = await run(
+      getCancelEndpoint(),
+      makeReq(
+        { findByID: vi.fn().mockResolvedValue(queuedRow), update },
+        { data: { minLeadSeconds } },
+      ),
+    )
+    expect(res.status).toBe(400)
+    expect(update).not.toHaveBeenCalled()
+  })
+
+  it('requires publisher access', async () => {
+    authorize.mockResolvedValueOnce(false)
+    const res = await run(getCancelEndpoint(), makeReq())
+    expect(res.status).toBe(403)
   })
 })
 

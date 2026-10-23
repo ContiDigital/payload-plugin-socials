@@ -64,12 +64,16 @@ export class RateLimitedError extends PluginError {
   }
 }
 
+/** One field-level message a provider returned with a rejected request. */
+export type PlatformFieldViolation = { field?: string; message: string; reason?: string }
+
 /**
  * Marker for errors that originated upstream from a third-party API. The
  * adapter layer wraps platform-specific errors in this so the publish
  * pipeline can classify them uniformly.
  */
 export class PlatformApiError extends PluginError {
+  readonly fieldViolations?: PlatformFieldViolation[]
   readonly outcome: 'failed' | 'unknown'
   readonly platform: string
   readonly raw?: unknown
@@ -78,6 +82,7 @@ export class PlatformApiError extends PluginError {
   readonly upstreamMessage?: string
 
   constructor(args: {
+    fieldViolations?: PlatformFieldViolation[]
     message: string
     outcome?: 'failed' | 'unknown'
     platform: string
@@ -89,6 +94,7 @@ export class PlatformApiError extends PluginError {
   }) {
     super(args.message, args.statusCode ?? 502)
     this.name = 'PlatformApiError'
+    this.fieldViolations = args.fieldViolations
     this.outcome = args.outcome ?? 'failed'
     this.platform = args.platform
     this.upstreamCode = args.upstreamCode

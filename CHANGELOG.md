@@ -4,6 +4,49 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-10-23
+
+### Added
+
+- Google Business Profile listing management through the Business Information API:
+  - `GET {basePath}/gbp/locations/:locationId` (publisher) and `getLocation()` read one listing in full: address, regular and special hours, open state, description, phone, website, categories, service area, labels and metadata (`hasVoiceOfMerchant`, `hasPendingEdits`, `canDelete`, `duplicateLocation`, `mapsUri`, `placeId`).
+  - `PATCH {basePath}/gbp/locations/:locationId` (admin) and `updateLocation()` change the storefront address, regular hours, special hours, `profile.description`, `phoneNumbers.primaryPhone` and `websiteUri`. The `updateMask` is derived from the patch keys only, the patch is validated at the boundary (`buildLocationPatch`), and `validateOnly` passes through so Google can check the exact change before approval.
+  - `POST {basePath}/gbp/locations/:locationId/open-status` (admin) and `setOpenStatus()` mark a listing `OPEN`, `CLOSED_TEMPORARILY` or `CLOSED_PERMANENTLY`, with optional `expectedTitle` and `validateOnly`.
+  - `DELETE {basePath}/gbp/locations/:locationId` (admin) and `deleteLocation()` remove a stale listing only when Google's `metadata.canDelete` is true, and a verified listing only when Google names it a duplicate in `metadata.duplicateLocation`; anything else is a 409 and nothing is sent.
+  - `GET {basePath}/gbp/locations?include=all` and `listAllLocations()` list every location on every account, postable or not. Discovered locations now carry `canDelete` and `duplicateLocation`.
+  - A rejected listing request is a `PlatformApiError` carrying Google's own message and `fieldViolations` (from `google.rpc.BadRequest` and `google.rpc.ErrorInfo` details), without the request URL. Error responses below 500 include `fieldViolations` when present.
+- `POST {basePath}/posts/:postId/cancel` (publisher) and `cancelQueuedSocialPost()` cancel a queued post in one guarded update and never call a provider, so they cannot remove a live post. An optional `minLeadSeconds` refuses a post due within that window. Any other status is a 409.
+- `POST {basePath}/compose/validate` (publisher) and `validateComposeTargets()` validate a standalone multi-channel post with the same body as `compose/publish`, without reserving or publishing anything.
+- `PlatformApiError` and the Business Profile location types are exported from the package entry.
+
+### Changed
+
+- **Schema: `social-posts.destinationId`.** The account a post went to (board id, Instagram user id, Page id or location resource name) is now a top-level, indexed `destinationId` text field. The `destination` group keeps `label` and `meta`. `scheduleSocialPostPublish` takes `destinationId` beside `destination: { label, meta }`.
+- The queued branch of `DELETE {basePath}/posts/:postId` now uses the same guarded cancellation as the cancel route, so it answers 409 instead of overwriting a row the publish task claimed a moment earlier.
+- `listPostablesLocations` is now built on `listAllLocations`; its result is unchanged.
+
+### Fixed
+
+- `social-posts` never stored its destination on SQL adapters: the group subfield was named `id`, which Payload's Postgres and SQLite adapters skip below the top level, so every post lost the account it was published to and history could not tell two accounts apart. Insights refresh now reads the stored `destinationId` (and the Facebook Page id from it).
+
+### Migration
+
+Run `payload migrate:create` after upgrading and review the SQL: it adds a nullable `destination_id` column to `social_posts` with an index, and drops nothing. Rows written by earlier versions have no destination on SQL adapters. If you want them backfilled, a reviewed data step can recover most of them from what was stored, for example on Postgres:
+
+```sql
+UPDATE social_posts
+SET destination_id = 'accounts/' || (destination_meta->>'accountId') || '/locations/' || (destination_meta->>'locationId')
+WHERE platform = 'gbp' AND destination_id IS NULL
+  AND destination_meta->>'accountId' IS NOT NULL AND destination_meta->>'locationId' IS NOT NULL;
+
+UPDATE social_posts
+SET destination_id = COALESCE(meta->'queuedInput'->>'pageId', meta->'queuedInput'->>'igUserId',
+                              meta->'queuedInput'->>'boardId', meta->'queuedInput'->>'locationResourceName')
+WHERE destination_id IS NULL AND meta ? 'queuedInput';
+```
+
+On MongoDB the old value was stored, so move it: `updateMany({ 'destination.id': { $exists: true } }, [{ $set: { destinationId: '$destination.id' } }, { $unset: 'destination.id' }])`. Host code that read `post.destination.id` should read `post.destinationId`. No other plugin option or default changed.
+
 ## [0.10.0] - 2026-10-22
 
 ### Added

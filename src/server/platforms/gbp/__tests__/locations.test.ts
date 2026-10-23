@@ -11,7 +11,12 @@ vi.mock('../api.js', async (importActual) => ({
 }))
 
 import { gbpJson } from '../api.js'
-import { listAccounts, listLocations, listPostablesLocations } from '../locations.js'
+import {
+  listAccounts,
+  listAllLocations,
+  listLocations,
+  listPostablesLocations,
+} from '../locations.js'
 
 const payload = {} as Payload
 const options = {} as NormalizedPluginOptions
@@ -108,5 +113,40 @@ describe('listPostablesLocations', () => {
     const postable = await listPostablesLocations(payload, options)
     expect(postable.map((location) => location.locationId)).toEqual(['a'])
     expect(postable[0]).toMatchObject({ canOperateLocalPost: true, hasVoiceOfMerchant: true })
+  })
+})
+
+describe('listAllLocations', () => {
+  it('keeps non-postable listings with the flags that mark a stale one', async () => {
+    vi.mocked(gbpJson)
+      .mockResolvedValueOnce({
+        accounts: [{ name: 'accounts/1' }, { name: 'accounts/2' }],
+        nextPageToken: null,
+      } as never)
+      .mockResolvedValueOnce({
+        locations: [{ name: 'locations/a', metadata: { hasVoiceOfMerchant: true }, title: 'A' }],
+        nextPageToken: null,
+      } as never)
+      .mockResolvedValueOnce({
+        locations: [
+          {
+            name: 'locations/b',
+            metadata: { canDelete: true, duplicateLocation: 'locations/a' },
+            title: 'B',
+          },
+        ],
+        nextPageToken: null,
+      } as never)
+    const all = await listAllLocations(payload, options)
+    expect(all.map((location) => [location.accountId, location.locationId])).toEqual([
+      ['1', 'a'],
+      ['2', 'b'],
+    ])
+    expect(all[1]).toMatchObject({
+      canDelete: true,
+      canOperateLocalPost: false,
+      duplicateLocation: 'locations/a',
+      resourceName: 'accounts/2/locations/b',
+    })
   })
 })

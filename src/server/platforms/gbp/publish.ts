@@ -343,10 +343,10 @@ export const publishGbpLocalPost = async (args: {
         : 1,
     body: summary,
     destination: {
-      id: input.locationResourceName,
       label: undefined as string | undefined,
       meta: { accountId, locationId, topicType },
     },
+    destinationId: input.locationResourceName,
     externalId: response.name,
     externalUrl: response.searchUrl,
     idempotencyKey,

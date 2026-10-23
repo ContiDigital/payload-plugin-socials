@@ -225,10 +225,13 @@ export interface SocialPost {
    */
   link?: string | null;
   /**
-   * Channel-specific destination (board id, location id, page id, etc.).
+   * Account the post went to: board id, Instagram user id, Page id or Business Profile location resource name.
+   */
+  destinationId?: string | null;
+  /**
+   * Display label and channel-specific details of the destination.
    */
   destination?: {
-    id?: string | null;
     label?: string | null;
     meta?:
       | {
@@ -609,10 +612,10 @@ export interface SocialPostsSelect<T extends boolean = true> {
   altText?: T;
   imageUrl?: T;
   link?: T;
+  destinationId?: T;
   destination?:
     | T
     | {
-        id?: T;
         label?: T;
         meta?: T;
       };
