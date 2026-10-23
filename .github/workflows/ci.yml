@@ -15,7 +15,7 @@ concurrency:
 jobs:
   database-matrix:
     name: Database boot (${{ matrix.database }})
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     strategy:
       fail-fast: false
@@ -53,7 +53,7 @@ jobs:
 
   release-check:
     name: Release check (Node ${{ matrix.node }})
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     strategy:
       fail-fast: false
