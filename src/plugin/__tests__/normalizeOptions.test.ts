@@ -360,6 +360,19 @@ describe('normalizePluginOptions — platform credential validation', () => {
     )
     expect(n.platforms.gbp.enabled).toBe(true)
     expect(n.platforms.gbp.serviceAccount?.clientEmail).toBe('svc@project.iam')
+    expect(n.platforms.gbp.listingManagement).toBe(false)
+  })
+
+  it('turns GBP listing management on only when asked', () => {
+    const gbp = {
+      enabled: true,
+      serviceAccount: { clientEmail: 'svc@project.iam', privateKey: 'KEY' },
+    }
+    const on = normalizePluginOptions(
+      withOpts({ platforms: { gbp: { ...gbp, listingManagement: true } } }),
+    )
+    expect(on.platforms.gbp.listingManagement).toBe(true)
+    expect(normalizePluginOptions(withOpts({})).platforms.gbp.listingManagement).toBe(false)
   })
 
   it('throws when GBP is enabled without OAuth creds or a service account', () => {

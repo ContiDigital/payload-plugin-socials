@@ -29,11 +29,13 @@ const loadRow = async (payload: Payload, postId: number | string): Promise<Cance
 }
 
 /**
- * Cancel a post that has not reached any platform yet. The transition is one guarded update
- * (`status = queued`, and with `minLeadSeconds` a `scheduledAt` at least that far ahead), so it
- * races safely with the publish task, which claims the same row only while it is still queued.
- * Never calls a platform adapter: a published, publishing or natively scheduled post refuses
- * with 409 and is left exactly as it was.
+ * Cancel a post that has not reached any platform yet, through a guarded update (`status =
+ * queued`, and with `minLeadSeconds` a `scheduledAt` at least that far ahead). Payload's
+ * conditional update selects the matching row and then writes it, as the publish task's claim
+ * does, so the guard is not atomic against that claim: a post already due can be claimed between
+ * the two steps and publish although this answers cancelled. `minLeadSeconds` closes that window,
+ * because the publish task never claims a post before its time. Never calls a platform adapter: a
+ * published, publishing or natively scheduled post refuses with 409 and is left as it was.
  */
 export const cancelQueuedSocialPost = async (args: {
   minLeadSeconds?: number

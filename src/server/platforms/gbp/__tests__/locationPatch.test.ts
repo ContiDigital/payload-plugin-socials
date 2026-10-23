@@ -144,6 +144,20 @@ describe('buildLocationPatch', () => {
         specialHours: {
           specialHourPeriods: [
             {
+              closed: true,
+              endDate: { day: 2, month: 1, year: 2027 },
+              startDate: { day: 1, month: 1, year: 2027 },
+            },
+          ],
+        },
+      },
+      /one closed day per period/,
+    ],
+    [
+      {
+        specialHours: {
+          specialHourPeriods: [
+            {
               closeTime: { hours: 9 },
               openTime: { hours: 18 },
               startDate: { day: 1, month: 1, year: 2027 },

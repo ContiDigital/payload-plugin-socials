@@ -110,6 +110,17 @@ Business Information API. Reads need the `publisher` scope; every write needs
 `admin`. Paths are relative to `/api/socials`, and `{locationId}` is the numeric
 id (the last segment of `locations[].resourceName`).
 
+The write routes (PATCH, open-status, DELETE) change the live listing inline in
+the request, so they are mounted only when you opt in:
+
+```ts
+platforms: { gbp: { enabled: true, listingManagement: true /* , credentials */ } }
+```
+
+Enable them only when every user your `authorize` grants `admin` may edit, close
+or delete the profile, or put your own approval in front of them. The exported
+helpers below work without the option.
+
 | Method | Path                                      | Effect                                           |
 | ------ | ----------------------------------------- | ------------------------------------------------ |
 | GET    | `/gbp/locations?include=all`              | Every location on every account                  |

@@ -31,6 +31,8 @@ import { optionalString, requireString } from '../utilities/validation.js'
  *   GET    {basePath}/gbp/locations: flattened postable list across all accounts;
  *          `?include=all` adds every non-postable listing
  *   GET    {basePath}/gbp/locations/:locationId: one listing's full profile (publisher)
+ *
+ * Only with `platforms.gbp.listingManagement`, because each changes Google inline:
  *   PATCH  {basePath}/gbp/locations/:locationId: edit the profile (admin)
  *   POST   {basePath}/gbp/locations/:locationId/open-status: open or close (admin)
  *   DELETE {basePath}/gbp/locations/:locationId: remove a deletable listing (admin)
@@ -191,8 +193,12 @@ export const createGbpLocationsEndpoints = (options: NormalizedPluginOptions): E
     createListAccountLocationsEndpoint(options),
     createListPostableLocationsEndpoint(options),
     createGetLocationEndpoint(options),
-    createUpdateLocationEndpoint(options),
-    createOpenStatusEndpoint(options),
-    createDeleteLocationEndpoint(options),
+    ...(options.platforms.gbp.listingManagement
+      ? [
+          createUpdateLocationEndpoint(options),
+          createOpenStatusEndpoint(options),
+          createDeleteLocationEndpoint(options),
+        ]
+      : []),
   ]
 }

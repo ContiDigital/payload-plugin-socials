@@ -234,6 +234,13 @@ const specialHours = (value: unknown): { specialHourPeriods: GbpSpecialHourPerio
         if (period.openTime !== undefined || period.closeTime !== undefined) {
           throw new ValidationError(`${field} is closed, so it takes no opening or closing time`)
         }
+        // Google ignores endDate on a closed period; refusing it keeps a two-day closure from
+        // silently becoming one.
+        if (period.endDate !== undefined) {
+          throw new ValidationError(
+            `${field} is closed, and Google takes one closed day per period; give each day its own period`,
+          )
+        }
         return { closed: true, startDate }
       }
       const openTime = timeOfDay(period.openTime, `${field}.openTime`, false)

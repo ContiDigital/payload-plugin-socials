@@ -50,7 +50,10 @@ their content and verify that it is gone even when an intermediate assertion
 fails. Tests for platforms whose complete variable set is absent are skipped.
 
 GBP remains a read-only probe until Google grants Basic API Access and the owner
-approves a real verified location for a lifecycle canary.
+approves a real verified location for a lifecycle canary. With
+`CANARY_GBP_LOCATION_ID` set, the probe also sends a `validateOnly` listing
+patch built from the listing's own values, which proves the nested update masks
+against the live API and saves nothing.
 
 Record the result before tagging:
 

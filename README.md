@@ -369,7 +369,7 @@ Publishing can outlive an HTTP request when a host runs provider calls on a work
 
 ## Access and secrets
 
-Every API and admin surface calls the host's `authorize` function. `publisher` covers compose, preview, validation, publish, history, cancellation, delete, reconciliation and the Business Profile listing read. `admin` covers connection and template administration and the Business Profile listing writes (profile edits, open status, deletion).
+Every API and admin surface calls the host's `authorize` function. `publisher` covers compose, preview, validation, publish, history, cancellation, delete, reconciliation and the Business Profile listing read. `admin` covers connection and template administration and the Business Profile listing writes (profile edits, open status, deletion), which are mounted only with `platforms.gbp.listingManagement: true`.
 
 Stored tokens use authenticated AES-256-GCM envelopes. Keep `encryptionKey` stable and identical across all instances. During rotation, make the new key primary and temporarily provide old keys in `previousEncryptionKeys`; successfully read envelopes are rewritten with the primary key. Secret-bearing fields are redacted before plugin logs reach the host logger.
 
@@ -394,9 +394,9 @@ Paths below are relative to Payload's `/api` route and the default `/socials` pl
 | POST       | `/socials/posts/{postId}/cancel`, `/resolve`                                            | Publisher                 |
 | GET        | `/socials/pinterest/boards`, `/facebook/pages`, `/instagram/accounts`, `/gbp/locations` | Publisher                 |
 | GET        | `/socials/gbp/locations/{locationId}`                                                   | Publisher                 |
-| PATCH      | `/socials/gbp/locations/{locationId}`                                                   | Admin                     |
-| POST       | `/socials/gbp/locations/{locationId}/open-status`                                       | Admin                     |
-| DELETE     | `/socials/gbp/locations/{locationId}`                                                   | Admin                     |
+| PATCH      | `/socials/gbp/locations/{locationId}` (with `listingManagement`)                        | Admin                     |
+| POST       | `/socials/gbp/locations/{locationId}/open-status` (with `listingManagement`)            | Admin                     |
+| DELETE     | `/socials/gbp/locations/{locationId}` (with `listingManagement`)                        | Admin                     |
 | POST       | `/socials/templates/preview`                                                            | Admin                     |
 | POST       | `/socials/internal/jobs/sweep`, `/jobs/run`                                             | Scheduler API key         |
 

@@ -33,10 +33,10 @@ import {
 import { assertAccess } from '../../utilities/access.js'
 import { createGbpLocationsEndpoints } from '../createGbpLocationsEndpoints.js'
 
-const buildOptions = (enabled = true): NormalizedPluginOptions =>
+const buildOptions = (enabled = true, listingManagement = true): NormalizedPluginOptions =>
   ({
     api: { basePath: '/socials' },
-    platforms: { gbp: { enabled } },
+    platforms: { gbp: { enabled, listingManagement } },
   }) as unknown as NormalizedPluginOptions
 
 const options = buildOptions()
@@ -99,6 +99,17 @@ describe('gbp discovery endpoints', () => {
 describe('factory gating', () => {
   it('returns nothing when GBP is disabled', () => {
     expect(createGbpLocationsEndpoints(buildOptions(false))).toEqual([])
+  })
+
+  it('mounts the listing writes only when listing management is turned on', () => {
+    expect(
+      createGbpLocationsEndpoints(buildOptions(true, false)).map((e) => `${e.method} ${e.path}`),
+    ).toEqual([
+      'get /socials/gbp/accounts',
+      'get /socials/gbp/accounts/:accountId/locations',
+      'get /socials/gbp/locations',
+      'get /socials/gbp/locations/:locationId',
+    ])
   })
 
   it('returns the discovery and listing endpoints when enabled', () => {

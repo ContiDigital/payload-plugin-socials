@@ -598,10 +598,12 @@ POST /api/socials/posts/{postId}/cancel
 { "minLeadSeconds": 120 }
 ```
 
-It changes a `queued` row to `cancelled` in one guarded update and never calls a
-provider, so it cannot remove a live post. Anything other than a queued row is
-refused with `409`, as is a post due within `minLeadSeconds` (optional). The
-publish task claims only queued rows, so a cancelled post never publishes.
+It changes a `queued` row to `cancelled` through a guarded update and never calls
+a provider, so it cannot remove a live post. Anything other than a queued row is
+refused with `409`, as is a post due within `minLeadSeconds`. The publish task
+claims only queued rows whose time has come, but both guards are select-then-write,
+so a cancellation of a post that is already due can lose to the publish task and
+still answer cancelled. Always pass a `minLeadSeconds` of a minute or more.
 
 ```http
 DELETE /api/socials/posts/{postId}
