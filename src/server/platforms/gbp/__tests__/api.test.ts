@@ -120,6 +120,9 @@ describe('getGbpAccessToken — service-account path', () => {
     const body = new URLSearchParams(fetchMock.mock.calls[0]?.[1]?.body as string)
     expect(body.get('grant_type')).toBe('urn:ietf:params:oauth:grant-type:jwt-bearer')
     const assertion = body.get('assertion') ?? ''
+    for (const segment of assertion.split('.')) {
+      expect(segment).toMatch(/^[\w-]+$/)
+    }
     const claims = JSON.parse(Buffer.from(assertion.split('.')[1] ?? '', 'base64url').toString())
     expect(claims.iss).toBe('svc@x.iam')
     expect(claims.aud).toBe(TOKEN_URL)
