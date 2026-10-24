@@ -4,6 +4,12 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.11.1] - 2026-10-23
+
+### Fixed
+
+- Business Profile service-account tokens: encode JWT segments with Node's built-in `base64url` instead of a padding-stripping regular expression that static analysis flagged as potentially slow on crafted input. The produced tokens are unchanged.
+
 ## [0.11.0] - 2026-10-23
 
 ### Added

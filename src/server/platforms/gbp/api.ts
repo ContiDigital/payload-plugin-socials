@@ -196,7 +196,7 @@ export const refreshGbpAccessToken = async (
 
 const base64UrlEncode = (input: Buffer | string): string => {
   const buf = Buffer.isBuffer(input) ? input : Buffer.from(input, 'utf8')
-  return buf.toString('base64').replace(/=+$/, '').replace(/\+/g, '-').replace(/\//g, '_')
+  return buf.toString('base64url')
 }
 
 const signServiceAccountJwt = (serviceAccount: {
